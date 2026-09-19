@@ -85,7 +85,7 @@ def generate_scene1(client: anthropic.Anthropic,
     return next((b.text for b in message.content if hasattr(b, "text")), "").strip()
 
 
-def main(input_path: str = "output/parsed_scenes.json", output_dir: str = "output"):
+def main(input_path: str = "team2/output/parsed_scenes.json", output_dir: str = "team2/output"):
     scenes = json.loads(Path(input_path).read_text(encoding="utf-8"))
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
@@ -100,6 +100,11 @@ def main(input_path: str = "output/parsed_scenes.json", output_dir: str = "outpu
 
         emotion_tags = [e.strip() for e in scene["감정"].replace("(", ",").replace(")", ",").split(",") if e.strip()]
         all_emotions.extend(emotion_tags)
+
+    # 중복 제거 (순서 유지)
+    all_backgrounds = list(dict.fromkeys(all_backgrounds))
+    all_objects     = list(dict.fromkeys(all_objects))
+    all_emotions    = list(dict.fromkeys(all_emotions))
 
     print(f"  배경 후보 {len(all_backgrounds)}개: {all_backgrounds}")
     print(f"  오브제 후보 {len(all_objects)}개: {all_objects}")
@@ -133,6 +138,6 @@ def main(input_path: str = "output/parsed_scenes.json", output_dir: str = "outpu
 
 
 if __name__ == "__main__":
-    inp = sys.argv[1] if len(sys.argv) > 1 else "output/parsed_scenes.json"
-    out = sys.argv[2] if len(sys.argv) > 2 else "output"
+    inp = sys.argv[1] if len(sys.argv) > 1 else "team2/output/parsed_scenes.json"
+    out = sys.argv[2] if len(sys.argv) > 2 else "team2/output"
     main(inp, out)

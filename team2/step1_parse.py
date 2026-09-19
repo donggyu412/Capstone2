@@ -42,7 +42,7 @@ def parse_scenes(text):
     return scenes
 
 
-def main(timetable_path: str, output_dir: str = "output"):
+def main(timetable_path: str, output_dir: str = "team2/output"):
     text = Path(timetable_path).read_text(encoding="utf-8")
     scenes = parse_scenes(text)
     if not scenes:
@@ -65,5 +65,5 @@ if __name__ == "__main__":
         print("사용법: python step1_parse.py <timetable.txt> [output_dir]")
         sys.exit(1)
     timetable = sys.argv[1]
-    out_dir = sys.argv[2] if len(sys.argv) > 2 else "output"
+    out_dir = sys.argv[2] if len(sys.argv) > 2 else "team2/output"
     main(timetable, out_dir)
