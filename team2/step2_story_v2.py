@@ -35,17 +35,17 @@ N_OBJECT     = 2
 N_EMOTION    = 2
 
 # ── Dream State Machine 파라미터 ─────────────────
-COHERENCE   = 0.2   # 0.0 ~ 1.0  (낮을수록 꿈처럼, 높을수록 개연성)
+COHERENCE   = 0.9   # 0.0 ~ 1.0  (낮을수록 꿈처럼, 높을수록 개연성)
 TEMPERATURE = 0.3   # 0.0 ~ 1.0  (낮을수록 알고리즘 주도, 높을수록 랜덤)
-MAX_DRIFT   = 0.8   # 0.0 ~ 1.0  (분위기 변화 최대폭)
+MAX_DRIFT   = 0.1   # 0.0 ~ 1.0  (분위기 변화 최대폭)
 
 # 장면 벡터 계산 시 카테고리 가중치
 VECTOR_WEIGHTS = {"배경": 0.2, "오브제": 0.5, "감정": 0.3}
 
 # ── 글 품질 검사 기준 ─────────────────────────────
-MIN_CHARS    = 700
-MAX_CHARS    = 1400
-TARGET_CHARS = 1000
+MIN_CHARS    = 500
+MAX_CHARS    = 650
+TARGET_CHARS = 550
 MAX_TRIES    = 3
 BANNED       = ["듯한", "듯이", "것 같", "느낌"]
 SENTENCE_ENDS = {'.', '!', '?', '…', '"', "'", '”', '’', '」'}
@@ -555,6 +555,28 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
     print(f"{'═'*50}")
     for i in range(1, 5):
         print(f"  scene{i}_story.txt / scene{i}_elements.json")
+
+    # ── 전체 결과 단일 JSON으로 취합 ───────────────────
+    export = []
+    for i in range(1, 5):
+        story_text = (out / f"scene{i}_story.txt").read_text(encoding="utf-8")
+        elem       = json.loads((out / f"scene{i}_elements.json").read_text(encoding="utf-8"))
+        export.append({
+            "scene": i,
+            "story": story_text,
+            "backgrounds": [e["항목"] for e in elem.get("배경",  [])],
+            "objects":     [e["항목"] for e in elem.get("오브제", [])],
+            "emotions":    [e["항목"] for e in elem.get("감정",  [])],
+            "physics_laws": elem.get("물리법칙", []),
+            "vector":      [round(x, 3) for x in compute_scene_vector(elem)],
+        })
+
+    export_path = out / "dream_scenes.json"
+    export_path.write_text(
+        json.dumps({"scenes": export}, ensure_ascii=False, indent=2),
+        encoding="utf-8"
+    )
+    print(f"\n  취합 완료 → {export_path}")
 
 
 if __name__ == "__main__":
