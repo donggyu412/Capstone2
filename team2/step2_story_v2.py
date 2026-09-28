@@ -220,12 +220,18 @@ def extract_from_story(client, story: str, max_tries: int = 3) -> dict:
 - 이 글에서 현실과 어긋난 꿈의 논리를 짧게 서술 (예: "거리가 걸어도 좁혀지지 않음", "물체가 위로 떨어짐", "크기가 보는 위치에 따라 바뀜")
 - 없으면 빈 배열
 
+[main_emotion 정의]
+- 이 글 전체에서 가장 지배적인 감정 하나를 고른다.
+- label은 반드시 아래 7종 중 하나: 분노, 혐오, 공포, 기쁨, 슬픔, 놀람, 중립
+- intensity는 0.0~1.0 사이의 소수 (글에서 해당 감정이 얼마나 강하게 느껴지는지)
+
 [출력 형식 — JSON만 출력, 주석 없이 순수 JSON]
 {{
   "배경": [{{"항목": "...", "벡터": [긴장도, 이질감, 밀도, 온도]}}, ...],
   "오브제": [{{"항목": "...", "벡터": [긴장도, 이질감, 밀도, 온도]}}, ...],
   "감정": [{{"항목": "...", "벡터": [긴장도, 이질감, 밀도, 온도]}}, ...],
-  "물리법칙": ["법칙1", "법칙2", ...]
+  "물리법칙": ["법칙1", "법칙2", ...],
+  "main_emotion": {{"label": "슬픔", "intensity": 0.8}}
 }}
 
 모든 벡터 값은 0.0~1.0 사이의 소수로. 문자열 안에 쌍따옴표를 쓰지 않는다."""
@@ -568,6 +574,7 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
             "objects":     [e["항목"] for e in elem.get("오브제", [])],
             "emotions":    [e["항목"] for e in elem.get("감정",  [])],
             "physics_laws": elem.get("물리법칙", []),
+            "main_emotion": elem.get("main_emotion", {"label": "중립", "intensity": 0.5}),
             "vector":      [round(x, 3) for x in compute_scene_vector(elem)],
         })
 
