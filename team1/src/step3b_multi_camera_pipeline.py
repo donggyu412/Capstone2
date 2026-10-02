@@ -1,26 +1,30 @@
+# -*- coding: utf-8 -*-
 """
-[6~7단계 - 멀티 카메라 버전] 노트북 내장캠 + 폰(DroidCam) 등 여러 카메라를 동시에 사용
+[6~7단계 - 멀티 카메라 + 배치/디바이스 선택 버전]
+  노트북 내장캠 + 폰(DroidCam) + 영상 파일 등 여러 소스를 동시에 사용
 
-목적:
-- 카메라 하나의 화각 한계를 넘어, 여러 대의 카메라로 더 많은 관객을 커버
-- 각 카메라에서 독립적으로 얼굴 검출 + 감정 분류를 수행
-- 결과 csv에 어느 카메라에서 잡힌 얼굴인지 구분하는 'source' 컬럼 추가
-- face_id는 카메라별로 별도 네임스페이스 사용 (예: cam0_0, cam1_0 는 서로 다른 사람)
+[이 버전에서 달라진 점]
+  1. --device {cpu, gpu, auto} 로 CPU/GPU를 선택할 수 있습니다.
+     - cpu : TensorFlow가 GPU를 아예 못 보게 숨깁니다 (CUDA_VISIBLE_DEVICES=-1)
+     - gpu : GPU를 그대로 사용합니다 (GPU가 없거나 드라이버 문제면 TensorFlow가 자동으로 CPU로 넘어갑니다)
+     - auto: 아무것도 건드리지 않고 TensorFlow 기본 동작에 맡깁니다 (기본값)
+  2. 감정 분석을 "한 명씩 DeepFace.analyze() 호출"이 아니라, 한 프레임에서 검출된
+     얼굴 전체를 "하나의 배치"로 묶어 모델에 한 번만 넣습니다 (진짜 배치 추론).
+     - DeepFace.analyze()에 리스트를 넣어도 내부적으로는 한 장씩 반복 호출하는 구조라
+       배치 효과가 없습니다. 이 버전은 DeepFace 내부의 Emotion 모델을 직접 가져와
+       model.predict(이미지_리스트)로 한 번에 넘깁니다 — GPU 배치 가속은 이 경로에서만 제대로 나옵니다.
+     - 내부 API(모델 직접 접근)이므로 deepface 버전이 바뀌면 깨질 수 있어, 실패 시
+       자동으로 기존 방식(한 장씩 DeepFace.analyze())으로 되돌아갑니다 (--no-batch로 강제도 가능).
 
 사용법:
-    # 노트북 내장캠(보통 0번)과 DroidCam(예: 1번)을 동시에 사용
-    python step3b_multi_camera_pipeline.py --sources 0 1 --output ../output/multi_test.csv --interval 10
+    # GPU로, 배치 처리로 (기본)
+    python step3b_multi_camera_pipeline.py --sources 0 1 --output ../output/multi_test.csv --device gpu
 
-    # 내레이션 영상을 관객에게 자동 재생하면서 동시에 촬영
-    python step3b_multi_camera_pipeline.py --sources 0 1 --output ../output/multi_test.csv --narration ../capture/narration_video.mp4
+    # CPU로 강제 (gpu_test 환경이 켜져 있어도 CPU만 쓰고 싶을 때)
+    python step3b_multi_camera_pipeline.py --sources 0 1 --output ../output/multi_test.csv --device cpu
 
-    # 카메라 3대도 가능
-    python step3b_multi_camera_pipeline.py --sources 0 1 2 --output ../output/multi_test.csv
-
-주의:
-- 각 소스 번호는 step1_test_camera.py로 미리 확인해두세요 (어떤 카메라가 몇 번인지).
-- 카메라마다 별도 창이 뜹니다. 아무 창에서나 'q'를 누르면 전체 종료됩니다.
-- 노트북 성능에 따라 카메라 수가 늘수록 느려질 수 있습니다. 느려지면 --interval을 늘리세요.
+    # 배치 없이 기존 방식(한 명씩)으로 비교 테스트
+    python step3b_multi_camera_pipeline.py --sources 0 1 --output ../output/multi_test.csv --no-batch
 """
 
 import argparse
@@ -31,11 +35,55 @@ import subprocess
 import sys
 import time
 
+# ─────────────────────────────────────────────────────────
+# --device 는 TensorFlow/DeepFace를 import 하기 "전에" 반영해야 효과가 있다.
+# 그래서 argparse보다 먼저, sys.argv를 직접 간단히 훑어서 처리한다.
+# ─────────────────────────────────────────────────────────
+def _prescan_device_arg():
+    if "--device" in sys.argv:
+        idx = sys.argv.index("--device")
+        if idx + 1 < len(sys.argv):
+            return sys.argv[idx + 1]
+    return "auto"
+
+
+_device = _prescan_device_arg()
+if _device == "cpu":
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+    print("[device] CPU로 강제 설정 (GPU 숨김)")
+elif _device == "gpu":
+    os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+    print("[device] GPU 사용 시도 (GPU가 없거나 드라이버 문제면 자동으로 CPU로 전환됨)")
+else:
+    print("[device] auto (TensorFlow 기본 동작)")
+
 import cv2
+import numpy as np
 import mediapipe as mp
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision
 from deepface import DeepFace
+
+try:
+    # 내부 API: 감정 모델을 직접 가져와 진짜 배치 추론에 사용
+    from deepface.modules import modeling as _deepface_modeling
+    _BATCH_API_AVAILABLE = True
+except ImportError:
+    _BATCH_API_AVAILABLE = False
+
+# 실제로 GPU가 잡혔는지 확인하고 알려줌 (import 이후에 확인 가능)
+try:
+    import tensorflow as tf
+    _gpu_list = tf.config.list_physical_devices("GPU")
+    if _device == "gpu" and not _gpu_list:
+        print("[device] 경고: --device gpu로 설정했지만 TensorFlow가 GPU를 찾지 못했습니다. CPU로 돕니다.")
+    elif _gpu_list:
+        print(f"[device] TensorFlow가 인식한 GPU: {[d.name for d in _gpu_list]}")
+    else:
+        print("[device] TensorFlow가 GPU를 쓰지 않습니다 (CPU로 동작)")
+except Exception as e:
+    print(f"[device] TensorFlow GPU 확인 중 경고(무시 가능): {e}")
+
 
 MODEL_FILES = {
     "short": "blaze_face_short_range.tflite",   # 근거리(~2m) 최적화, 가벼움
@@ -44,22 +92,17 @@ MODEL_FILES = {
 
 
 def play_narration_video(path):
-    """
-    관객에게 보여줄 내레이션/사운드 영상을 OS 기본 플레이어로 재생.
-    Windows: os.startfile, Mac: open, Linux: xdg-open
-    """
-    abs_path = os.path.abspath(path)  # 상대경로를 절대경로로 변환 (os.startfile이 상대경로를 못 찾는 경우 대비)
-
+    abs_path = os.path.abspath(path)
     if not os.path.exists(abs_path):
         print(f"[경고] 재생할 영상 파일을 찾을 수 없습니다: {abs_path}")
         return
-
     if sys.platform.startswith("win"):
         os.startfile(abs_path)
     elif sys.platform == "darwin":
         subprocess.Popen(["open", abs_path])
     else:
         subprocess.Popen(["xdg-open", abs_path])
+
 
 EMOTION_MAP = {
     "angry": "분노",
@@ -70,6 +113,8 @@ EMOTION_MAP = {
     "surprise": "놀람",
     "neutral": "중립",
 }
+# DeepFace 내부 EMOTION_LABELS 순서와 맞춤 (modeling 모델의 predict() 출력 인덱스 순서)
+EMOTION_LABELS_ORDER = ["angry", "disgust", "fear", "happy", "sad", "surprise", "neutral"]
 
 
 def build_detector(model_variant="full"):
@@ -145,11 +190,23 @@ def crop_face(frame, detection, padding_ratio=0.2):
     return face_crop, centroid, (x1, y1, x2, y2)
 
 
-_emotion_call_times_ms = []  # 얼굴 1명 분석에 걸린 시간(ms)들을 기록해두는 리스트
+_emotion_call_times_ms = []   # 호출(또는 배치) 1회에 걸린 시간(ms)
+_emotion_batch_sizes = []     # 그 호출에 포함된 얼굴 수 (배치 크기)
+_emotion_model_cache = {"model": None}
 
 
-def analyze_emotion(face_crop, exclude_neutral=True):
-    _t0 = time.time()  # 시작 시각 기록
+def _get_emotion_model():
+    """DeepFace 내부의 Emotion 모델을 직접 가져온다 (최초 1회만 로드, 이후 캐시 재사용)."""
+    if _emotion_model_cache["model"] is None:
+        _emotion_model_cache["model"] = _deepface_modeling.build_model(
+            task="facial_attribute", model_name="Emotion"
+        )
+    return _emotion_model_cache["model"]
+
+
+def analyze_emotion_single(face_crop, exclude_neutral=True):
+    """기존 방식: 얼굴 1장을 DeepFace.analyze()로 분석 (배치 미사용 / 폴백용)."""
+    _t0 = time.time()
     try:
         result = DeepFace.analyze(
             face_crop,
@@ -160,15 +217,11 @@ def analyze_emotion(face_crop, exclude_neutral=True):
         )
         if isinstance(result, list):
             result = result[0]
-
-        scores = dict(result["emotion"])  # {"angry": 2.1, "neutral": 42.0, ...}
-
+        scores = dict(result["emotion"])
         if exclude_neutral:
-            scores.pop("neutral", None)  # 중립을 후보에서 아예 제거
-
+            scores.pop("neutral", None)
         if not scores:
             return None, None
-
         dominant = max(scores, key=scores.get)
         confidence = scores[dominant]
         return dominant, confidence
@@ -178,19 +231,68 @@ def analyze_emotion(face_crop, exclude_neutral=True):
     finally:
         elapsed_ms = (time.time() - _t0) * 1000
         _emotion_call_times_ms.append(elapsed_ms)
-        print(f"[감정분석 소요시간] {elapsed_ms:.1f} ms")
+        _emotion_batch_sizes.append(1)
+        print(f"[감정분석 소요시간] {elapsed_ms:.1f} ms (1명)")
+
+
+def analyze_emotion_batch(face_crops, exclude_neutral=True):
+    """
+    얼굴 여러 장을 한 번에 모델에 넣어 분석한다 (진짜 배치 추론).
+    face_crops: BGR 얼굴 크롭 이미지의 리스트 (크기가 서로 달라도 됨 - 내부에서 통일시킴)
+    반환: [(dominant_emotion_en, confidence), ...] 입력 순서와 동일한 길이의 리스트
+          실패한 항목은 (None, None)
+    """
+    if not face_crops:
+        return []
+
+    _t0 = time.time()
+    try:
+        model = _get_emotion_model()
+
+        # 모델 내부에서 np.array(리스트)로 한 번에 묶으려 하므로,
+        # 크기가 제각각이면 실패한다 → 여기서 미리 동일 크기로 맞춘다.
+        resized = [cv2.resize(c, (224, 224)) for c in face_crops]
+        predictions = model.predict(resized)   # shape: (n, 7) — 각 행이 한 얼굴의 7개 감정 점수
+        predictions = np.atleast_2d(predictions)
+
+        results = []
+        for row in predictions:
+            # DeepFace.analyze()와 동일한 기준: 퍼센트는 '7개 감정 전체' 대비로 계산한다.
+            # (중립을 뺀 나머지끼리 다시 100%로 재정규화하면 안 됨 — 그러면 중립이 90%대로
+            #  압도적일 때 나머지 중 조금이라도 큰 값이 100%에 가깝게 부풀려지는 왜곡이 생김)
+            total = float(row.sum())
+            scores = {
+                label: (100 * float(row[i]) / total if total > 0 else 0.0)
+                for i, label in enumerate(EMOTION_LABELS_ORDER)
+            }
+            if exclude_neutral:
+                scores.pop("neutral", None)
+            if not scores:
+                results.append((None, None))
+                continue
+            dominant = max(scores, key=scores.get)
+            confidence = scores[dominant]
+            results.append((dominant, confidence))
+        return results
+    except Exception as e:
+        print(f"[배치 감정분석 실패, 1장씩 분석으로 대체] {e}")
+        return [analyze_emotion_single(c, exclude_neutral) for c in face_crops]
+    finally:
+        elapsed_ms = (time.time() - _t0) * 1000
+        _emotion_call_times_ms.append(elapsed_ms)
+        _emotion_batch_sizes.append(len(face_crops))
+        per_face = elapsed_ms / len(face_crops)
+        print(f"[감정분석 소요시간] {elapsed_ms:.1f} ms ({len(face_crops)}명 배치, 1명당 {per_face:.1f} ms)")
 
 
 class CameraSource:
-    """카메라 한 대에 대한 상태(캡처, 트래커, 마지막 감정, 창 이름)를 묶어서 관리"""
-
     def __init__(self, index, token):
         self.index = index
-        self.token = token  # 예: "0" 또는 "cam1"
+        self.token = token
         self.label = f"cam{index}"
         self.cap = cv2.VideoCapture(token)
         self.tracker = SimpleTracker()
-        self.last_emotion = {}  # local_face_id -> (emotion_en, confidence)
+        self.last_emotion = {}
         self.last_analysis_time = -999.0
         self.window_name = f"Source {index}: {token}"
 
@@ -204,10 +306,15 @@ class CameraSource:
         ) >= 1 else None
 
 
-def main(source_tokens, output_path, interval_sec, narration_path=None, model_variant="full"):
+def main(source_tokens, output_path, interval_sec, narration_path=None,
+         model_variant="full", use_batch=True):
+    if use_batch and not _BATCH_API_AVAILABLE:
+        print("[경고] 배치 처리에 필요한 내부 API를 찾지 못했습니다. 기존 방식(1장씩)으로 진행합니다.")
+        use_batch = False
+    print(f"[설정] 배치 처리: {'사용' if use_batch else '미사용 (1장씩 분석)'}")
+
     sources = []
     for idx, token in enumerate(source_tokens):
-        # 숫자면 카메라 인덱스로, 아니면 파일 경로로 취급
         cam_token = int(token) if str(token).isdigit() else token
         cs = CameraSource(idx, cam_token)
         if not cs.is_opened():
@@ -225,7 +332,6 @@ def main(source_tokens, output_path, interval_sec, narration_path=None, model_va
         writer = csv.writer(f)
         writer.writerow(["timestamp_sec", "source", "face_id", "emotion_en", "emotion_kr", "confidence"])
 
-        # 내레이션 영상이 지정되어 있으면 여기서 재생 시작하고, 그 순간을 타임스탬프 0초로 잡음
         if narration_path:
             print(f"[재생 시작] {narration_path}")
             play_narration_video(narration_path)
@@ -265,11 +371,19 @@ def main(source_tokens, output_path, interval_sec, narration_path=None, model_va
 
                         local_ids = cs.tracker.update(centroids)
 
-                        for local_id, face_crop, box in zip(local_ids, crops, boxes):
+                        if do_analysis and crops:
+                            if use_batch:
+                                batch_results = analyze_emotion_batch(crops)
+                            else:
+                                batch_results = [analyze_emotion_single(c) for c in crops]
+                        else:
+                            batch_results = [None] * len(crops)
+
+                        for local_id, face_crop, box, emo_result in zip(local_ids, crops, boxes, batch_results):
                             global_face_id = f"{cs.label}_{local_id}"
 
-                            if do_analysis:
-                                emotion_en, confidence = analyze_emotion(face_crop)
+                            if emo_result is not None:
+                                emotion_en, confidence = emo_result
                                 if emotion_en is not None:
                                     cs.last_emotion[local_id] = (emotion_en, confidence)
                                     emotion_kr = EMOTION_MAP.get(emotion_en, emotion_en)
@@ -290,7 +404,7 @@ def main(source_tokens, output_path, interval_sec, narration_path=None, model_va
                     cv2.imshow(cs.window_name, frame)
 
                 if not any_frame_read:
-                    break  # 모든 소스가 끝남 (영상 파일 재생 종료 등)
+                    break
 
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     quit_requested = True
@@ -304,14 +418,18 @@ def main(source_tokens, output_path, interval_sec, narration_path=None, model_va
 
     print(f"\nDone. Saved to: {output_path}")
 
-    # 감정분석 처리 시간 통계 요약
     if _emotion_call_times_ms:
-        n = len(_emotion_call_times_ms)
-        avg = sum(_emotion_call_times_ms) / n
-        print(f"\n[감정분석 속도 요약] 총 {n}회 호출")
-        print(f"  평균: {avg:.1f} ms   최소: {min(_emotion_call_times_ms):.1f} ms   최대: {max(_emotion_call_times_ms):.1f} ms")
-        print(f"  참고: 한 프레임에 동시에 있는 얼굴 수만큼 이 시간이 곱해집니다.")
-        print(f"        예) 이 평균값 x 20명 = 한 번의 --interval 주기에 필요한 최소 시간")
+        n_calls = len(_emotion_call_times_ms)
+        total_faces = sum(_emotion_batch_sizes)
+        avg_call_ms = sum(_emotion_call_times_ms) / n_calls
+        # 얼굴 1명 기준 평균 시간 (배치일 때는 "호출시간/배치크기"들의 평균)
+        per_face_times = [t / n for t, n in zip(_emotion_call_times_ms, _emotion_batch_sizes)]
+        avg_per_face_ms = sum(per_face_times) / len(per_face_times)
+
+        print(f"\n[감정분석 속도 요약] 총 {n_calls}회 호출 (총 {total_faces}개 얼굴 처리)")
+        print(f"  호출당 평균: {avg_call_ms:.1f} ms   호출당 최소: {min(_emotion_call_times_ms):.1f} ms   호출당 최대: {max(_emotion_call_times_ms):.1f} ms")
+        print(f"  얼굴 1명당 평균 처리시간: {avg_per_face_ms:.1f} ms")
+        print(f"  평균 배치 크기: {total_faces / n_calls:.1f}명/호출")
 
 
 if __name__ == "__main__":
@@ -325,6 +443,11 @@ if __name__ == "__main__":
                         help="관객에게 자동 재생할 내레이션/사운드 영상 경로 (선택)")
     parser.add_argument("--model", type=str, default="full", choices=["short", "full"],
                         help="얼굴 검출 모델: short(근거리, 가벼움) / full(원거리 대응, 기본값)")
+    parser.add_argument("--device", type=str, default="auto", choices=["cpu", "gpu", "auto"],
+                        help="감정 분석에 쓸 디바이스 (기본 auto = TensorFlow가 알아서 결정)")
+    parser.add_argument("--no-batch", dest="use_batch", action="store_false",
+                        help="배치 처리를 쓰지 않고 기존 방식(얼굴 1장씩 분석)으로 실행")
     args = parser.parse_args()
 
-    main(args.sources, args.output, args.interval, args.narration, args.model)
+    main(args.sources, args.output, args.interval, args.narration,
+         args.model, use_batch=args.use_batch)
