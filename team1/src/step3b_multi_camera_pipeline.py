@@ -257,16 +257,21 @@ def analyze_emotion_batch(face_crops, exclude_neutral=True):
 
         results = []
         for row in predictions:
-            scores = {label: float(row[i]) for i, label in enumerate(EMOTION_LABELS_ORDER)}
+            # DeepFace.analyze()와 동일한 기준: 퍼센트는 '7개 감정 전체' 대비로 계산한다.
+            # (중립을 뺀 나머지끼리 다시 100%로 재정규화하면 안 됨 — 그러면 중립이 90%대로
+            #  압도적일 때 나머지 중 조금이라도 큰 값이 100%에 가깝게 부풀려지는 왜곡이 생김)
+            total = float(row.sum())
+            scores = {
+                label: (100 * float(row[i]) / total if total > 0 else 0.0)
+                for i, label in enumerate(EMOTION_LABELS_ORDER)
+            }
             if exclude_neutral:
                 scores.pop("neutral", None)
             if not scores:
                 results.append((None, None))
                 continue
             dominant = max(scores, key=scores.get)
-            total = sum(scores.values()) if exclude_neutral else float(row.sum())
-            # DeepFace.analyze()와 동일하게 "후보로 남은 감정들 중 비율(%)"로 환산
-            confidence = 100 * scores[dominant] / total if total > 0 else 0.0
+            confidence = scores[dominant]
             results.append((dominant, confidence))
         return results
     except Exception as e:
