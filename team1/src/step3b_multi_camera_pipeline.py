@@ -251,7 +251,10 @@ def analyze_emotion_batch(face_crops, exclude_neutral=True):
 
         # 모델 내부에서 np.array(리스트)로 한 번에 묶으려 하므로,
         # 크기가 제각각이면 실패한다 → 여기서 미리 동일 크기로 맞춘다.
-        resized = [cv2.resize(c, (224, 224)) for c in face_crops]
+        # DeepFace.analyze()는 내부에서 얼굴을 0~1로 정규화한 뒤 모델에 넣는다.
+        # 모델을 직접 호출할 때도 똑같이 정규화해야 한다. (0~255 그대로 넣으면
+        # 출력이 한 감정에 100%로 쏠려서 confidence가 0 아니면 100만 나옴)
+        resized = [cv2.resize(c, (224, 224)).astype("float32") / 255.0 for c in face_crops]
         predictions = model.predict(resized)   # shape: (n, 7) — 각 행이 한 얼굴의 7개 감정 점수
         predictions = np.atleast_2d(predictions)
 
@@ -373,9 +376,9 @@ def main(source_tokens, output_path, interval_sec, narration_path=None,
 
                         if do_analysis and crops:
                             if use_batch:
-                                batch_results = analyze_emotion_batch(crops)
+                                batch_results = analyze_emotion_batch(crops, exclude_neutral=False)
                             else:
-                                batch_results = [analyze_emotion_single(c) for c in crops]
+                                batch_results = [analyze_emotion_single(c, exclude_neutral=False) for c in crops]
                         else:
                             batch_results = [None] * len(crops)
 
