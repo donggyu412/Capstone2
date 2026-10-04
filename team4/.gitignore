@@ -1,0 +1,6 @@
+# Keep only the output directory marker, overriding the inherited output/ rule.
+!output/
+output/*
+!output/.gitkeep
+__pycache__/
+*.pyc
