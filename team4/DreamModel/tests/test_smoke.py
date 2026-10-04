@@ -12,24 +12,24 @@ import unittest
 from collections.abc import Iterable
 from pathlib import Path
 
-from team4.config import PipelineConfig
-from team4.controllers.emotion_mapper import map_emotion_parameters
-from team4.controllers.narrative_controller import NarrativeController
-from team4.engines.background_ca import BackgroundCAStateField
-from team4.engines.stochastic_rules import StochasticRuleModulator
-from team4.engines.temporal_memory import TemporalMemory
-from team4.main import build_pipeline_plan, write_pipeline_plan
-from team4.models.state import ReenactmentState, clamp01
-from team4.pipeline_io.adapters import discover_assets, load_story
-from team4.renderer.final_renderer import FinalRenderer
+from team4.DreamModel.config import MODEL_INPUT_ROOT, PipelineConfig
+from team4.DreamModel.controllers.emotion_mapper import map_emotion_parameters
+from team4.DreamModel.controllers.narrative_controller import NarrativeController
+from team4.DreamModel.engines.background_ca import BackgroundCAStateField
+from team4.DreamModel.engines.stochastic_rules import StochasticRuleModulator
+from team4.DreamModel.engines.temporal_memory import TemporalMemory
+from team4.DreamModel.main import build_pipeline_plan, write_pipeline_plan
+from team4.DreamModel.models.state import ReenactmentState, clamp01
+from team4.DreamModel.pipeline_io.adapters import discover_assets, load_story
+from team4.DreamModel.renderer.final_renderer import FinalRenderer
 
-TEAM4 = Path(__file__).resolve().parents[1]
+MODEL = Path(__file__).resolve().parents[1]
 
 
 class PipelineSmokeTests(unittest.TestCase):
     def setUp(self) -> None:
-        # Even miniature upstream fixtures stay under Team 4's generated output.
-        output = TEAM4 / "output"
+        # Fixtures stay under this model's generated output.
+        output = MODEL / "output"
         output.mkdir(exist_ok=True)
         temporary = tempfile.TemporaryDirectory(prefix="smoke_", dir=output)
         self.addCleanup(temporary.cleanup)
@@ -49,11 +49,11 @@ class PipelineSmokeTests(unittest.TestCase):
             self.assertLessEqual(value, 1.0)
 
     def test_all_modules_import_without_optional_dependencies(self) -> None:
-        for path in TEAM4.rglob("*.py"):
-            relative = path.relative_to(TEAM4)
+        for path in MODEL.rglob("*.py"):
+            relative = path.relative_to(MODEL)
             if relative.parts[0] in {"tests", "output"}:
                 continue
-            parts = ("team4", *relative.with_suffix("").parts)
+            parts = ("team4", "DreamModel", *relative.with_suffix("").parts)
             with self.subTest(module=".".join(parts)):
                 importlib.import_module(".".join(parts))
 
@@ -65,6 +65,7 @@ class PipelineSmokeTests(unittest.TestCase):
         self.assertIsNone(saved["source_path"])
         self.assertTrue(saved["warnings"])
         self.assertFalse(saved["rendered"])
+        self.assertEqual(output, self.root / "team4/DreamModel/output/pipeline_plan.json")
 
     def test_observed_team2_schema_generates_four_scene_plan(self) -> None:
         scenes = [
@@ -74,13 +75,13 @@ class PipelineSmokeTests(unittest.TestCase):
              "vector": [0.2, 0.3, 0.4, 0.5]}
             for index in range(1, 5)
         ]
-        source = self.write_json("team2/output/dream_scenes.json", {"scenes": scenes})
+        source = self.write_json(f"{MODEL_INPUT_ROOT}/storyboard/dream_scenes.json", {"scenes": scenes})
         before = source.read_bytes()
         plan = build_pipeline_plan(self.config)
         output = write_pipeline_plan(self.config, plan)
         saved = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual([scene["narrative_stage"] for scene in saved["scenes"]], ["기", "승", "전", "결"])
-        self.assertEqual(saved["source_path"], "team2/output/dream_scenes.json")
+        self.assertEqual(saved["source_path"], f"{MODEL_INPUT_ROOT}/storyboard/dream_scenes.json")
         for scene in saved["scenes"]:
             self.assertEqual(scene["emotion"], "기쁨")
             self.assertEqual(scene["emotion_intensity"], 0.8)
@@ -102,13 +103,13 @@ class PipelineSmokeTests(unittest.TestCase):
                 self.assertTrue(plan["warnings"])
 
     def test_scene_slots_are_preserved_without_inventing_missing_scenes(self) -> None:
-        path = self.write_json("team4/input/dream_scenes.json", [None, {}, {}, {}, {}])
+        path = self.write_json(f"{MODEL_INPUT_ROOT}/dream_scenes.json", [None, {}, {}, {}, {}])
         story = load_story(self.root)
         self.assertEqual(story.path, path)
         self.assertEqual(len(story.scenes), 4)
         self.assertEqual(story.scenes[0], {})
         self.assertTrue(story.warnings)
-        self.write_json("team4/input/dream_scenes.json", {"scenes": [{}]})
+        self.write_json(f"{MODEL_INPUT_ROOT}/dream_scenes.json", {"scenes": [{}]})
         self.assertEqual(len(build_pipeline_plan(self.config)["scenes"]), 1)
 
     def test_invalid_numeric_fields_never_leak_nonfinite_values(self) -> None:
@@ -127,7 +128,7 @@ class PipelineSmokeTests(unittest.TestCase):
         self.assertEqual(clamp01(2), 1)
 
     def test_flat_emotion_named_vector_and_background_alias(self) -> None:
-        self.write_json("team2/dream_scenes.json", [{
+        self.write_json(f"{MODEL_INPUT_ROOT}/dream_scenes.json", [{
             "main_emotion": "놀람", "intensity": "0.9", "background": "바다",
             "vector": {"tension": 0.1}, "temperature": 0.8,
         }])
@@ -138,9 +139,10 @@ class PipelineSmokeTests(unittest.TestCase):
         self.assertEqual(scene["state_vector"], {"tension": 0.1, "strangeness": 0.5, "density": 0.5, "temperature": 0.8})
 
     def test_asset_discovery_does_not_guess_shared_object_scene(self) -> None:
-        paths = ["team3/output/scene_01.png", "team3/input/scene_01.png",
-                 "team3/output/objects/scene_01/butterfly.png",
-                 "team3/output/objects/shared.png", "team3/output/scenes.json"]
+        paths = [f"{MODEL_INPUT_ROOT}/backgrounds/a/scene_01.png",
+                 f"{MODEL_INPUT_ROOT}/backgrounds/b/scene_01.png",
+                 f"{MODEL_INPUT_ROOT}/objects/scene_01/butterfly.png",
+                 f"{MODEL_INPUT_ROOT}/objects/shared.png", f"{MODEL_INPUT_ROOT}/scenes.json"]
         for relative in paths:
             path = self.root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -156,17 +158,17 @@ class PipelineSmokeTests(unittest.TestCase):
         self.assertEqual(before, {relative: (self.root / relative).read_bytes() for relative in paths})
 
     def test_explicit_missing_input_does_not_silently_choose_another_story(self) -> None:
-        self.write_json("team2/dream_scenes.json", [{}, {}, {}, {}])
+        self.write_json(f"{MODEL_INPUT_ROOT}/dream_scenes.json", [{}, {}, {}, {}])
         story = load_story(self.root, self.root / "missing.json")
         self.assertEqual(story.scenes, [])
         self.assertTrue(story.warnings)
 
     def test_cli_from_another_working_directory_with_relative_input(self) -> None:
-        shutil.copytree(TEAM4, self.root / "team4", ignore=shutil.ignore_patterns("output", "__pycache__", "tests"))
+        shutil.copytree(MODEL, self.root / "team4/DreamModel", ignore=shutil.ignore_patterns("output", "__pycache__", "tests"))
         self.write_json("input/story.json", {"scenes": [{}, {}, {}, {}]})
         elsewhere = self.root / "elsewhere"
         elsewhere.mkdir()
-        command = [sys.executable, str(self.root / "team4/main.py"), "--input", "../input/story.json"]
+        command = [sys.executable, str(self.root / "team4/DreamModel/main.py"), "--input", "../input/story.json"]
         env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
         result = subprocess.run(command, cwd=elsewhere, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -176,6 +178,34 @@ class PipelineSmokeTests(unittest.TestCase):
         result = subprocess.run(command[:-1] + ["missing.json"], cwd=elsewhere, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(self.config.output_path.read_text(encoding="utf-8"))["scenes"], [])
+
+    def test_other_models_and_upstream_files_are_not_automatic_inputs(self) -> None:
+        for directory in ("team4/input/GridModelInput", "team2/output", "team3/input",
+                          "team4/DreamModel/output"):
+            self.write_json(f"{directory}/dream_scenes.json", [{}, {}, {}, {}])
+            (self.root / directory / "scene_01.png").write_bytes(b"unrelated image")
+        plan = build_pipeline_plan(self.config)
+        self.assertEqual(plan["scenes"], [])
+        self.assertEqual(plan["asset_inventory"]["backgrounds"], {})
+        source = self.write_json(f"{MODEL_INPUT_ROOT}/dream_scenes.json", [{"story": "own input"}])
+        own_background = self.config.input_dir / "scene_01.png"
+        own_background.write_bytes(b"own image")
+        plan = build_pipeline_plan(self.config)
+        self.assertEqual(plan["source_path"], source.relative_to(self.root).as_posix())
+        self.assertEqual(plan["scenes"][0]["story"], "own input")
+        self.assertEqual(plan["scenes"][0]["background_asset_path"], own_background.relative_to(self.root).as_posix())
+
+    def test_module_cli_uses_model_input_and_output(self) -> None:
+        shutil.copytree(MODEL, self.config.model_dir,
+                        ignore=shutil.ignore_patterns("output", "__pycache__", "tests"))
+        self.write_json(f"{MODEL_INPUT_ROOT}/dream_scenes.json", [{}, {}, {}, {}])
+        result = subprocess.run([sys.executable, "-m", "team4.DreamModel.main"],
+                                cwd=self.root, capture_output=True, text=True,
+                                encoding="utf-8", timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        saved = json.loads(self.config.output_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(saved["scenes"]), 4)
+        self.assertEqual(saved["source_path"], f"{MODEL_INPUT_ROOT}/dream_scenes.json")
 
     def test_memory_and_seeded_variation(self) -> None:
         state = ReenactmentState(1, "기")

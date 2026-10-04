@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from team4.models.state import ReenactmentState
+from team4.DreamModel.models.state import ReenactmentState
 
 
 @dataclass(frozen=True)

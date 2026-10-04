@@ -2,9 +2,9 @@
 
 from dataclasses import dataclass
 
-from team4.engines.background_ca import BackgroundFrame
-from team4.engines.object_swarm import ObjectSwarmSnapshot
-from team4.models.state import ReenactmentState
+from team4.DreamModel.engines.background_ca import BackgroundFrame
+from team4.DreamModel.engines.object_swarm import ObjectSwarmSnapshot
+from team4.DreamModel.models.state import ReenactmentState
 
 
 @dataclass(frozen=True)

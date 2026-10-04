@@ -4,7 +4,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from team4.config import DEFAULT_EMOTION_LABEL, DEFAULT_SCALAR, VECTOR_FIELDS
+from team4.DreamModel.config import DEFAULT_EMOTION_LABEL, DEFAULT_SCALAR, VECTOR_FIELDS
 
 
 def clamp01(value: object, default: float = DEFAULT_SCALAR) -> float:

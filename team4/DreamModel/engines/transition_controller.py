@@ -1,6 +1,6 @@
 """Prototype threshold only; visual completion measurement remains TODO."""
 
-from team4.models.state import clamp01
+from team4.DreamModel.models.state import clamp01
 
 
 def prototype_transition_threshold(tension: float) -> float:

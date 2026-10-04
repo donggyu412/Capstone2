@@ -1,6 +1,6 @@
 """Internal scene-order controller, not a named research algorithm."""
 
-from team4.config import NARRATIVE_STAGES
+from team4.DreamModel.config import NARRATIVE_STAGES
 
 
 class NarrativeController:

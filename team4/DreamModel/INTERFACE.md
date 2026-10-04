@@ -1,6 +1,28 @@
-# Team 1/2/3 → Team 4 입력 계약
+# DreamModel 입력과 출력
 
 현재 단계는 **Interface / Pipeline Skeleton Prototype**이다. 이 문서는 저장소에서 확인한 출력 형태와 Team 4가 임시로 수용하는 입력을 구분한다. 팀 간 합의가 필요한 내용은 **예정 / 확인 필요**로 표시한다.
+
+## Team 4 폴더 구성
+
+```text
+team4/
+├── DreamModel/                 # 지섭 모델
+│   ├── main.py
+│   ├── controllers/, engines/, models/, ...
+│   └── output/                 # 이 모델의 생성 결과
+├── GridModel/                  # 태건 모델 코드 추가 위치
+└── input/
+    ├── DreamModelInput/        # DreamModel에 전달할 입력
+    │   ├── storyboard/         # dream_scenes.json, scene_01.png~scene_04.png
+    │   └── objects/            # 전달받은 오브제 이미지 추가 위치
+    └── GridModelInput/         # GridModel에 전달할 입력
+```
+
+각 모델의 코드와 출력은 해당 모델 폴더 안에서 관리한다. `GridModel/`과 `GridModelInput/`은 폴더 자리만 준비한 상태다. GridModel 구현과 출력 처리는 해당 모델에서 추가한다.
+
+현재 `DreamModelInput/storyboard/`에는 기존에 사용하던 `team3/background/input/storyboard/`의 JSON과 장면 이미지 4장을 수정 없이 복사했다. 임시 실행용 입력이며 다른 팀의 최신 출력과 자동 동기화하지 않는다. 실제 전달 파일을 받으면 이 입력 폴더에서 교체한다. Team 3의 학습용 데이터셋은 오브제 입력으로 포함하지 않는다.
+
+실행 환경은 Python 3.12이며 현재 코드는 표준 라이브러리만 사용한다.
 
 ## 계약 상태
 
@@ -8,9 +30,9 @@
 | --- | --- | --- |
 | Team 1 | 감정·집단 공감 데이터를 향후 사용한다는 설계 맥락 | 원본 스키마, 집단 반응의 정의·정규화, 전달 위치·주기, Team 2를 통한 전달 방식 |
 | Team 2 | 현재 `team2/step2_story_v2.py`가 `dream_scenes.json`을 `{"scenes": [...]}`로 내보냄 | 운영 시 실제 저장 위치, 버전 관리, Team 4와의 전달 절차 |
-| Team 3 | 배경 이미지·투명 오브제 PNG·`scenes.json`이 입력 후보 | 현재 기준 저장소에는 `team3/` 디렉터리가 없음. 실제 생성 경로, 파일명, manifest 형식, 장면·오브제 연결 규칙 모두 협의 후 확정 |
+| Team 3 | `team3/background/`와 `team3/object/` 코드가 존재하며, 배경 이미지·투명 오브제 PNG·`scenes.json`이 입력 후보 | 실제 전달 파일명, manifest 형식, 장면·오브제 연결 규칙은 협의 후 확정 |
 
-Team 2의 현재 코드에서 확인한 형식은 연동 근거이며, 다른 팀과 합의가 완료되었다는 뜻은 아니다. `dream_scenes.json`은 실제 출력 코드로 확인한 파일명이다. 구체적인 디렉터리는 한 위치로 고정하지 않는다.
+Team 2의 현재 코드에서 확인한 형식은 연동 근거이며, 다른 팀과 데이터 계약 합의가 완료되었다는 뜻은 아니다. `dream_scenes.json`은 실제 출력 코드로 확인한 파일명이다. DreamModel에 전달할 파일은 `team4/input/DreamModelInput/` 아래에서 관리한다.
 
 ## Team 2: 확인된 출력 형태
 
@@ -68,14 +90,19 @@ JSON 구조 수용은 `pipeline_io/adapters.py`, 상태 필드 선택과 정규�
 
 ## 경로 탐색
 
-`pipeline_io/adapters.py`의 `STORY_SEARCH_ROOTS`와 `ASSET_SEARCH_ROOTS`가 탐색 후보를 관리한다. `team2/`, `team3/` 및 저장소 내부의 input/storyboard 관련 위치는 후보이며, 특정 팀의 확정 출력 경로가 아니다. 후보 루트 순서와 정렬된 하위 경로 순서로 탐색하고, 심볼릭 링크·Windows junction·가상환경 등은 제외한다. 자동 JSON 탐색은 유효한 첫 입력을 선택한다. 후보가 여러 개면 선택한 파일을 경고에 표시한다.
+`config.py`의 `MODEL_INPUT_ROOT`가 기본 입력 위치를 지정한다. `pipeline_io/adapters.py`는 `team4/input/DreamModelInput/` 아래만 재귀 탐색한다. `GridModelInput/`, 다른 팀의 코드·출력, 모델 자체의 출력은 자동 탐색하지 않는다. 정렬된 하위 경로 순서로 탐색하고, 심볼릭 링크·Windows junction·가상환경 등은 제외한다. 자동 JSON 탐색은 유효한 첫 입력을 선택한다. 후보가 여러 개면 선택한 파일을 경고에 표시한다.
 
 ```console
-python team4/main.py
-python team4/main.py --input path/to/dream_scenes.json --seed 42
+python team4/DreamModel/main.py
+python -m team4.DreamModel.main
+python team4/DreamModel/main.py --input path/to/dream_scenes.json --seed 42
 ```
 
-`--input`은 자동 탐색 대신 사용할 파일을 명시한다. 상대경로는 명령을 실행한 작업 디렉터리 기준이다. 지정한 파일에 문제가 있어도 다른 파일을 자동 선택하지 않는다. 사용자 PC의 절대경로를 코드에 하드코딩하지 않는다. 파일 탐색과 입력 처리는 기존 팀 파일을 변경하지 않는다.
+위 명령은 저장소 루트에서 실행한다. `team4/DreamModel/` 폴더를 연 경우에는 `python main.py`로 실행한다. 기본 입력·출력 위치는 현재 작업 디렉터리에 영향을 받지 않는다.
+
+`--input`은 자동 탐색 대신 사용할 JSON 파일을 명시한다. 상대경로는 명령을 실행한 작업 디렉터리 기준이다. 지정한 파일에 문제가 있어도 다른 파일을 자동 선택하지 않는다. 이미지 자산은 계속 `DreamModelInput/`에서 읽는다. 사용자 PC의 절대경로를 코드에 하드코딩하지 않는다. 파일 탐색과 입력 처리는 기존 팀 파일을 변경하지 않는다.
+
+검증 명령은 저장소 루트에서 `python -m unittest discover -s team4/DreamModel/tests -v`이다.
 
 UTF-8과 UTF-8 BOM JSON을 읽는다. 사용할 입력을 찾지 못하면 안내와 경고를 남기고, 장면이 없는 계획 파일을 생성하여 정상 종료한다. 자동 탐색 중 읽기·파싱에 실패한 후보는 경고하고 다음 후보를 확인한다. 출력 디렉터리에 저장할 수 없는 상황까지 성공으로 보고하지는 않는다.
 
@@ -93,7 +120,7 @@ UTF-8과 UTF-8 BOM JSON을 읽는다. 사용할 입력을 찾지 못하면 안�
 
 ## Team 4 출력 계약
 
-항상 `team4/output/pipeline_plan.json`에 계획을 저장한다. 최상위 구조는 다음과 같다.
+항상 `team4/DreamModel/output/pipeline_plan.json`에 계획을 저장한다. 생성 결과는 Git에 포함하지 않는다. 최상위 구조는 다음과 같다.
 
 | 출력 필드 | 의미 |
 | --- | --- |
@@ -124,7 +151,7 @@ UTF-8과 UTF-8 BOM JSON을 읽는다. 사용할 입력을 찾지 못하면 안�
 | `planned_interaction` | 향후 배경·오브제 상호작용 계획 |
 | `planned_transition` | 향후 장면 전환 계획 |
 
-`mapped_parameters`는 `ca_activity`, `ca_birth_bias`, `object_speed`, `object_cohesion`, `object_dispersion`, `stochasticity`, `transition_threshold`를 포함한다. 임시 공식과 한계는 [README.md](README.md)의 Prototype mapping 항목을 따른다.
+`mapped_parameters`는 `ca_activity`, `ca_birth_bias`, `object_speed`, `object_cohesion`, `object_dispersion`, `stochasticity`, `transition_threshold`를 포함한다. 임시 공식은 `controllers/emotion_mapper.py`와 `engines/transition_controller.py`에 있으며, 과학적으로 검증되지 않은 prototype mapping이다. 감정 이름별 학습·보정은 구현하지 않았다.
 
 seed의 기본값은 `42`다. 기본 파이프라인은 이를 메타데이터로 저장하며 임의의 수치 변동을 자동 적용하지 않는다. 확률 변동 보조 함수는 향후 엔진에서 별도로 연결해야 한다.
 

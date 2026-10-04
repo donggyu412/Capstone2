@@ -1,7 +1,7 @@
 """Prototype mapping only: these formulas have not been scientifically validated."""
 
-from team4.engines.transition_controller import prototype_transition_threshold
-from team4.models.state import ReenactmentState, clamp01
+from team4.DreamModel.engines.transition_controller import prototype_transition_threshold
+from team4.DreamModel.models.state import ReenactmentState, clamp01
 
 
 def map_emotion_parameters(state: ReenactmentState) -> dict[str, float]:

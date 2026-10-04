@@ -7,15 +7,15 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-# Support both `python team4/main.py` and `python -m team4.main`.
+# Support direct execution and `python -m team4.DreamModel.main`.
 if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from team4.config import PipelineConfig
-from team4.controllers.emotion_mapper import map_emotion_parameters
-from team4.controllers.narrative_controller import NarrativeController
-from team4.models.state import ReenactmentState
-from team4.pipeline_io.adapters import (
+from team4.DreamModel.config import PipelineConfig
+from team4.DreamModel.controllers.emotion_mapper import map_emotion_parameters
+from team4.DreamModel.controllers.narrative_controller import NarrativeController
+from team4.DreamModel.models.state import ReenactmentState
+from team4.DreamModel.pipeline_io.adapters import (
     AssetInventory,
     discover_assets,
     display_path,

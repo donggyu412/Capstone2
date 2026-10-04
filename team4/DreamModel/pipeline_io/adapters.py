@@ -1,6 +1,5 @@
-"""Discover upstream files without importing or changing other teams' code.
+"""Read the inputs delivered to DreamModel without changing them.
 
-Search roots below are configurable candidates, not an agreed storage contract.
 Team 3 manifest interpretation and object transparency checks remain TODO.
 """
 
@@ -12,26 +11,10 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from team4.DreamModel.config import MODEL_INPUT_ROOT
 
-STORY_SEARCH_ROOTS = (
-    "team2",
-    "team3",
-    "input/storyboard",
-    "storyboard",
-    "input",
-    "team4/input",
-)
-ASSET_SEARCH_ROOTS = (
-    "team3/output",
-    "team3/outputs",
-    "team3/input",
-    "team3/assets",
-    "team3",
-    "input/storyboard",
-    "storyboard",
-    "input",
-    "team4/input",
-)
+STORY_SEARCH_ROOTS = (MODEL_INPUT_ROOT,)
+ASSET_SEARCH_ROOTS = (MODEL_INPUT_ROOT,)
 OBJECT_DIRECTORY_NAMES = frozenset({"objects", "object", "object_images"})
 IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp"})
 SKIPPED_DIRECTORY_NAMES = frozenset(
@@ -154,8 +137,8 @@ def load_story(repo_root: Path, explicit_path: Path | None = None) -> StoryInput
         candidates = _story_candidates(repo_root, result.warnings)
     if not candidates:
         result.warnings.append(
-            "No dream_scenes.json found. Add a Team 2 story to a candidate "
-            "directory or provide an explicit input path."
+            f"No dream_scenes.json found in {MODEL_INPUT_ROOT}. "
+            "Add the delivered story there or provide an explicit input path."
         )
         return result
 

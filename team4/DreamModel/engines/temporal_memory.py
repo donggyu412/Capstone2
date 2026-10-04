@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 
-from team4.models.state import ReenactmentState
+from team4.DreamModel.models.state import ReenactmentState
 
 
 @dataclass
