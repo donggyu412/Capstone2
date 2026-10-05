@@ -86,7 +86,34 @@ def read_scene_list(path):
         return None
     if isinstance(data, dict):
         data = data.get('scenes') or data.get('장면') or []
-    return data if isinstance(data, list) and data else None
+    return normalize_rows(data) if isinstance(data, list) and data else None
+
+
+def scene_number(row, i):
+    """장면 번호 — 정수 · "3" · "scene_3"/"장면 3" 을 모두 받는다. 없으면 배열 순서(i+1).
+
+       10-05 1팀: 2팀 스토리보드는 형식은 같지만 내용은 매번 다르게 나온다(오픈엔디드).
+       번호 표기가 조금 달라져도 서버가 500 으로 죽지 않게 한다. 0 도 번호로 받는다(예전 `or` 는 0 을 버렸다)."""
+    v = row.get('act') if row.get('act') is not None else row.get('scene')
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return int(v)
+    if isinstance(v, str) and re.search(r'\d+', v):
+        return int(re.search(r'\d+', v).group())
+    return i + 1
+
+
+def normalize_rows(rows):
+    """장면 목록 → 번호(_num)를 붙여 번호순으로 정렬한 목록. 장면이 아닌 항목(null 등)은 버린다.
+
+       번호가 겹치면 배열 순서로 다시 매긴다 — 그대로 두면 여러 장면이 scene_01.png 하나를 나눠 쓴다."""
+    good = [r for r in rows if isinstance(r, dict)]
+    if len(good) < len(rows):
+        print("장면이 아닌 항목 %d개를 건너뜁니다." % (len(rows) - len(good)))
+    nums = [scene_number(r, i) for i, r in enumerate(good)]
+    if len(set(nums)) < len(nums):
+        print("장면 번호가 겹칩니다 %s — 배열 순서로 1부터 다시 매깁니다." % nums)
+        nums = list(range(1, len(good) + 1))
+    return [dict(r, _num=n) for n, r in sorted(zip(nums, good), key=lambda t: t[0])]
 
 
 def pick_source():
@@ -300,9 +327,9 @@ def object_heads(row):
     heads = set()
     for o in row.get('objects') or []:
         if isinstance(o, str) and o.strip():
-            h = re.sub(r'\(.*?\)', '', o).split()[-1]
-            if h and h not in bg:
-                heads.add(h)
+            words = re.sub(r'\(.*?\)', '', o).split()   # '(냉동액)' 처럼 괄호뿐이면 빈 목록
+            if words and words[-1] not in bg:
+                heads.add(words[-1])
     return heads
 
 
@@ -352,7 +379,7 @@ def to_scene(i, n, row, base_dir):
          · 2팀 스토리보드  scene · story · backgrounds · objects · emotions[] · physics_laws · vector
        프론트는 image_url / sound_url 만 본다. 파일명을 URL 로 바꾸는 일과
        빠진 칸을 메우는 일이 여기서 끝나야, 프론트에 방어 코드가 안 쌓인다."""
-    num = int(row.get('act') or row.get('scene') or (i + 1))
+    num = row['_num'] if '_num' in row else scene_number(row, i)
     img = (row.get('scene_file') or row.get('image_file') or row.get('image')
            or by_convention(num, IMAGE_EXT, base_dir))
     snd = (row.get('sound_file') or row.get('audio_file') or row.get('sound')
@@ -367,6 +394,12 @@ def to_scene(i, n, row, base_dir):
     # 감정 — ① 2팀 main_emotion(1팀 7종, 세기 포함) ② 옛 규격 emotion(더미) ③ 자유 문장에서 짐작
     emo, m_inten = main_emotion(row)
     emo_src = '2팀 대표 감정(main_emotion)' if emo else None
+    if emo and emo not in EMO_SEVEN:
+        # 7종 밖의 라벨(내용이 매번 달라 '불안'·'경외' 같은 말이 올 수 있다) → 같은 낱말 표로 7종에 붙인다.
+        # 못 붙이면 그대로 넘긴다 — 프론트가 영어 라벨은 받고, 모르는 말은 중립 + '(미정의)'로 드러낸다.
+        mapped, _ = label_from_phrases([emo])
+        if mapped:
+            emo, emo_src = mapped, '2팀 대표 감정 "%s" → %s' % (emo, mapped)
     if not emo:
         m_inten = None          # 라벨 없는 세기는 짐작한 라벨에 붙이지 않는다 — 2팀이 그 라벨에 준 세기가 아니다
     if not emo:
@@ -422,8 +455,7 @@ def build_scenes():
     mode, path, base_dir = pick_source()
     rows = read_scene_list(path) if path else None
     if rows is None:
-        rows = scan_fallback() if mode == 'dummy' else []
-    rows = sorted(rows, key=lambda r: r.get('act') or r.get('scene') or 0)
+        rows = normalize_rows(scan_fallback()) if mode == 'dummy' else []
     all_scenes = [to_scene(i, len(rows), r, base_dir) for i, r in enumerate(rows)]
     drawable = [s for s in all_scenes if s['image_url'] and not
                 (s['missing'] and os.path.basename(s['image_url']) in s['missing'])]
@@ -669,8 +701,10 @@ except ImportError:
     cv2 = None
 FIXREC = {}                      # run → 쓰는 중인 영상 하나
 FIXREC_LOCK = threading.Lock()
-X264 = ['-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', '-movflags', '+faststart']
-# preset: slow 는 40초에 265초가 걸렸다(09-29 재압축). 녹화 중엔 엔진과 CPU 를 나눠 써서 medium.
+X264 = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-movflags', '+faststart']
+# preset: slow 는 40초에 265초가 걸렸다(09-29 재압축). 녹화 중엔 엔진과 CPU 를 나눠 쓴다.
+# 10-05: medium → veryfast. 75초 장면이 되며 기록 시간이 문제가 됐다 — 1496×840 단독 실측 medium 16.5fps ·
+#        veryfast 47fps(같은 crf 18, 용량 +30%). 엔진(초당 20~30프레임)보다 느린 인코더는 기록을 붙잡는다.
 
 
 @app.route('/api/fixrec/start', methods=['POST'])
@@ -685,13 +719,25 @@ def api_fixrec_start():
     d = os.path.join(OUTPUT_DIR, run)
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, 'dream.mp4')
-    r = {"w": w, "h": h, "fps": fps, "next": 0, "pending": {}, "lock": threading.Lock(), "dir": d}
+    # 10-05: 브라우저가 무엇을 보내나(pix) — 녹화 속도 실측(헤드리스 · 같은 노트북 Iris Xe):
+    #   'h264' 브라우저 하드웨어 인코더(WebCodecs)가 이미 압축한 H.264 → 여기선 mp4 로 감싸기만(-c copy). 초당 약 23프레임
+    #   'rgba' 픽셀 그대로 → ffmpeg 가 압축. 초당 약 10프레임 (WebCodecs 가 없는 브라우저용)
+    #   'jpeg' 옛 방식(09-29) — 크롬 toBlob 이 '한가할 때' 인코딩해 한 장 1.2~1.8초 대기 → 초당 2.5~7프레임
+    pix = j.get('pix') if j.get('pix') in ('h264', 'rgba') else 'jpeg'
+    if pix == 'h264' and not FFMPEG:
+        return jsonify({"error": "h264 를 mp4 로 감쌀 ffmpeg 가 없습니다 — pip install imageio-ffmpeg"}), 501
+    r = {"w": w, "h": h, "fps": fps, "next": 0, "pending": {}, "lock": threading.Lock(), "dir": d, "pix": pix}
     if FFMPEG:
         r["log"] = open(os.path.join(d, 'ffmpeg.log'), 'wb')   # stderr 를 PIPE 로 두면 차서 멈출 수 있다
-        r["proc"] = subprocess.Popen([FFMPEG, '-y', '-v', 'error', '-f', 'image2pipe', '-framerate', str(fps),
-                                      '-c:v', 'mjpeg', '-i', '-', '-vf', 'scale=%d:%d' % (w, h)] + X264 + [path],
+        if pix == 'h264':
+            cmd = ['-f', 'h264', '-framerate', str(fps), '-i', '-', '-c:v', 'copy', '-movflags', '+faststart']
+            r["codec"] = 'h264 (브라우저 하드웨어 인코더 WebCodecs · %s)' % (j.get('enc') or '?')
+        else:
+            src = ['-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', '%dx%d' % (w, h)] if pix == 'rgba' else ['-f', 'image2pipe', '-c:v', 'mjpeg']
+            cmd = src + ['-framerate', str(fps), '-i', '-', '-vf', 'scale=%d:%d' % (w, h)] + X264
+            r["codec"] = 'h264 (libx264 veryfast crf 18 · %s)' % pix
+        r["proc"] = subprocess.Popen([FFMPEG, '-y', '-v', 'error'] + cmd + [path],
                                      stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=r["log"])
-        r["codec"] = 'h264 (libx264 crf 18)'
     else:
         for cc in ('avc1', 'mp4v'):
             vw = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*cc), fps, (w, h))
@@ -720,9 +766,14 @@ def api_fixrec_frame():
     if r is None:
         return jsonify({"error": "시작되지 않은 녹화"}), 404
     data = request.get_data()
-    if not data.startswith(b'\xff\xd8'):
+    if r["pix"] == 'rgba':
+        if len(data) != r["w"] * r["h"] * 4:
+            return jsonify({"error": "픽셀 크기가 다름 (%d바이트)" % len(data)}), 400
+    elif r["pix"] == 'jpeg' and not data.startswith(b'\xff\xd8'):
         return jsonify({"error": "JPEG 가 아님"}), 400
-    if "vw" in r:                            # OpenCV 는 픽셀로 풀어서 넣는다
+    if "vw" in r and r["pix"] == 'rgba':
+        data = cv2.cvtColor(np.frombuffer(data, np.uint8).reshape(r["h"], r["w"], 4), cv2.COLOR_RGBA2BGR)
+    elif "vw" in r:                          # OpenCV 는 픽셀로 풀어서 넣는다
         img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
         if img is None:
             return jsonify({"error": "프레임 해석 실패"}), 400

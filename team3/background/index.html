@@ -122,7 +122,7 @@ h2 { font-size: 12px; color: #fff; letter-spacing: 2px; margin-bottom: 2px; }
   <div class="sec">서사</div>
   <div id="acts"></div>
   <div class="hint">막 클릭·←→ 이동 · 스페이스 머물기</div>
-  <button class="btn on navbtn" id="b-auto" onclick="toggleAuto()">자동 넘김 · 장면당 10초</button>
+  <button class="btn on navbtn" id="b-auto" onclick="toggleAuto()">자동 넘김</button>
   <div class="grow wrap"><span class="gk">장면</span><span class="gv" id="g-title">-</span></div>
   <div class="grow"><span class="gk">막</span><span class="gv" id="g-stage">-</span></div>
   <div class="grow"><span class="gk">감정</span><span class="gv" id="g-emo">-</span></div>
@@ -134,7 +134,8 @@ h2 { font-size: 12px; color: #fff; letter-spacing: 2px; margin-bottom: 2px; }
     <button class="btn" id="b-png" onclick="togglePngSave()">장면 저장</button>
     <button class="btn" id="b-rec" onclick="toggleRecord()">녹화</button>
   </div>
-  <button class="btn navbtn" id="b-fix" onclick="toggleFixRec()">영상 mp4 · 프레임 고정 (무음)</button>
+  <button class="btn navbtn" id="b-fix" onclick="toggleFixRec(false)">영상 mp4 · 프레임 고정 (무음)</button>
+  <button class="btn navbtn" id="b-fix1" onclick="toggleFixRec(true)">이 장면만 mp4 · 흐름 확인용</button>
   <div class="hint" id="g-exp">누를 때만 저장 · 처음 장면부터 한 바퀴 돌고 멈춤</div>
   <div class="warn" id="g-warn" style="display:none"></div>
   <div class="mrow"><div class="mlabel">경과</div><div class="mbg"><div class="mfill" id="bar-prog" style="width:0%"></div></div><div class="mval" id="val-prog">0.00</div></div>
@@ -190,9 +191,18 @@ h2 { font-size: 12px; color: #fff; letter-spacing: 2px; margin-bottom: 2px; }
 const SERVER = (location.protocol === 'file:') ? 'http://127.0.0.1:5000' : '';
 
 const NP2 = 14000;          // 빛 파편 수. 점묘라 선보다 훨씬 많이 감당된다.
-const SCENE_PERIOD = 600;   // 장면 길이 (600프레임 ≈ 10초 @60fps). 09-13: 15초 → 10초 (수동으로 기다리기 길다는 피드백)
-const DISSOLVE_FRAMES = 900; // 형체 해체가 최대에 이르는 시간. 장면 길이와 분리했다 —
-                             // 장면을 줄여도 같은 시점의 해체 세기(=윤곽)가 예전과 같도록.
+/* 장면 길이 — 10/15 미션 '5분 꿈 배경 mp4'(기승전결 4장면) → 장면당 75초가 기본 (10-05 · 기본 틀).
+   주소 뒤 ?sec=10 을 붙이면 예전(09-13~10-03) 10초판으로 돈다 — 75초 흐름을 손볼 때 비교용.
+   09-13: 15초 → 10초 (수동으로 기다리기 길다는 피드백) · 10-05: 10초 → 75초 (5분 미션) */
+const SCENE_SEC = (() => { const v = +new URLSearchParams(location.search).get('sec'); return v >= 3 && v <= 600 ? v : 75; })();
+const SCENE_PERIOD = Math.round(SCENE_SEC * 60);   // 장면 길이 (프레임 @60fps) — 10초 = 600 · 75초 = 4500
+/* 형체 해체가 최대에 이르는 시간 — 장면 길이의 1.5배.
+   10초판에서 육안으로 확정한 값(900)이 바로 600 × 1.5 다: 장면 끝에서 해체가 최대의 2/3 에 닿는다.
+   75초로 늘리며 900 을 그대로 두면 15초에 최대에 닿고 나머지 60초는 같은 화면이 된다(그리고 최대 해체는
+   아무도 육안으로 본 적 없는 세기다). 비례로 두면 '장면 안의 해체 곡선 모양'이 육안 확정판과 같다.
+   ?sec=10 이면 900 그대로 — 예전 동작과 완전히 같다. (75초 안의 흐름은 육안으로 다시 본다 — 기본 틀일 뿐) */
+const DISSOLVE_FRAMES = SCENE_PERIOD * 1.5;
+document.getElementById('b-auto').textContent = '자동 넘김 · 장면당 ' + SCENE_SEC + '초';
 
 /* 여백 — '비움'과 '정적'을 둔다.
    아피찻퐁의 여백은 빈 화면만이 아니라 아무 일도 일어나지 않는 시간이다.
@@ -1048,7 +1058,7 @@ function toggleAuto() {
     else   sceneFrame = Math.min(sceneFrame, SCENE_PERIOD - 1);   // 비우지 않는 전환이면 바로 다음 프레임에 넘어간다
   }
   const b = $('b-auto');
-  if (b) { b.textContent = autoAdvance ? '자동 넘김 · 장면당 10초' : '이 장면에 머무는 중 · 자동 넘김 켜기'; b.classList.toggle('on', autoAdvance); }
+  if (b) { b.textContent = autoAdvance ? '자동 넘김 · 장면당 ' + SCENE_SEC + '초' : '이 장면에 머무는 중 · 자동 넘김 켜기'; b.classList.toggle('on', autoAdvance); }
 }
 
 /* ★ 여백을 어디에 둘 것인가 — 09-25
@@ -1078,12 +1088,12 @@ function stepStory() {
   }
   if (autoAdvance && sceneFrame >= SCENE_PERIOD) {
     if (rec && rec.state === 'rec' && sceneIdx === scenes.length - 1) stopRecord();   // 결이 비워진 자리에서 끊는다
-    if (fix && fix.state === 'rec' && sceneIdx === scenes.length - 1) stopFixRec();
+    if (fix && fix.state === 'rec' && (fix.only !== null || sceneIdx === scenes.length - 1)) stopFixRec();   // 한 장면만이면 그 장면 끝에서
     yeobaekOn = false;
     curXfade = XFADE;
     emptyHold = Y ? Y.hold : 0; audDelay = Y ? Y.hold : 0;
     gotoScene(sceneIdx + 1);
-    sceneFrame = Y ? -Y.hold : 0;   // 정적은 다음 장면의 10초를 깎지 않고 그 앞에 덧붙는다(해체·경과는 0 에서 멈춰 있다)
+    sceneFrame = Y ? -Y.hold : 0;   // 정적은 다음 장면의 길이를 깎지 않고 그 앞에 덧붙는다(해체·경과는 0 에서 멈춰 있다)
   }
   if (emptyHold > 0 && --emptyHold === 0) { ybTarget = 1; ybStep = (1 - YB_MIN) / 120; }
   if (yb < ybTarget) yb = Math.min(ybTarget, yb + ybStep);
@@ -2344,7 +2354,7 @@ function loop() {
    ★ 누를 때만 저장한다(09-28). 09-27 에는 페이지를 열 때마다 자동으로 저장해, 확인만 하려고 켜도
      output/ 에 폴더가 쌓여 손으로 지워야 했다(사용자 지적). 두 버튼 모두 '처음 장면부터 한 바퀴'를 돌고 스스로 멈춘다.
 
-   [장면 저장] 장면마다 한가운데(10초 중 5초 · 측정 도구와 같은 시점) 대표 프레임 한 장씩
+   [장면 저장] 장면마다 한가운데(SCENE_PERIOD / 2 — 10초판이면 5초 · 측정 도구와 같은 시점) 대표 프레임 한 장씩
      output/<시각>_<입력>/scene_NN.png        — 서사 표지 없는 배경 (시스템 II 오브제를 얹을 바탕)
                          scene_NN_title.png  — 화면 그대로 (막 · 제목 · 감정 표지 포함)
                          scenes.json         — 막 · 제목 · 감정 · 참조 작가 · 원본 · 해상도 · 엔진 설정
@@ -2485,7 +2495,7 @@ function beginRecord() {
   mr.ondataavailable = e => { if (e.data && e.data.size) rec.chunks.push(e.data); };
   mr.onstop = uploadRecord;
   rec.mr = mr; rec.state = 'rec';
-  sceneFrame = 0;                            // 첫 장면도 온전한 10초 — 사진이 뜨길 기다린 만큼 깎이지 않게
+  sceneFrame = 0;                            // 첫 장면도 온전한 장면 길이 — 사진이 뜨길 기다린 만큼 깎이지 않게
   mr.start(1000);
   rec.t0 = performance.now();
   recMark(scenes[sceneIdx]);
@@ -2546,24 +2556,49 @@ function uploadRecord() {
    왜: [녹화]는 벽시계로 찍는데 엔진은 '프레임 수'로 장면을 넘긴다(SCENE_PERIOD 600). 09-29 발표용 녹화에서
      이 컴퓨터가 막마다 초당 5~19프레임밖에 못 그려(전 5 · 기 12 · 결 17 · 승 19) 40초가 3분 58초 슬로모션이 됐다.
      엔진이 한 프레임 그릴 때마다 한 장씩 서버로 보내 60fps mp4 로 이으면(app.py /api/fixrec)
-     컴퓨터가 느려도 결과는 정확히 장면당 10초 — 엔진 한 프레임 = 영상 1/60초.
+     컴퓨터가 느려도 결과는 정확히 장면당 SCENE_SEC 초 — 엔진 한 프레임 = 영상 1/60초.
    - 소리는 담지 않는다: 소리는 벽시계로 흐르므로 느리게 그린 화면과 맞출 수 없다. 이번 발표는 무음(2팀 답).
      음원이 생기면 소리까지 담는 건 [녹화](webm)로.
    - 보낸 프레임이 FIX_INFLIGHT 장 넘게 밀리면 엔진을 세운다(loop 첫 줄) — 메모리가 쌓이지 않고 프레임도 빠지지 않는다.
    - 시작·끝은 [녹화]와 같다: 첫 장면 사진이 뜬 뒤 ~ 결이 비워지고 기로 넘어가는 순간.
    - H.264 는 가로·세로가 짝수여야 해 1px 깎는다(창 크기 1497 → 1496). */
 const FIX_INFLIGHT = 6;
-const FIX_LABEL = '영상 mp4 · 프레임 고정 (무음)';
+const FIX_LABEL = '영상 mp4 · 프레임 고정 (무음)', FIX1_LABEL = '이 장면만 mp4 · 흐름 확인용';
+function fixBtn(f, on, label) { setBtn(f.only !== null ? 'b-fix1' : 'b-fix', on, label || (f.only !== null ? FIX1_LABEL : FIX_LABEL), 'rec'); }
 let fix = null;
-function fixBusy() { return !!fix && (fix.state === 'starting' || (fix.state === 'rec' && fix.inflight >= FIX_INFLIGHT)); }
+function fixBusy() {
+  return !!fix && (fix.state === 'starting' ||
+         (fix.state === 'rec' && (fix.inflight >= FIX_INFLIGHT || (fix.enc && fix.enc.encodeQueueSize >= FIX_ENC_QUEUE))));
+}
+
+/* 10-05: 녹화 속도 — 브라우저 하드웨어 인코더(WebCodecs)로 H.264 를 여기서 만들고, 서버는 mp4 로 감싸기만 한다.
+   헤드리스 실측(같은 노트북 · Iris Xe): 원래 JPEG(toBlob) 초당 6~7프레임 → 픽셀 그대로 약 10 → WebCodecs 약 23
+   (녹화 안 할 때 엔진 약 25). toBlob 은 '한가할 때' 인코딩해 한 장 1.2~1.8초를 기다렸고, 픽셀 읽기(getImageData)는
+   그래픽 작업이 끝나길 기다리느라 느렸다. WebCodecs 는 둘 다 없다. 못 쓰는 브라우저면 픽셀 그대로(rgba)로 내려간다.
+   비트레이트 25Mbps — x264 crf 18 이 이 화면에서 약 15Mbps 였다(파편이 많아 압축이 잘 안 되는 화면). */
+const FIX_BITRATE = 25e6;
+const FIX_ENC_QUEUE = 24;   // 인코더에 쌓아 둘 수 있는 프레임 — 하드웨어 인코더는 여러 장을 겹쳐 처리해 6 이면 절반을 기다렸다(실측)
+async function fixEncoderConfig(w, h) {
+  if (!window.VideoEncoder) return null;
+  for (const hw of ['prefer-hardware', 'no-preference'])                   // 하드웨어(그래픽카드) 먼저 — 소프트웨어면 느리다
+    for (const codec of ['avc1.640033', 'avc1.4d0033', 'avc1.42e033']) {    // High → Main → Baseline (레벨 5.1)
+      const cfg = { codec, width: w, height: h, bitrate: FIX_BITRATE, framerate: 60, hardwareAcceleration: hw, avc: { format: 'annexb' } };
+      try { if ((await VideoEncoder.isConfigSupported(cfg)).supported) return cfg; } catch (e) {}
+    }
+  return null;
+}
 function fixMark(sc) {
   fix.marks.push({ act: sc.act, stage: sc.stage, title: sc.title, emotion: sc.emotion || null,
                    intensity: sc.intensity, start_frame: fix.n, start_sec: +(fix.n / 60).toFixed(2) });
 }
 
-function toggleFixRec() {
+/* [이 장면만 mp4] (10-05) — 장면이 75초가 되자 이 컴퓨터(초당 5~19프레임)에선 실시간 화면으로 한 장면 보는 데 4분~15분.
+   흐름을 정상 속도로 보려면 결과물과 같은 프레임 고정 mp4 가 맞다(실시간을 시계 기준으로 바꾸면 mp4 와 다른 화면이 된다).
+   누를 때 보고 있던 장면을 처음(sceneFrame 0)부터 끝(SCENE_PERIOD)까지만 기록한다 — 다섯 배 짧다.
+   ※ 그 장면으로 '바로 이동'해서 시작하므로, 한 바퀴 기록과 달리 앞 장면에서 넘어오는 2.8초 변형은 담기지 않는다. */
+function toggleFixRec(one) {
   if (fix) {
-    if (fix.state === 'wait') { fix = null; setBtn('b-fix', false, FIX_LABEL, 'rec'); expMsg('영상 취소'); }
+    if (fix.state === 'wait') { fixBtn(fix, false); fix = null; expMsg('영상 취소'); }
     else if (fix.state === 'rec') stopFixRec();            // 도중에 누르면 거기까지 저장
     return;
   }
@@ -2571,50 +2606,81 @@ function toggleFixRec() {
   if (rec) { expMsg('녹화(webm) 중에는 영상(mp4)을 기록할 수 없습니다'); return; }
   const cv = document.createElement('canvas');
   cv.width = W - W % 2; cv.height = H - H % 2;
-  fix = { state: 'wait', cv, g: cv.getContext('2d'), n: 0, inflight: 0, marks: [], err: null, codec: null,
-          total: scenes.length * SCENE_PERIOD, run: stamp() + '_' + ((SRC_INFO && SRC_INFO.mode) || 'input') + '_mp4' };
-  setBtn('b-fix', true, '영상 준비 · 누르면 취소', 'rec');
-  expMsg('영상 준비 — 첫 장면 사진이 뜨면 시작');
-  startCycle();
+  const only = one ? Math.max(0, sceneIdx) : null;
+  fix = { state: 'wait', cv, g: null, enc: null, sent: 0, n: 0, inflight: 0, marks: [], err: null, codec: null, only,
+          total: (only !== null ? 1 : scenes.length) * SCENE_PERIOD,
+          run: stamp() + '_' + ((SRC_INFO && SRC_INFO.mode) || 'input') + (only !== null ? '_scene' + String(scenes[only].act).padStart(2, '0') : '') + '_mp4' };
+  fixBtn(fix, true, '영상 준비 · 누르면 취소');
+  if (only !== null) {
+    expMsg('영상 준비 — ' + (only + 1) + '번 장면을 처음부터 (사진이 뜨면 시작)');
+    if (!autoAdvance) toggleAuto();
+    jumpScene(only);
+  } else {
+    expMsg('영상 준비 — 첫 장면 사진이 뜨면 시작');
+    startCycle();
+  }
 }
 
-function beginFixRec() {
+function fixSend(f, body) {                 // 한 덩어리(H.264 조각 또는 픽셀 한 장)를 번호 붙여 보낸다 — 서버가 번호순으로 잇는다
+  const i = f.sent++;
+  f.inflight++;
+  fetch(SERVER + '/api/fixrec/frame?run=' + encodeURIComponent(f.run) + '&i=' + i, { method: 'POST', body })
+    .then(res => res.json()).then(j => { if (j.error) throw new Error(j.error); })
+    .catch(e => { f.err = f.err || e; })
+    .finally(() => { f.inflight--; });
+}
+
+async function beginFixRec() {
   const f = fix;
   f.state = 'starting';                      // 서버가 인코더를 열 때까지 엔진을 세운다(fixBusy)
+  const cfg = await fixEncoderConfig(f.cv.width, f.cv.height);
+  if (cfg) {
+    f.g = f.cv.getContext('2d');
+    f.enc = new VideoEncoder({
+      output: ch => { const u = new Uint8Array(ch.byteLength); ch.copyTo(u); fixSend(f, u); },   // 순서대로 나온다
+      error: e => { f.err = f.err || e; },
+    });
+    f.enc.configure(cfg);
+  } else {
+    f.g = f.cv.getContext('2d', { willReadFrequently: true });   // 픽셀을 자주 읽는다고 알려 두면 읽기가 빠르다
+  }
   fetch(SERVER + '/api/fixrec/start', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ run: f.run, width: f.cv.width, height: f.cv.height, fps: 60 }) })
+        body: JSON.stringify({ run: f.run, width: f.cv.width, height: f.cv.height, fps: 60,
+                               pix: cfg ? 'h264' : 'rgba', enc: cfg ? cfg.codec + ' ' + cfg.hardwareAcceleration + ' ' + FIX_BITRATE / 1e6 + 'Mbps' : null }) })
     .then(res => res.json()).then(j => {
       if (j.error) throw new Error(j.error);
       if (fix !== f) return;
       f.codec = j.codec; f.state = 'rec';
-      sceneFrame = 0;                        // 첫 장면도 온전한 10초
+      sceneFrame = 0;                        // 첫 장면도 온전한 장면 길이
       fixMark(scenes[sceneIdx]);
-      setBtn('b-fix', true, '영상 기록 중 · 누르면 끝', 'rec');
+      fixBtn(f, true, '영상 기록 중 · 누르면 끝');
     }).catch(e => {
       expMsg('영상 시작 실패 — ' + e.message);
       console.error('[영상]', e);
-      fix = null; setBtn('b-fix', false, FIX_LABEL, 'rec');
+      if (f.enc) try { f.enc.close(); } catch (x) {}
+      fixBtn(f, false); fix = null;
     });
 }
 
 function stepFixRec() {
   if (!fix) return;
   if (fix.state === 'wait') {
-    if (sceneIdx === 0 && imgIdx === 0 && fadeT >= 1) beginFixRec();
+    const k = fix.only !== null ? fix.only : 0;
+    if (sceneIdx === k && imgIdx === k && fadeT >= 1) beginFixRec();
     return;
   }
   if (fix.state !== 'rec') return;
   const f = fix, i = f.n++;
   paintScreen(f.g, f.cv.width, f.cv.height);
-  f.inflight++;
-  f.cv.toBlob(b => {                         // 부르는 순간의 캔버스를 떠 간다 — 다음 프레임이 덮어써도 안전
-    fetch(SERVER + '/api/fixrec/frame?run=' + encodeURIComponent(f.run) + '&i=' + i, { method: 'POST', body: b })
-      .then(res => res.json()).then(j => { if (j.error) throw new Error(j.error); })
-      .catch(e => { f.err = f.err || e; })
-      .finally(() => { f.inflight--; });
-  }, 'image/jpeg', 0.92);
+  if (f.enc) {                               // 하드웨어 인코더 — 2초마다 키프레임(앞뒤로 넘겨 보기 편하게)
+    const vf = new VideoFrame(f.cv, { timestamp: Math.round(i * 1e6 / 60), duration: Math.round(1e6 / 60) });
+    f.enc.encode(vf, { keyFrame: i % 120 === 0 });
+    vf.close();
+  } else {                                   // 픽셀 그대로 — 압축은 서버의 ffmpeg 가 한다
+    fixSend(f, f.g.getImageData(0, 0, f.cv.width, f.cv.height).data);
+  }
   if (f.err) { stopFixRec(); return; }       // 조용히 빠진 프레임을 만들지 않는다 — 멈추고 드러낸다
-  if (frame % 30 === 0) expMsg('● 영상 기록 · ' + (sceneIdx + 1) + '/' + scenes.length + '장면 · ' +
+  if (frame % 30 === 0) expMsg('● 영상 기록 · ' + (sceneIdx + 1) + '/' + scenes.length + '장면' + (f.only !== null ? '만' : '') + ' · ' +
                                Math.min(100, f.n / f.total * 100).toFixed(0) + '% (' + (f.n / 60).toFixed(1) + '초분)');
 }
 
@@ -2622,8 +2688,9 @@ function stopFixRec() {
   if (!fix || fix.state !== 'rec') return;
   const f = fix;
   f.state = 'stop';
-  setBtn('b-fix', true, '저장 중…', 'rec');
+  fixBtn(f, true, '저장 중…');
   expMsg('영상 끝 · ' + (f.n / 60).toFixed(1) + '초분 — 남은 프레임 보내는 중');
+  const flushed = f.enc ? f.enc.flush().catch(e => { f.err = f.err || e; }).then(() => f.enc.close()) : Promise.resolve();
   const finish = () => {
     if (f.inflight > 0) { setTimeout(finish, 100); return; }
     const meta = {
@@ -2631,10 +2698,10 @@ function stopFixRec() {
       sound: '없음 — 프레임 고정 녹화는 소리를 담지 않는다 (소리까지는 [녹화] webm)',
       layers: '화면 그대로 (비네트 + 막 · 제목 · 감정 표지) — 글자 없는 판은 [장면 저장]의 scene_NN.png',
       input_mode: SRC_INFO ? SRC_INFO.mode : null, input_file: SRC_INFO ? SRC_INFO.file : null,
-      scenes: f.marks, recorded_at: new Date().toISOString(),
+      scenes: f.marks, only_scene: f.only !== null ? scenes[f.only].act : null, recorded_at: new Date().toISOString(),
       engine: { GLOW_SIZE, BASE_ALPHA, AP_COMP, NP2 },
       error: f.err ? String(f.err.message || f.err) : null,
-      note: '프레임 고정 녹화 — 엔진 한 프레임 = 영상 1/60초. 컴퓨터 속도와 상관없이 장면당 10초. 같은 입력이어도 매번 조금씩 다르다(창발).',
+      note: '프레임 고정 녹화 — 엔진 한 프레임 = 영상 1/60초. 컴퓨터 속도와 상관없이 장면당 ' + SCENE_SEC + '초. 같은 입력이어도 매번 조금씩 다르다(창발).',
     };
     fetch(SERVER + '/api/fixrec/end', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ run: f.run, meta }) })
@@ -2645,9 +2712,9 @@ function stopFixRec() {
       }).catch(e => {
         expMsg('영상 저장 실패 — 서버를 확인하세요');
         console.error('[영상]', e);
-      }).finally(() => { fix = null; setBtn('b-fix', false, FIX_LABEL, 'rec'); });
+      }).finally(() => { fixBtn(f, false); fix = null; });
   };
-  finish();
+  flushed.then(finish);
 }
 
 loop();

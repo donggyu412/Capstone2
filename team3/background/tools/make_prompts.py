@@ -111,8 +111,7 @@ def main():
     mode, path, base_dir = app.pick_source()
     if mode != 'storyboard':
         sys.exit('input/storyboard/ 에 2팀 스토리보드 JSON 이 없습니다. (더미 자료는 이미지가 이미 있어 프롬프트가 필요 없습니다)')
-    rows = app.read_scene_list(path) or []
-    rows = sorted(rows, key=lambda r: r.get('act') or r.get('scene') or 0)
+    rows = app.read_scene_list(path) or []      # 번호순 정렬·번호 정리까지 끝나서 온다
 
     out = ['배경 이미지 프롬프트 — %s (%d장면)' % (os.path.relpath(path, ROOT).replace('\\', '/'), len(rows)),
            '각 문장을 이미지 생성기에 붙여넣고, 결과를 input/storyboard/ 에 옆에 적힌 이름으로 저장하세요.',
