@@ -1,12 +1,40 @@
+"""
+꿈 오브제 생성 — 스토리보드 json → ComfyUI(dreamshaper_8 + dream_object LoRA) → 장면별 투명 PNG
+캡스톤 디자인2 · 3팀 · 시스템 II (꿈 오브제)
+
+스토리보드 내용이 바뀌어도 그대로 돌아가도록:
+  오브제 이름(한국어) → 영어 프롬프트를 자동 번역한다.
+    1) translations.json  — 사람이 고친 번역이 있으면 그것을 최우선으로 쓴다
+    2) 기본 사전          — 지난 스토리보드의 13개 (검수된 번역)
+    3) 자동 번역          — 그 밖의 새 오브제는 구글 번역으로, 구글이 막히면 MyMemory 로 옮기고 translations.json 에 적어 둔다
+    4) 번역 실패 시에만    — "surreal object" (경고 출력)
+
+사용법
+  번역만 먼저 확인 (ComfyUI 없이)   python generate_objects_comfy.py --dry-run
+  생성                              python generate_objects_comfy.py
+  다른 스토리보드                    python generate_objects_comfy.py --story new_scenes.json
+
+결과
+  output_objects/scene_01/obj_1_이름.png   투명 PNG (배경 엔진·4팀 입력)
+  output_objects_raw/scene_01/...          흰 배경 원본 (누끼를 손으로 다시 딸 때)
+  output_objects/objects.json              장면·오브제·번역·프롬프트·시드 대응표
+  translations.json                        번역 기록 — 이상한 번역은 여기서 고치고 다시 돌리면 된다
+
+필요 패키지: pip install pillow "rembg[cpu]" deep-translator scipy
+ComfyUI 는 미리 켜 두고(run_nvidia_gpu.bat), models/loras 에 dream_object_lora.safetensors 가 있어야 한다.
+"""
+import argparse
 import json
 import os
 import time
-import urllib.request
 import urllib.parse
+import urllib.request
 from io import BytesIO
-from PIL import Image
-from rembg import remove
 
+import numpy as np
+from PIL import Image, ImageChops, ImageFilter
+
+# 지난 스토리보드에서 검수한 번역 — 자동 번역보다 우선한다
 OBJ_ENGLISH_MAP = {
     "낡은 항해일지": "old weathered navigation logbook",
     "푸른빛 냉동액 웅덩이": "puddle of glowing blue cryogenic fluid",
@@ -20,149 +48,240 @@ OBJ_ENGLISH_MAP = {
     "벌어지는 타일 금": "cracking and widening floor tile fissures",
     "밤색 서류철": "dark brown leather document folder",
     "금이 간 타일 바닥": "cracked tiled floor surface",
-    "창백하고 얇은 손": "pale thin ghostly hand emerging"
+    "창백하고 얇은 손": "pale thin ghostly hand emerging",
 }
 
+TRIGGER = "dream_object"  # LoRA 학습 때 캡션 맨 앞에 붙인 트리거 워드
 STYLE_PROMPT = "digital art style, abstract geometric shape, surreal, white background, standalone object"
+NEGATIVE = "worst quality, low quality, blurry, distorted"  # ComfyUI 화면에서 쓴 것과 같게
+FALLBACK = "surreal object"
+TRANSLATIONS = "translations.json"
 
-def get_workflow(prompt_text, negative_text, seed):
-    return {
-        "3": {
-            "inputs": {
-                "seed": seed,
-                "steps": 20,
-                "cfg": 8.0,
-                "sampler_name": "euler",
-                "scheduler": "simple",
-                "denoise": 1.0,
-                "model": ["4", 0],
-                "positive": ["6", 0],
-                "negative": ["7", 0],
-                "latent_image": ["5", 0]
-            },
-            "class_type": "KSampler"
-        },
-        "4": {
-            "inputs": {
-                "ckpt_name": "dreamshaper_8.safetensors"
-            },
-            "class_type": "CheckpointLoaderSimple"
-        },
-        "5": {
-            "inputs": {
-                "width": 512,
-                "height": 512,
-                "batch_size": 1
-            },
-            "class_type": "EmptyLatentImage"
-        },
-        "6": {
-            "inputs": {
-                "text": prompt_text,
-                "clip": ["4", 1]
-            },
-            "class_type": "CLIPTextEncode"
-        },
-        "7": {
-            "inputs": {
-                "text": negative_text,
-                "clip": ["4", 1]
-            },
-            "class_type": "CLIPTextEncode"
-        },
-        "8": {
-            "inputs": {
-                "samples": ["3", 0],
-                "vae": ["4", 2]
-            },
-            "class_type": "VAEDecode"
-        },
-        "9": {
-            "inputs": {
-                "filename_prefix": "ComfyUI_Dream",
-                "images": ["8", 0]
-            },
-            "class_type": "SaveImage"
-        }
+
+# ─────────────────────────────────────────────
+# 번역
+# ─────────────────────────────────────────────
+def load_translations():
+    if os.path.exists(TRANSLATIONS):
+        with open(TRANSLATIONS, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def save_translations(tr):
+    with open(TRANSLATIONS, "w", encoding="utf-8") as f:
+        json.dump(tr, f, ensure_ascii=False, indent=2)
+
+
+def clean_en(text):
+    text = (text or "").strip().strip(".").strip()
+    for art in ("The ", "the ", "A ", "a ", "An ", "an "):
+        if text.startswith(art):
+            text = text[len(art):]
+    return text.lower()
+
+
+_providers = None
+
+
+def _make_providers():
+    """구글 → MyMemory 순서. 구글이 네트워크(IP) 단위로 막히는 일이 있어 다른 번역기로 넘어간다"""
+    try:
+        from deep_translator import GoogleTranslator, MyMemoryTranslator
+    except ImportError:
+        print("  ! deep-translator 가 없습니다 → pip install deep-translator")
+        return []
+    return [("google", lambda: GoogleTranslator(source="ko", target="en")),
+            ("mymemory", lambda: MyMemoryTranslator(source="korean", target="english us"))]
+
+
+def auto_translate(ko):
+    """(영어, 번역기 이름) — 모두 실패하면 (None, None)"""
+    global _providers
+    if _providers is None:
+        _providers = _make_providers()
+    for name, make in list(_providers):
+        for attempt in range(2):
+            try:
+                en = clean_en(make().translate(ko))
+                if en and en != ko.lower():
+                    return en, name
+                break
+            except Exception as e:
+                msg = type(e).__name__
+                print(f"  ! {name} 번역 실패({msg}) — {'다시 시도' if attempt == 0 else '다음 번역기로'}")
+                time.sleep(1.5)
+        else:  # 두 번 다 막힌 번역기는 이번 실행에서 다시 부르지 않는다
+            _providers = [p for p in _providers if p[0] != name]
+    return None, None
+
+
+def translate(ko, tr):
+    """(영어, 출처) — 출처: manual / dict / auto / fallback"""
+    entry = tr.get(ko)
+    if entry and entry.get("en"):
+        return entry["en"], entry.get("source", "manual")
+    if ko in OBJ_ENGLISH_MAP:
+        return OBJ_ENGLISH_MAP[ko], "dict"
+    en, provider = auto_translate(ko)
+    if en:
+        tr[ko] = {"en": en, "source": "auto", "provider": provider}
+        save_translations(tr)
+        return en, "auto"
+    print(f"  ! '{ko}' 번역 실패 → '{FALLBACK}' 로 생성합니다 (translations.json 에 직접 적어 주세요)")
+    return FALLBACK, "fallback"
+
+
+# ─────────────────────────────────────────────
+# ComfyUI
+# ─────────────────────────────────────────────
+def get_workflow(prompt_text, negative_text, seed, lora_name, lora_strength):
+    model_src, clip_src = ["4", 0], ["4", 1]
+    wf = {
+        "3": {"class_type": "KSampler", "inputs": {
+            "seed": seed, "steps": 20, "cfg": 8.0, "sampler_name": "euler", "scheduler": "simple",
+            "denoise": 1.0, "model": model_src, "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["5", 0]}},
+        "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "dreamshaper_8.safetensors"}},
+        "5": {"class_type": "EmptyLatentImage", "inputs": {"width": 512, "height": 512, "batch_size": 1}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt_text, "clip": clip_src}},
+        "7": {"class_type": "CLIPTextEncode", "inputs": {"text": negative_text, "clip": clip_src}},
+        "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
+        "9": {"class_type": "SaveImage", "inputs": {"filename_prefix": "ComfyUI_Dream", "images": ["8", 0]}},
     }
+    if lora_name:  # LoRA 를 체크포인트와 샘플러·텍스트 인코더 사이에 끼운다 (화면 워크플로와 같은 연결)
+        wf["10"] = {"class_type": "LoraLoader", "inputs": {
+            "lora_name": lora_name, "strength_model": lora_strength, "strength_clip": lora_strength,
+            "model": ["4", 0], "clip": ["4", 1]}}
+        wf["3"]["inputs"]["model"] = ["10", 0]
+        wf["6"]["inputs"]["clip"] = ["10", 1]
+        wf["7"]["inputs"]["clip"] = ["10", 1]
+    return wf
 
-def queue_prompt(workflow):
-    data = json.dumps({"prompt": workflow}).encode('utf-8')
-    req = urllib.request.Request("http://127.0.0.1:8188/prompt", data=data)
+
+def queue_prompt(server, workflow):
+    data = json.dumps({"prompt": workflow}).encode("utf-8")
+    req = urllib.request.Request(f"{server}/prompt", data=data)
     return json.loads(urllib.request.urlopen(req).read())
 
-def get_image(filename, subfolder, folder_type):
-    data = {"filename": filename, "subfolder": subfolder, "type": folder_type}
-    url_values = urllib.parse.urlencode(data)
-    with urllib.request.urlopen(f"http://127.0.0.1:8188/view?{url_values}") as response:
-        return response.read()
 
+def wait_result(server, prompt_id, timeout=600):
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        time.sleep(1)
+        try:
+            history = json.loads(urllib.request.urlopen(f"{server}/history/{prompt_id}").read())
+            if prompt_id in history:
+                return history[prompt_id]
+        except Exception:
+            continue
+    raise TimeoutError("ComfyUI 응답 시간 초과")
+
+
+def get_image(server, filename, subfolder, folder_type):
+    q = urllib.parse.urlencode({"filename": filename, "subfolder": subfolder, "type": folder_type})
+    with urllib.request.urlopen(f"{server}/view?{q}") as r:
+        return r.read()
+
+
+# ─────────────────────────────────────────────
+# 누끼 — 두 모델 마스크를 합치고(흰 물체가 흰 배경에 지워지지 않게) 안쪽 구멍을 메운다
+# ─────────────────────────────────────────────
+_sessions = None
+
+
+def remove_bg(img):
+    global _sessions
+    from rembg import new_session, remove
+    from scipy.ndimage import binary_fill_holes
+    if _sessions is None:
+        _sessions = (new_session("u2net"), new_session("isnet-general-use"))
+    src = img.convert("RGB")
+    a1 = remove(src, session=_sessions[0], only_mask=True).convert("L")
+    a2 = remove(src, session=_sessions[1], only_mask=True).convert("L")
+    a = np.array(ImageChops.lighter(a1, a2))
+    solid = binary_fill_holes(a > 64)
+    a = np.where(solid, 255, a).astype(np.uint8)
+    out = src.convert("RGBA")
+    out.putalpha(Image.fromarray(a).filter(ImageFilter.GaussianBlur(0.8)))
+    return out
+
+
+# ─────────────────────────────────────────────
 def main():
-    json_path = "dream_scenes.json"
-    output_dir = "output_objects"
-    if not os.path.exists(json_path):
-        print(f"오류: {json_path} 파일을 찾을 수 없습니다.")
+    ap = argparse.ArgumentParser(description="꿈 오브제 생성 (ComfyUI + LoRA)")
+    ap.add_argument("--story", default="dream_scenes.json")
+    ap.add_argument("--out", default="output_objects")
+    ap.add_argument("--server", default="http://127.0.0.1:8188")
+    ap.add_argument("--lora", default="dream_object_lora.safetensors", help="빈 문자열이면 LoRA 없이")
+    ap.add_argument("--lora-strength", type=float, default=0.6)
+    ap.add_argument("--dry-run", action="store_true", help="번역·프롬프트만 확인하고 생성하지 않음")
+    args = ap.parse_args()
+
+    if not os.path.exists(args.story):
+        print(f"오류: {args.story} 파일을 찾을 수 없습니다.")
         return
-
-    with open(json_path, "r", encoding="utf-8") as f:
+    with open(args.story, "r", encoding="utf-8") as f:
         data = json.load(f)
+    scenes = data.get("scenes", data) if isinstance(data, dict) else data
 
-    os.makedirs(output_dir, exist_ok=True)
+    tr = load_translations()
+    raw_dir = args.out + "_raw"
+    manifest = {"story": os.path.basename(args.story), "checkpoint": "dreamshaper_8.safetensors",
+                "lora": args.lora or None, "lora_strength": args.lora_strength if args.lora else None,
+                "style_prompt": STYLE_PROMPT, "negative": NEGATIVE,
+                "background_removal": "rembg u2net + isnet-general-use 마스크 합집합 + 구멍 메우기", "scenes": []}
 
-    for scene_data in data.get("scenes", []):
-        scene_num = scene_data.get("scene")
+    for scene_data in scenes:
+        n = int(scene_data.get("scene"))
         objects = scene_data.get("objects", [])
-        scene_folder = os.path.join(output_dir, f"scene_{scene_num}")
-        os.makedirs(scene_folder, exist_ok=True)
-
-        print(f"\n=== Scene {scene_num} 오브제 생성 시작 (총 {len(objects)}개) ===")
-
-        for idx, obj_name in enumerate(objects, 1):
-            safe_name = obj_name.replace(" ", "_")
-            save_path = os.path.join(scene_folder, f"obj_{idx}_{safe_name}.png")
-
-            if os.path.exists(save_path):
-                print(f"[{idx}/{len(objects)}] 패스: {obj_name} (이미 존재함)")
+        folder = os.path.join(args.out, f"scene_{n:02d}")
+        raw_folder = os.path.join(raw_dir, f"scene_{n:02d}")
+        print(f"\n=== 장면 {n} · 오브제 {len(objects)}개 ===")
+        entries = []
+        for idx, ko in enumerate(objects, 1):
+            en, source = translate(ko, tr)
+            prompt = f"{TRIGGER}, {en}, {STYLE_PROMPT}"
+            seed = idx * 777 + n * 100
+            fname = f"obj_{idx}_{ko.replace(' ', '_')}.png"
+            entries.append({"index": idx, "name_ko": ko, "name_en": en, "translation": source,
+                            "prompt": prompt, "seed": seed, "file": f"scene_{n:02d}/{fname}"})
+            tag = {"manual": "직접", "dict": "사전", "auto": "자동", "fallback": "실패"}.get(source, source)
+            print(f"  [{idx}] {ko}  →  {en}   ({tag})")
+            if args.dry_run:
                 continue
 
-            eng_obj = OBJ_ENGLISH_MAP.get(obj_name, "surreal object")
-            prompt_text = f"{eng_obj}, {STYLE_PROMPT}"
-            negative_text = "bad anatomy, blurry, low quality, distorted, deformed, text, watermark, bright daylight, harsh flashing lights"
-            seed = idx * 777 + scene_num * 100
-
-            workflow = get_workflow(prompt_text, negative_text, seed)
-            print(f"[{idx}/{len(objects)}] ComfyUI 요청 전송 및 대기 중: {obj_name}")
-
+            save_path = os.path.join(folder, fname)
+            if os.path.exists(save_path):
+                print("      패스 (이미 있음)")
+                continue
+            os.makedirs(folder, exist_ok=True)
+            os.makedirs(raw_folder, exist_ok=True)
             try:
-                # 1. 작업 큐에 등록
-                resp = queue_prompt(workflow)
-                prompt_id = resp['prompt_id']
-
-                # 2. 완료될 때까지 상태 확인 (폴링 방식)
-                while True:
-                    time.sleep(1)
-                    try:
-                        history_req = urllib.request.urlopen(f"http://127.0.0.1:8188/history/{prompt_id}")
-                        history = json.loads(history_req.read())
-                        if prompt_id in history:
-                            break
-                    except Exception:
-                        continue
-
-                # 3. 결과 이미지 가져오기
-                node_output = history[prompt_id]['outputs']['9']
-                image_info = node_output['images'][0]
-                img_bytes = get_image(image_info['filename'], image_info['subfolder'], image_info['type'])
-                
-                # 4. 누끼(배경 제거) 처리 후 저장
-                orig_image = Image.open(BytesIO(img_bytes))
-                nobg_image = remove(orig_image)
-                nobg_image.save(save_path, "PNG")
-
-                print(f" -> 성공: {save_path} 저장 완료")
-
+                wf = get_workflow(prompt, NEGATIVE, seed, args.lora, args.lora_strength)
+                pid = queue_prompt(args.server, wf)["prompt_id"]
+                hist = wait_result(args.server, pid)
+                info = hist["outputs"]["9"]["images"][0]
+                img = Image.open(BytesIO(get_image(args.server, info["filename"], info["subfolder"], info["type"])))
+                img.save(os.path.join(raw_folder, fname))
+                remove_bg(img).save(save_path, "PNG")
+                print(f"      저장 → {save_path}")
+            except urllib.error.URLError:
+                print("      ! ComfyUI 에 연결할 수 없습니다 — run_nvidia_gpu.bat 으로 먼저 켜 주세요")
+                return
             except Exception as e:
-                print(f" -> 오류 발생: {e}")
+                print(f"      ! 오류: {e}")
+        manifest["scenes"].append({"scene": n, "objects": entries})
+
+    if not args.dry_run:
+        os.makedirs(args.out, exist_ok=True)
+        with open(os.path.join(args.out, "objects.json"), "w", encoding="utf-8") as f:
+            json.dump(manifest, f, ensure_ascii=False, indent=2)
+        print(f"\n대응표 → {os.path.join(args.out, 'objects.json')}")
+    auto = [k for k, v in tr.items() if v.get("source") == "auto"]
+    if auto:
+        print(f"\n자동 번역 {len(auto)}개가 {TRANSLATIONS} 에 있습니다. 어색한 번역은 그 파일에서 'en' 을 고치고 "
+              f"'source' 를 'manual' 로 바꾼 뒤, 해당 PNG 를 지우고 다시 돌리면 됩니다.")
+
 
 if __name__ == "__main__":
     main()
