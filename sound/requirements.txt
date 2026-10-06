@@ -1,0 +1,8 @@
+# conda 'sound' 환경용 (python 3.10)
+# 1) torch: pip install torch==2.7.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu126
+# 2) 나머지: pip install -r sound/requirements.txt
+stable-audio-3 @ git+https://github.com/Stability-AI/stable-audio-3.git
+soundfile
+numpy
+anthropic
+python-dotenv
