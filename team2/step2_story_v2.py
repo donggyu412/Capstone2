@@ -4,14 +4,15 @@ step2_story_v2.py
 emotion_peaks.txt → 4개 꿈 장면 생성
 
 [파이프라인]
-장면1: emotion_peaks 풀에서 랜덤 뽑기 → 글 생성 → 4D 벡터 추출
+장면1: 1팀 assembled_blueprint.json 첫 장면 재료 사용 (없으면 emotion_peaks 풀 폴백)
 장면2~4: 이전 장면 elements에서 Dream Drift + 코사인 유사도 샘플링 → 글 생성
 
 [조정 가능한 값]
 - COHERENCE   : 장면 간 연결 강도 (0=꿈처럼 단절, 1=이야기처럼 연결)
 - TEMPERATURE : 샘플링 랜덤성 (높을수록 무작위)
 - MAX_DRIFT   : 분위기 변화 최대폭
-- N_BACKGROUND / N_OBJECT / N_EMOTION : 재료 뽑는 개수
+- BG_RANGE / OBJ_RANGE / EMO_RANGE : (최소, 최대) 재료 개수 범위
+  실제 개수는 1팀 공감 비율 P에 의해 이항분포로 결정됨
 """
 import json
 import math
@@ -29,25 +30,34 @@ load_dotenv()
 MODEL_EXTRACT = "claude-haiku-4-5-20251001"
 MODEL_STORY   = "claude-sonnet-5"
 
-# ── 재료 뽑는 개수 ───────────────────────────────
-N_BACKGROUND = 1
-N_OBJECT     = 2
-N_EMOTION    = 2
+# ── 재료 개수 범위 (L=최소, U=최대) ──────────────────
+# 실제 개수는 공감 비율 P로 N = L + Binomial(U-L, q) 결정
+BG_RANGE  = (1, 2)   # (L_c, U_c) for 배경
+OBJ_RANGE = (1, 3)   # (L_c, U_c) for 오브제
+EMO_RANGE = (1, 3)   # (L_c, U_c) for 감정
 
-# ── Dream State Machine 파라미터 ─────────────────
-COHERENCE   = 0.9   # 0.0 ~ 1.0  (낮을수록 꿈처럼, 높을수록 개연성)
+# ── Dream State Machine 파라미터 ─────────────────────
+COHERENCE   = 0.9   # 벡터 drift 크기만 좌우 (낮을수록 분위기가 크게 튄다)
 TEMPERATURE = 0.3   # 0.0 ~ 1.0  (낮을수록 알고리즘 주도, 높을수록 랜덤)
-MAX_DRIFT   = 0.1   # 0.0 ~ 1.0  (분위기 변화 최대폭)
+MAX_DRIFT   = 0.2   # 분위기 변화 최대폭. Hourglass 축이 -1~1(폭 2.0)이라
+                    # 0~1 시절 0.1과 같은 체감 변화량을 내려면 2배가 필요하다.
+
+# 이전 글을 프롬프트에 얼마나 넘길지. COHERENCE와 분리돼 있다.
+# 0.0=안 넘김 / 0.5=직전 장면 마지막 문단만 / 1.0=직전 장면 전문
+CONTEXT_LEVEL = 0.5
+
+# 이전 장면에서 이미 쓴 재료가 다시 뽑힐 때 곱해지는 가중치
+REPEAT_PENALTY = 0.1
 
 # 장면 벡터 계산 시 카테고리 가중치
 VECTOR_WEIGHTS = {"배경": 0.2, "오브제": 0.5, "감정": 0.3}
 
-# ── 글 품질 검사 기준 ─────────────────────────────
+# ── 글 품질 검사 기준 ─────────────────────────────────
 MIN_CHARS    = 500
 MAX_CHARS    = 650
-TARGET_CHARS = 550
+TARGET_CHARS = 580   # 범위 중앙(575) 근처. 550이면 모델이 하한 아래로 내려간다.
 MAX_TRIES    = 3
-BANNED       = ["듯한", "듯이", "것 같", "느낌"]
+BANNED       = ["듯", "것 같", "느낌"]   # "듯"은 듯한/듯이/비틀리듯/옮긴 듯 모두 포괄
 SENTENCE_ENDS = {'.', '!', '?', '…', '"', "'", '”', '’', '」'}
 
 HUMAN_WORDS      = ["사람", "남자", "여자", "아이", "노인"]
@@ -56,12 +66,18 @@ _HUMAN_SUBJECT_RE = re.compile(
     r"^(?:(?:그녀|그)[는가의]|(?:" + "|".join(HUMAN_WORDS) + r")[은는이가의])"
 )
 
-# ── 4D 벡터 축 설명 (Claude에게 전달) ───────────────
-VECTOR_AXES = """4개 축의 의미:
-- 긴장도 : 0(고요) ~ 1(팽팽)
-- 이질감 : 0(현실적) ~ 1(꿈의 논리, 초자연)
-- 밀도   : 0(텅 빔, 여백) ~ 1(꽉 참, 빽빽함)
-- 온도   : 0(차갑고 날카로움) ~ 1(따뜻하고 물렁함)"""
+# ── 4D 벡터 축 설명 (Hourglass of Emotions, Cambria 2012) ────────────────
+VECTOR_AXES = """4개 축의 의미 (Hourglass of Emotions 기반, 각 값 -1.0 ~ +1.0):
+- Pleasantness (쾌적감) : -1(불쾌·혐오·공포) ~ 0(중립) ~ +1(기쁨·편안·아름다움)
+- Attention    (주의감) : -1(무관심·졸음·멍함) ~ 0(중립) ~ +1(각성·호기심·긴장)
+- Sensitivity  (민감감) : -1(둔감·무감각·익숙함) ~ 0(중립) ~ +1(예민·날카로움·낯섦)
+- Aptitude     (적합감) : -1(무력감·실패·좌절) ~ 0(중립) ~ +1(자신감·유능함·성취)
+
+평가 지침:
+- 값이 명확히 판단되지 않으면 null을 출력한다.
+- 평가상태: "정상" (판단 근거 있음) 또는 "미확정" (근거 불충분, 벡터 null)
+- 근거문장: 글에서 실제로 사용한 문장 또는 구절 (없으면 빈 문자열)
+- 판단근거: 왜 그 값인지 한 줄 설명"""
 
 
 # ════════════════════════════════════════════════
@@ -118,7 +134,9 @@ SCENE_PROMPT = """
 - 다음 장면으로 이어질 작은 변화 하나에서 끊듯이 끝낸다.
 
 8. 분량과 출력
-- 공백 제외 {목표글자수}자 이상, 6~7문단으로 쓴다. 각 문단은 4문장 이상으로 쓴다.
+- 공백 제외 {최소글자수}~{최대글자수}자 사이로 쓴다. {목표글자수}자 안팎이 가장 좋다.
+- 6~7문단으로 나누고, 각 문단은 4문장 이상으로 쓴다.
+- 문장을 짧게 끊어 쓴다. 문장당 평균 20자 안팎이어야 위 분량에 들어맞는다.
 - 반드시 마지막 문장까지 완결해서 끝낸다.
 - 이야기 본문만 출력한다. 제목, 설명, 메타 코멘트 없이.
 
@@ -133,7 +151,7 @@ SCENE_PROMPT = """
 - 같은 사물이나 장소가 살짝 다른 형태로 다시 나타날 수 있다.
 - 피부, 땀, 호흡, 체온 중 하나를 구체적으로 쓴다.
 
-[중요] 공백을 제외한 글자 수가 반드시 {목표글자수}자 이상이어야 한다."""
+[중요] 공백을 제외한 글자 수가 반드시 {최소글자수}자 이상 {최대글자수}자 이하여야 한다. {최대글자수}자를 넘기면 안 된다."""
 
 
 # ════════════════════════════════════════════════
@@ -163,7 +181,8 @@ def random_unit_vector(dim=4):
     n = _norm(v)
     return [x / n for x in v] if n > 1e-8 else [1.0] + [0.0] * (dim - 1)
 
-def clip_vector(v, lo=0.0, hi=1.0):
+def clip_vector(v, lo=-1.0, hi=1.0):
+    """Hourglass 범위 -1.0 ~ +1.0으로 클리핑"""
     return [max(lo, min(hi, x)) for x in v]
 
 def weighted_mean_vectors(vectors, weights):
@@ -177,11 +196,125 @@ def weighted_mean_vectors(vectors, weights):
 
 
 # ════════════════════════════════════════════════
+# 1팀 연동 헬퍼
+# ════════════════════════════════════════════════
+
+def load_blueprint_scene1(blueprint_path: str = "team1/output/assembled_blueprint.json") -> dict | None:
+    """1팀 assembled_blueprint.json 첫 장면(기) 재료 로드.
+    파일이 없거나 파싱 실패 시 None 반환 → 호출자가 폴백 처리.
+    반환값: {"배경": [...str], "오브제": [...str], "감정": [...str]}
+    """
+    p = Path(blueprint_path)
+    if not p.exists():
+        print(f"  [blueprint] 파일 없음: {blueprint_path} → 폴백")
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        # assembled_blueprint는 {"scenes": [...]} 또는 리스트 형식 모두 허용
+        scenes = data.get("scenes", data) if isinstance(data, dict) else data
+        if not scenes:
+            print("  [blueprint] 장면 데이터 없음 → 폴백")
+            return None
+        s = scenes[0]
+
+        # 배경
+        bg_raw = s.get("배경", "")
+        if isinstance(bg_raw, dict):
+            bg_list = [bg_raw.get("장소", "")] + list(bg_raw.get("분위기_상태", []))
+        elif isinstance(bg_raw, str) and bg_raw:
+            bg_list = [bg_raw]
+        else:
+            bg_list = bg_raw if isinstance(bg_raw, list) else []
+
+        bg_detail = s.get("배경_상세", "")
+        if isinstance(bg_detail, str) and bg_detail:
+            bg_list.append(bg_detail)
+        bg_list = [b for b in bg_list if b]
+
+        # 오브제 (주체 목록에서 키워드 또는 새_표현)
+        obj_list = []
+        for item in s.get("주체", []):
+            if isinstance(item, dict):
+                name = item.get("새_표현") or item.get("키워드") or item.get("이름", "")
+            else:
+                name = str(item)
+            if name:
+                obj_list.append(name)
+        # 엔티티_오브제 형식(scene_handoff)도 허용
+        for item in s.get("엔티티_오브제", []):
+            if isinstance(item, dict):
+                name = item.get("이름", "")
+            else:
+                name = str(item)
+            if name and name not in obj_list:
+                obj_list.append(name)
+
+        # 감정
+        emo_raw = s.get("감정", "")
+        if isinstance(emo_raw, str) and emo_raw:
+            emo_list = [e.strip() for e in re.split(r"[,、]", emo_raw) if e.strip()]
+        elif isinstance(emo_raw, list):
+            emo_list = [str(e) for e in emo_raw if e]
+        else:
+            emo_list = []
+
+        if not bg_list and not obj_list and not emo_list:
+            print("  [blueprint] 재료 추출 실패 → 폴백")
+            return None
+
+        print(f"  [blueprint] 로드 성공: 배경 {len(bg_list)}개, 오브제 {len(obj_list)}개, 감정 {len(emo_list)}개")
+        return {"배경": bg_list, "오브제": obj_list, "감정": emo_list}
+    except Exception as e:
+        print(f"  [blueprint] 로드 오류: {e} → 폴백")
+        return None
+
+
+def extract_empathy_ratio(peaks_path: str = "team1/output/emotion_peaks.txt") -> float:
+    """emotion_peaks.txt에서 공감 비율(%) 평균 추출.
+    형식 예: "감정 : 슬픔  (1/1명, 100.0%)"
+    파일 없거나 파싱 실패 시 기본값 50.0 반환.
+    """
+    p = Path(peaks_path)
+    if not p.exists():
+        print(f"  [공감률] 파일 없음: {peaks_path} → 기본값 50.0 사용")
+        return 50.0
+    text = p.read_text(encoding="utf-8")
+    ratios = [float(m) for m in re.findall(r"\([\d]+/[\d]+명,\s*([\d.]+)%\)", text)]
+    if not ratios:
+        print("  [공감률] 수치 파싱 실패 → 기본값 50.0 사용")
+        return 50.0
+    avg = sum(ratios) / len(ratios)
+    print(f"  [공감률] {len(ratios)}개 구간 평균: {avg:.1f}%")
+    return avg
+
+
+def calc_material_counts(P: float) -> tuple:
+    """공감 비율 P(0~100) → (n_bg, n_obj, n_emo).
+    q = max(0, min(1, (P-50)*2/100))
+    N_c = L_c + Binomial(U_c - L_c, q)
+    """
+    q = max(0.0, min(1.0, (P - 50.0) * 2.0 / 100.0))
+
+    def binom_sample(lo, hi):
+        trials = hi - lo
+        if trials <= 0:
+            return lo
+        successes = sum(1 for _ in range(trials) if random.random() < q)
+        return lo + successes
+
+    n_bg  = binom_sample(*BG_RANGE)
+    n_obj = binom_sample(*OBJ_RANGE)
+    n_emo = binom_sample(*EMO_RANGE)
+    print(f"  [재료 개수] q={q:.3f}  배경={n_bg}  오브제={n_obj}  감정={n_emo}")
+    return n_bg, n_obj, n_emo
+
+
+# ════════════════════════════════════════════════
 # Claude API 호출
 # ════════════════════════════════════════════════
 
 def extract_elements(client, scene_desc: str, sound: str) -> dict:
-    """타임테이블 장면 → 배경/오브제 추출 (장면1 재료용, 벡터 없음)"""
+    """타임테이블 장면 → 배경/오브제 추출 (장면1 폴백 재료용, 벡터 없음)"""
     prompt = f"""아래 장면 설명과 사운드 특성에서 배경과 오브제를 추출해라.
 
 장면 설명: {scene_desc}
@@ -207,9 +340,29 @@ def extract_elements(client, scene_desc: str, sound: str) -> dict:
     return json.loads(m.group())
 
 
+def extract_peaks_pool(client, scenes: list) -> dict:
+    """타임테이블 전체 → 배경/오브제/감정 후보 풀 (장면1 폴백용)"""
+    all_bg, all_obj, all_emo = [], [], []
+    print(f"[추출] {len(scenes)}개 타임테이블에서 요소 추출 중...")
+    for scene in scenes:
+        elements = extract_elements(client, scene["설명"], scene["사운드"])
+        all_bg.extend(elements.get("배경",  []))
+        all_obj.extend(elements.get("오브제", []))
+        all_emo.extend([
+            e.strip()
+            for e in scene["감정"].replace("(", ",").replace(")", ",").split(",")
+            if e.strip()
+        ])
+    return {
+        "배경":   list(dict.fromkeys(all_bg)),
+        "오브제": list(dict.fromkeys(all_obj)),
+        "감정":   list(dict.fromkeys(all_emo)),
+    }
+
+
 def extract_from_story(client, story: str, max_tries: int = 3) -> dict:
-    """완성된 글 → 배경/오브제/감정 + 각 요소의 4D 벡터"""
-    prompt = f"""아래 글에서 배경, 오브제, 감정, 물리법칙을 추출하고 각 항목의 분위기를 4D 벡터로 점수화해라.
+    """완성된 글 → 배경/오브제/감정 + 각 요소의 Hourglass 4D 벡터"""
+    prompt = f"""아래 글에서 배경, 오브제, 감정, 물리법칙을 추출하고 각 항목의 분위기를 Hourglass of Emotions 4D 벡터로 점수화해라.
 
 글:
 {story}
@@ -217,29 +370,50 @@ def extract_from_story(client, story: str, max_tries: int = 3) -> dict:
 {VECTOR_AXES}
 
 [물리법칙 정의]
-- 이 글에서 현실과 어긋난 꿈의 논리를 짧게 서술 (예: "거리가 걸어도 좁혀지지 않음", "물체가 위로 떨어짐", "크기가 보는 위치에 따라 바뀜")
+- 이 글에서 현실과 어긋난 꿈의 논리를 짧게 서술 (예: "거리가 걸어도 좁혀지지 않음", "물체가 위로 떨어짐")
 - 없으면 빈 배열
 
 [main_emotion 정의]
 - 이 글 전체에서 가장 지배적인 감정 하나를 고른다.
 - label은 반드시 아래 7종 중 하나: 분노, 혐오, 공포, 기쁨, 슬픔, 놀람, 중립
-- intensity는 0.0~1.0 사이의 소수 (글에서 해당 감정이 얼마나 강하게 느껴지는지)
+- intensity는 0.0~1.0 사이의 소수
 
 [출력 형식 — JSON만 출력, 주석 없이 순수 JSON]
 {{
-  "배경": [{{"항목": "...", "벡터": [긴장도, 이질감, 밀도, 온도]}}, ...],
-  "오브제": [{{"항목": "...", "벡터": [긴장도, 이질감, 밀도, 온도]}}, ...],
-  "감정": [{{"항목": "...", "벡터": [긴장도, 이질감, 밀도, 온도]}}, ...],
-  "물리법칙": ["법칙1", "법칙2", ...],
+  "배경": [{{
+    "항목": "...",
+    "벡터": [Pleasantness, Attention, Sensitivity, Aptitude],
+    "근거문장": "글에서 가져온 실제 구절",
+    "평가상태": "정상",
+    "판단근거": "왜 이 값인지 한 줄"
+  }}, ...],
+  "오브제": [{{
+    "항목": "...",
+    "벡터": [Pleasantness, Attention, Sensitivity, Aptitude],
+    "근거문장": "...",
+    "평가상태": "정상",
+    "판단근거": "..."
+  }}, ...],
+  "감정": [{{
+    "항목": "...",
+    "벡터": [Pleasantness, Attention, Sensitivity, Aptitude],
+    "근거문장": "...",
+    "평가상태": "정상",
+    "판단근거": "..."
+  }}, ...],
+  "물리법칙": ["법칙1", ...],
   "main_emotion": {{"label": "슬픔", "intensity": 0.8}}
 }}
 
-모든 벡터 값은 0.0~1.0 사이의 소수로. 문자열 안에 쌍따옴표를 쓰지 않는다."""
+모든 벡터 값은 -1.0~+1.0 사이의 소수로. 판단 근거가 불충분하면 벡터를 null로 출력하고 평가상태를 "미확정"으로 표기. 문자열 안에 쌍따옴표를 쓰지 않는다."""
     for attempt in range(1, max_tries + 1):
         message = client.messages.create(
-            model=MODEL_STORY, max_tokens=2048,
+            model=MODEL_STORY, max_tokens=4096,
             messages=[{"role": "user", "content": prompt}],
         )
+        if message.stop_reason == "max_tokens":
+            print(f"  [추출 재시도 {attempt}/{max_tries}] max_tokens 초과로 JSON이 잘렸습니다.")
+            continue
         raw = next((b.text for b in message.content if hasattr(b, "text")), "").strip()
         m = re.search(r"\{.*\}", raw, re.DOTALL)
         if not m:
@@ -256,17 +430,22 @@ def extract_from_story(client, story: str, max_tries: int = 3) -> dict:
 # Dream State Machine
 # ════════════════════════════════════════════════
 
+def _is_valid_vector(v) -> bool:
+    """벡터가 유효한지 확인 (null 또는 None 포함 시 False)"""
+    return v is not None and len(v) == 4 and all(x is not None for x in v)
+
+
 def compute_scene_vector(elements: dict) -> list:
-    """장면 요소 전체의 가중 평균 벡터 계산"""
+    """장면 요소 전체의 가중 평균 벡터 계산. null 벡터 항목은 제외."""
     all_vectors, all_weights = [], []
     for category, weight in VECTOR_WEIGHTS.items():
         for item in elements.get(category, []):
             v = item.get("벡터")
-            if v and len(v) == 4:
-                all_vectors.append(v)
+            if _is_valid_vector(v):
+                all_vectors.append([float(x) for x in v])
                 all_weights.append(weight)
     if not all_vectors:
-        return [0.5, 0.5, 0.5, 0.5]
+        return [0.0, 0.0, 0.0, 0.0]
     return weighted_mean_vectors(all_vectors, all_weights)
 
 
@@ -278,65 +457,128 @@ def dream_drift(current_vector: list) -> list:
     return clip_vector(target)
 
 
+_MODIFIER_RE = re.compile(r"[은는]$")
+
+
+def _tokens(name: str) -> set:
+    """항목 이름에서 사물의 정체를 가리키는 2글자 이상 토큰 추출"""
+    raw = {t for t in re.findall(r"[가-힣A-Za-z0-9]+", name) if len(t) >= 2}
+    # '낡은', '깜빡이는', '붉은' 같은 수식어는 사물이 아니라 상태를 가리킨다.
+    # 이것까지 비교하면 '낡은 스피커'와 '낡은 종이'가 같은 것으로 잡힌다.
+    core = {t for t in raw if not _MODIFIER_RE.search(t)}
+    return core or raw
+
+
+def is_same_thing(a: str, b: str) -> bool:
+    """추출될 때마다 이름이 바뀌는 같은 사물을 같다고 판정.
+
+    장면이 넘어갈 때마다 Claude가 같은 사물을 다르게 적는다.
+    '전구' → '깜빡이는 전구' → '전구(필라멘트)',  '바닥 홈' → '바닥의 홈과 쇠 끌리는 소리'
+    정확히 비교하면 교집합이 늘 공집합이 되어 반복 억제가 작동하지 않는다.
+
+    조사가 붙어 형태가 달라지는 건('바닥' ~ '바닥의') 접두 일치로 흡수하고,
+    짧은 쪽 토큰의 절반 이상이 맞으면 같은 것으로 본다.
+    """
+    ta, tb = _tokens(a), _tokens(b)
+    if not ta or not tb:
+        return a == b
+    short, other = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+    matched = sum(1 for x in short
+                  if any(x.startswith(y) or y.startswith(x) for y in other))
+    return matched / len(short) >= 0.5
+
+
+def has_banned(name: str) -> bool:
+    """재료 이름 자체에 금지표현이 있으면 글에 쓸 수 없다"""
+    return any(w in name for w in BANNED)
+
+
+def merge_candidates(prev_elements: dict, bg_pool: list,
+                     obj_pool: list, emo_pool: list) -> dict:
+    """직전 장면 추출 요소에 원본 후보 풀을 더한다.
+
+    직전 장면 것만 쓰면 후보가 2~5개뿐이고 그게 전부 직전 장면에서 온 것이라,
+    무슨 수를 써도 같은 공간을 벗어날 수 없다. 원본 풀 항목은 벡터가 없어
+    코사인 유사도 0(중립)으로 취급되므로, 패널티 받은 반복 항목과 경쟁하게 된다.
+    """
+    def extend(items, names):
+        existing = [i["항목"] for i in items]
+        fresh = [{"항목": n, "벡터": None} for n in names
+                 if not any(is_same_thing(n, e) for e in existing)]
+        return items + fresh
+
+    return {
+        "배경":   extend(prev_elements.get("배경",  []), bg_pool),
+        "오브제": extend(prev_elements.get("오브제", []), obj_pool),
+        "감정":   extend(prev_elements.get("감정",  []), emo_pool),
+    }
+
+
 def sample_elements(elements: dict, target_vector: list,
-                    excluded_backgrounds: list = None,
-                    penalized_objects: set = None) -> tuple:
+                    n_bg: int = 1, n_obj: int = 2, n_emo: int = 2,
+                    used_backgrounds: list = None,
+                    used_objects: list = None) -> tuple:
     """코사인 유사도 기반 가중치 샘플링 → (배경, 오브제, 감정) 리스트"""
-    def sample_category(items, n, excluded=None, penalized=None):
-        if not items:
+    def sample_category(items, n, used=None):
+        candidates = [i for i in items if not has_banned(i["항목"])] or items
+        if not candidates:
             return []
 
-        # 배경: 이전 장면 배경은 후보에서 제외 (fallback: 전부 제외되면 그냥 씀)
-        candidates = items
-        if excluded:
-            filtered = [i for i in items if i["항목"] not in excluded]
-            if filtered:
-                candidates = filtered
-
-        sims    = [cosine_similarity(item.get("벡터", [0.5]*4), target_vector) for item in candidates]
+        # null 벡터 항목은 [0.0]*4 로 대체 (코사인 유사도 0 근방)
+        sims = [
+            cosine_similarity(
+                [float(x) for x in item.get("벡터")] if _is_valid_vector(item.get("벡터")) else [0.0]*4,
+                target_vector
+            )
+            for item in candidates
+        ]
         weights = softmax_weights(sims, TEMPERATURE)
 
-        # 오브제: 2장면 연속 등장한 항목은 가중치 0.1배 패널티
-        if penalized:
-            weights = [w * 0.1 if item["항목"] in penalized else w
-                       for item, w in zip(candidates, weights)]
+        # 이미 쓴 재료는 이름이 변형됐어도 찾아내 가중치를 낮춘다.
+        # 하드 제외를 쓰지 않는 이유: 후보 풀이 작아 전부 제외되는 경우가 생기고,
+        # 그때 fallback으로 되돌아가면 억제가 통째로 무효화된다.
+        if used:
+            weights = [
+                w * REPEAT_PENALTY
+                if any(is_same_thing(item["항목"], u) for u in used) else w
+                for item, w in zip(candidates, weights)
+            ]
             total = sum(weights)
             if total > 1e-8:
                 weights = [w / total for w in weights]
 
         chosen = random.choices(candidates, weights=weights, k=min(n, len(candidates)))
-        # 중복 제거
         seen, result = set(), []
         for item in chosen:
             name = item["항목"]
             if name not in seen:
                 seen.add(name)
                 result.append(name)
-        # 부족하면 보충 (패널티 항목 제외 우선)
         if len(result) < n:
             remaining = [i for i in candidates if i["항목"] not in seen]
             extra = random.sample(remaining, min(n - len(result), len(remaining)))
             result += [i["항목"] for i in extra]
         return result
 
-    penalized = penalized_objects or set()
-    bg  = sample_category(elements.get("배경",  []), N_BACKGROUND, excluded=excluded_backgrounds)
-    obj = sample_category(elements.get("오브제", []), N_OBJECT,    penalized=penalized)
-    emo = sample_category(elements.get("감정",  []), N_EMOTION)
+    bg  = sample_category(elements.get("배경",  []), n_bg,  used=used_backgrounds)
+    obj = sample_category(elements.get("오브제", []), n_obj, used=used_objects)
+    emo = sample_category(elements.get("감정",  []), n_emo)
     return bg, obj, emo
 
 
 def build_context(previous_stories: list) -> str:
-    """COHERENCE에 따라 이전 장면 컨텍스트 구성"""
-    if not previous_stories or COHERENCE < 0.3:
+    """CONTEXT_LEVEL에 따라 직전 장면 컨텍스트 구성.
+
+    직전 1편까지만 넘긴다. 이전 장면 전체를 넘기면 프롬프트가 수천 자로 불어나
+    모델이 새 장면을 쓰는 대신 같은 장면을 계속 이어쓴다.
+    """
+    if not previous_stories or CONTEXT_LEVEL <= 0:
         return ""
-    if COHERENCE < 0.7:
-        last_para = previous_stories[-1].strip().split("\n\n")[-1]
+    last = previous_stories[-1].strip()
+    if CONTEXT_LEVEL < 1.0:
+        last_para = last.split("\n\n")[-1]
         return f"[직전 장면 마지막 문단]\n{last_para}\n\n"
-    context = ""
-    for i, story in enumerate(previous_stories, 1):
-        context += f"[장면 {i}]\n{story}\n\n"
-    return context
+    return f"[직전 장면]\n{last}\n\n"
 
 
 # ════════════════════════════════════════════════
@@ -360,12 +602,33 @@ def check_story(story: str, truncated: bool = False) -> list:
         problems.append(f"분량이 부족하다({n}자). 공백 제외 {TARGET_CHARS}자 이상으로 쓸 것.")
     if n > MAX_CHARS:
         problems.append(f"분량이 너무 길다({n}자). 공백 제외 {TARGET_CHARS}자 안팎으로 줄일 것.")
-    hits = [w for w in BANNED if w in story]
+    hits = sorted({m.group() for w in BANNED
+                   for m in re.finditer(r"\S*" + re.escape(w) + r"\S*", story)})
     if hits:
         problems.append(f"금지 표현이 들어 있다: {hits}. 이 표현 없이 단정적으로 쓸 것.")
     if truncated or (story and story.rstrip()[-1] not in SENTENCE_ENDS):
         problems.append("글이 문장 중간에서 끊겼다. 마지막 문장까지 완결해서 쓸 것.")
     return problems
+
+
+def story_penalty(story: str, truncated: bool = False) -> float:
+    """초안끼리 우열을 가리는 벌점. 낮을수록 좋다.
+
+    문제 '개수'로 비교하면 분량 30자 미달과 금지표현 위반이 같은 무게가 되어,
+    규칙을 어긴 글이 채택될 수 있다. 위반 종류별로 무게를 다르게 둔다.
+    """
+    if not story.strip():
+        return 1e6                                  # 빈 글은 절대 채택하지 않는다
+    score = 0.0
+    if truncated or story.rstrip()[-1] not in SENTENCE_ENDS:
+        score += 1000.0                             # 문장이 끊긴 글은 사용 불가
+    score += 500.0 * sum(story.count(w) for w in BANNED)
+    n = count_no_space(story)
+    if n < MIN_CHARS:
+        score += MIN_CHARS - n                      # 분량은 벗어난 만큼만
+    elif n > MAX_CHARS:
+        score += n - MAX_CHARS
+    return score
 
 
 def generate_scene(client, scene_num: int,
@@ -375,7 +638,6 @@ def generate_scene(client, scene_num: int,
                    previous_backgrounds: list = None) -> str:
     context = build_context(previous_stories)
 
-    # 이전 장면 물리법칙/배경 금지 구성
     if used_physics or previous_backgrounds:
         lines = ["[이전 장면에서 이미 사용한 것 — 이번 장면에서 반복 금지]"]
         if used_physics:
@@ -395,9 +657,11 @@ def generate_scene(client, scene_num: int,
         오브제=", ".join(objects),
         감정=", ".join(emotions),
         목표글자수=TARGET_CHARS,
+        최소글자수=MIN_CHARS,
+        최대글자수=MAX_CHARS,
     )
     prompt = base_prompt
-    best_story, best_problems = "", None
+    best_story, best_penalty = "", None
 
     for attempt in range(1, MAX_TRIES + 1):
         message = client.messages.create(
@@ -409,13 +673,19 @@ def generate_scene(client, scene_num: int,
         if truncated:
             print("  ※ max_tokens에 걸려 글이 잘렸습니다.")
 
+        # 텍스트 블록 없이 돌아오는 경우가 있다. 같은 프롬프트로 바로 다시 시도한다.
+        if not story:
+            print(f"  [재시도 {attempt}/{MAX_TRIES}] 빈 응답(텍스트 블록 없음)")
+            continue
+
         problems = check_story(story, truncated)
         if not problems:
             return story
 
         print(f"  [재시도 {attempt}/{MAX_TRIES}] {problems}")
-        if best_problems is None or len(problems) <= len(best_problems):
-            best_story, best_problems = story, problems
+        penalty = story_penalty(story, truncated)
+        if best_penalty is None or penalty < best_penalty:
+            best_story, best_penalty = story, penalty
 
         prompt = (
             base_prompt
@@ -425,7 +695,7 @@ def generate_scene(client, scene_num: int,
               "분량이 부족하면 문단을 추가해 장면을 더 길게 펼쳐라."
         )
 
-    print("  ※ 재시도 횟수를 모두 사용했습니다. 문제가 가장 적은 결과를 사용합니다.")
+    print(f"  ※ 재시도 횟수를 모두 사용했습니다. 벌점이 가장 낮은 결과를 사용합니다 (벌점 {best_penalty}).")
     return best_story
 
 
@@ -434,40 +704,39 @@ def generate_scene(client, scene_num: int,
 # ════════════════════════════════════════════════
 
 def main(input_path: str = "team2/output/parsed_scenes.json",
-         output_dir: str = "team2/output"):
+         output_dir: str = "team2/output",
+         blueprint_path: str = "team1/output/assembled_blueprint.json",
+         peaks_path: str = "team1/output/emotion_peaks.txt"):
 
     scenes = json.loads(Path(input_path).read_text(encoding="utf-8"))
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
     out    = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    # ── 장면1 재료: emotion_peaks 풀에서 추출 ──────────────
-    all_bg, all_obj, all_emo = [], [], []
-    print(f"[추출] {len(scenes)}개 타임테이블에서 요소 추출 중...")
-    for scene in scenes:
-        elements = extract_elements(client, scene["설명"], scene["사운드"])
-        all_bg.extend(elements.get("배경",  []))
-        all_obj.extend(elements.get("오브제", []))
-        all_emo.extend([
-            e.strip()
-            for e in scene["감정"].replace("(", ",").replace(")", ",").split(",")
-            if e.strip()
-        ])
+    # ── 공감 비율 → 재료 개수 결정 ──────────────────────
+    P = extract_empathy_ratio(peaks_path)
+    n_bg, n_obj, n_emo = calc_material_counts(P)
 
-    all_bg  = list(dict.fromkeys(all_bg))
-    all_obj = list(dict.fromkeys(all_obj))
-    all_emo = list(dict.fromkeys(all_emo))
+    # ── 장면1 재료: 1팀 blueprint 우선, 빈 카테고리만 emotion_peaks로 보충 ──
+    pool = load_blueprint_scene1(blueprint_path) or {"배경": [], "오브제": [], "감정": []}
 
+    missing = [c for c in ("배경", "오브제", "감정") if not pool.get(c)]
+    if missing:
+        print(f"  [폴백] blueprint에서 비어 있는 카테고리: {missing}")
+        peaks_pool = extract_peaks_pool(client, scenes)
+        for c in missing:
+            pool[c] = peaks_pool[c]
+
+    all_bg, all_obj, all_emo = pool["배경"], pool["오브제"], pool["감정"]
     print(f"  배경 후보 {len(all_bg)}개: {all_bg}")
     print(f"  오브제 후보 {len(all_obj)}개: {all_obj}")
     print(f"  감정 후보 {len(all_emo)}개: {all_emo}")
 
-    previous_stories         = []
-    current_vector           = None
-    all_used_physics         = []
-    all_previous_backgrounds = []   # 프롬프트 금지용 (샘플링된 배경 이름)
-    all_prev_bg_names        = []   # 샘플링 제외용 (elements 항목 이름)
-    object_history           = []   # 장면별 오브제 집합 (패널티 계산용)
+    previous_stories = []
+    current_vector   = None
+    all_used_physics = []
+    used_bg_names    = []   # 실제 글에 쓴 배경 — 프롬프트 금지 + 샘플링 패널티 공용
+    used_obj_names   = []   # 실제 글에 쓴 오브제 — 샘플링 패널티용
 
     for scene_num in range(1, 5):
         print(f"\n{'═'*50}")
@@ -476,11 +745,10 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
 
         # ── 재료 선택 ──────────────────────────────────────
         if scene_num == 1:
-            bg  = random.sample(all_bg,  min(N_BACKGROUND, len(all_bg)))
-            obj = random.sample(all_obj, min(N_OBJECT,     len(all_obj)))
-            emo = random.sample(all_emo, min(N_EMOTION,    len(all_emo)))
+            bg  = random.sample(all_bg,  min(n_bg,  len(all_bg)))
+            obj = random.sample(all_obj, min(n_obj, len(all_obj)))
+            emo = random.sample(all_emo, min(n_emo, len(all_emo)))
         else:
-            # 이전 장면 elements에서 Dream Drift + 코사인 샘플링
             prev_elements_path = out / f"scene{scene_num-1}_elements.json"
             prev_elements = json.loads(prev_elements_path.read_text(encoding="utf-8"))
             target_vector = dream_drift(current_vector)
@@ -488,15 +756,13 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
             print(f"  현재 벡터: {[round(x, 2) for x in current_vector]}")
             print(f"  목표 벡터: {[round(x, 2) for x in target_vector]}")
 
-            # 2장면 연속 등장한 오브제 → 패널티
-            penalized_obj = set()
-            if len(object_history) >= 2:
-                penalized_obj = object_history[-1] & object_history[-2]
+            merged = merge_candidates(prev_elements, all_bg, all_obj, all_emo)
 
             bg, obj, emo = sample_elements(
-                prev_elements, target_vector,
-                excluded_backgrounds=all_prev_bg_names if all_prev_bg_names else None,
-                penalized_objects=penalized_obj if penalized_obj else None,
+                merged, target_vector,
+                n_bg=n_bg, n_obj=n_obj, n_emo=n_emo,
+                used_backgrounds=used_bg_names or None,
+                used_objects=used_obj_names or None,
             )
 
         print(f"  배경: {bg}")
@@ -507,8 +773,8 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
         print(f"\n[생성] 장면{scene_num} 글 작성 중...")
         story = generate_scene(
             client, scene_num, bg, obj, emo, previous_stories,
-            used_physics=all_used_physics if all_used_physics else None,
-            previous_backgrounds=all_previous_backgrounds if all_previous_backgrounds else None,
+            used_physics=all_used_physics or None,
+            previous_backgrounds=used_bg_names or None,
         )
 
         # ── 저장 ───────────────────────────────────────────
@@ -533,7 +799,6 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
         elements_path = out / f"scene{scene_num}_elements.json"
         elements_path.write_text(json.dumps(elements, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        # 각 카테고리 출력
         for cat in ("배경", "오브제", "감정"):
             items = elements.get(cat, [])
             print(f"  {cat}: {[i['항목'] for i in items]}")
@@ -543,14 +808,9 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
             print(f"  물리법칙: {physics}")
             all_used_physics.extend(physics)
 
-        # 배경 금지 목록 누적
-        all_previous_backgrounds.extend(bg)
-        all_prev_bg_names.extend(item["항목"] for item in elements.get("배경", []))
+        used_bg_names.extend(bg)
+        used_obj_names.extend(obj)
 
-        # 오브제 히스토리 누적 (패널티 계산용)
-        object_history.append(set(item["항목"] for item in elements.get("오브제", [])))
-
-        # ── 현재 벡터 갱신 ─────────────────────────────────
         current_vector = compute_scene_vector(elements)
         print(f"  장면{scene_num} 벡터: {[round(x, 2) for x in current_vector]}")
 
@@ -580,13 +840,19 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
 
     export_path = out / "dream_scenes.json"
     export_path.write_text(
-        json.dumps({"scenes": export}, ensure_ascii=False, indent=2),
+        json.dumps({
+            "축순서": ["Pleasantness", "Attention", "Sensitivity", "Aptitude"],
+            "평가기준버전": "Hourglass of Emotions (Cambria et al., 2012)",
+            "scenes": export,
+        }, ensure_ascii=False, indent=2),
         encoding="utf-8"
     )
     print(f"\n  취합 완료 → {export_path}")
 
 
 if __name__ == "__main__":
-    inp = sys.argv[1] if len(sys.argv) > 1 else "team2/output/parsed_scenes.json"
-    out = sys.argv[2] if len(sys.argv) > 2 else "team2/output"
-    main(inp, out)
+    inp        = sys.argv[1] if len(sys.argv) > 1 else "team2/output/parsed_scenes.json"
+    out        = sys.argv[2] if len(sys.argv) > 2 else "team2/output"
+    blueprint  = sys.argv[3] if len(sys.argv) > 3 else "team1/output/assembled_blueprint.json"
+    peaks      = sys.argv[4] if len(sys.argv) > 4 else "team1/output/emotion_peaks.txt"
+    main(inp, out, blueprint, peaks)
