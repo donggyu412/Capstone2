@@ -39,17 +39,18 @@ body { background: #05070a; overflow: hidden; font-family: 'Courier New', monosp
   position: fixed; top: 0; right: 0; width: 210px; height: 100vh;
   background: rgba(0,0,0,.85); border-left: 1px solid rgba(255,255,255,.08);
   padding: 14px 12px; overflow-y: auto; color: #ccc; font-size: 11px; z-index: 9;
+  scrollbar-width: thin; scrollbar-color: #333 transparent;   /* [상세]를 펼쳐 스크롤이 생겨도 폭을 덜 먹어 줄이 덜 바뀐다(10-07) */
 }
 h2 { font-size: 12px; color: #fff; letter-spacing: 2px; margin-bottom: 2px; }
 .sub { font-size: 8px; color: #555; letter-spacing: 2px; margin-bottom: 14px; }
-.sec { font-size: 8px; color: #444; letter-spacing: 3px; text-transform: uppercase;
+.sec { font-size: 9px; color: #6a6a6a; letter-spacing: 2px; word-break: keep-all; text-transform: uppercase;
        border-bottom: 1px solid #1a1a1a; padding-bottom: 3px; margin: 12px 0 7px; }
 
 .mrow { display: flex; align-items: center; gap: 5px; margin-bottom: 5px; }
-.mlabel { width: 42px; font-size: 9px; color: #555; }
+.mlabel { width: 42px; font-size: 9px; color: #777; }
 .mbg { flex: 1; height: 4px; background: #111; border-radius: 2px; overflow: hidden; }
 .mfill { height: 100%; border-radius: 2px; transition: width .3s, background .5s; }
-.mval { width: 30px; text-align: right; font-size: 9px; color: #444; }
+.mval { width: 30px; text-align: right; font-size: 9px; color: #666; }
 
 .grow { display: flex; justify-content: space-between; gap: 6px; margin-bottom: 3px; font-size: 9px; white-space: nowrap; }
 .gk { color: #6a6a6a; flex-shrink: 0; } .gv { color: #ddd; font-weight: bold; overflow: hidden; text-overflow: ellipsis; }
@@ -58,10 +59,10 @@ h2 { font-size: 12px; color: #fff; letter-spacing: 2px; margin-bottom: 2px; }
    숫자 값과 달리 제목은 매 프레임 바뀌지 않아 줄 수가 흔들리지 않는다 */
 .grow.wrap { white-space: normal; align-items: flex-start; }
 .grow.wrap .gv { text-align: right; word-break: keep-all; line-height: 1.35; }
-.hint { font-size: 8px; color: #5a5a5a; margin: -1px 0 2px; letter-spacing: 0; line-height: 1.4; word-break: keep-all; }
+.hint { font-size: 9px; color: #8c8c8c; margin: -1px 0 2px; letter-spacing: 0; line-height: 1.4; word-break: keep-all; }
 /* 안내문(.hint)과 달리 '이 장면에 무엇이 걸렸나'를 말하는 줄 — 09-28 까지 #3a3a3a 라 검은 바탕에서 거의 안 읽혔다 */
 .hint.info { font-size: 9px; color: #8c8c8c; }
-.sub2 { font-size: 8px; color: #555; letter-spacing: 1px; margin: 7px 0 3px; }
+.sub2 { font-size: 9px; color: #6a6a6a; letter-spacing: 1px; margin: 7px 0 3px; }
 .sub2 i { color: #5a5a5a; font-style: normal; letter-spacing: 0; }
 /* 창발 변조 — 값이 길어 한 줄에 라벨과 같이 두면 잘린다. 전체 폭을 쓰고 줄바꿈을 허용한다. */
 .emg { font-size: 9px; color: #ddd; font-weight: bold; line-height: 1.5;
@@ -98,8 +99,11 @@ h2 { font-size: 12px; color: #fff; letter-spacing: 2px; margin-bottom: 2px; }
 
 /* 장면 제목은 09-25 부터 캔버스 안에 그린다(drawStoryMark) — 생성 이미지가
    이야기를 품고 있어야 한다는 피드백 7번. HTML 요소는 제거했다. */
-#foot { position: fixed; bottom: 18px; left: 24px; font-size: 9px;
-        letter-spacing: 3px; color: #3d3d3d; pointer-events: none; z-index: 8; }
+/* [상세] — 확인용 숫자·개발용 버튼을 접어 둔다(10-07). 펼친 상태는 페이지를 다시 열면 접힌다 */
+#more { margin-top: 14px; border-top: 1px solid #1a1a1a; padding-top: 6px; }
+#more summary { font-size: 9px; color: #777; letter-spacing: 3px; cursor: pointer; padding: 2px 0 4px; }
+#more summary:hover { color: #ccc; }
+#g-file { word-break: break-all; }
 </style>
 </head>
 <body>
@@ -119,56 +123,62 @@ h2 { font-size: 12px; color: #fff; letter-spacing: 2px; margin-bottom: 2px; }
   <h2>꿈의 소산</h2>
   <div class="sub">OPEN-ENDED DREAMING</div>
 
+  <!-- 10-07 패널 정리: 늘 보는 것만 위에 두고, 확인용 숫자·개발용 버튼은 맨 아래 [상세] 에 접었다.
+       피드백 7번(이야기→화면 근거: 참조·법칙) · 9번(사운드 창발: 창발 변조)에 답하는 줄은 위에 남긴다.
+       회색 8px 안내문은 마우스를 올리면 보이는 설명(title)으로 옮겼다. 결과물(mp4·PNG)에는 패널이 담기지 않는다. -->
   <div class="sec">서사</div>
-  <div id="acts"></div>
-  <div class="hint">막 클릭·←→ 이동 · 스페이스 머물기</div>
+  <div id="acts" title="막 클릭 · ←→ 이동 · 스페이스 머물기"></div>
   <button class="btn on navbtn" id="b-auto" onclick="toggleAuto()">자동 넘김</button>
   <div class="grow wrap"><span class="gk">장면</span><span class="gv" id="g-title">-</span></div>
   <div class="grow"><span class="gk">막</span><span class="gv" id="g-stage">-</span></div>
   <div class="grow"><span class="gk">감정</span><span class="gv" id="g-emo">-</span></div>
-  <div class="hint" id="g-emoW">-</div>
   <div class="hint info" id="g-src">-</div>
   <div class="hint info" id="g-art"></div>
   <div class="hint info" id="g-law"></div>
-  <div class="exprow">
-    <button class="btn" id="b-png" onclick="togglePngSave()">장면 저장</button>
-    <button class="btn" id="b-rec" onclick="toggleRecord()">녹화</button>
-  </div>
-  <button class="btn navbtn" id="b-fix" onclick="toggleFixRec(false)">영상 mp4 · 프레임 고정 (무음)</button>
-  <button class="btn navbtn" id="b-fix1" onclick="toggleFixRec(true)">이 장면만 mp4 · 흐름 확인용</button>
-  <div class="hint" id="g-exp">누를 때만 저장 · 처음 장면부터 한 바퀴 돌고 멈춤</div>
   <div class="warn" id="g-warn" style="display:none"></div>
+
+  <div class="sec">내보내기</div>
+  <button class="btn navbtn" id="b-png" onclick="togglePngSave()">장면 저장</button>
+  <button class="btn navbtn" id="b-fix" onclick="toggleFixRec(false)">영상 mp4 · 프레임 고정 (무음)</button>
+  <div class="hint" id="g-exp">누르면 첫 장면부터 한 바퀴 돌고 멈춤</div>
   <div class="mrow"><div class="mlabel">경과</div><div class="mbg"><div class="mfill" id="bar-prog" style="width:0%"></div></div><div class="mval" id="val-prog">0.00</div></div>
 
-
-  <div class="sec">입력이 움직이는 것</div>
+  <div class="sec" title="안개·바람·빛 ← 이미지 · 소리 ← 사운드 · 전부 × 감정">입력이 움직이는 것</div>
   <div class="mrow"><div class="mlabel">안개</div><div class="mbg"><div class="mfill" id="bar-fog" style="width:40%"></div></div><div class="mval" id="val-fog">0.40</div></div>
   <div class="mrow"><div class="mlabel">바람</div><div class="mbg"><div class="mfill" id="bar-wind" style="width:40%"></div></div><div class="mval" id="val-wind">0.40</div></div>
   <div class="mrow"><div class="mlabel">빛</div><div class="mbg"><div class="mfill" id="bar-glow" style="width:40%"></div></div><div class="mval" id="val-glow">0.40</div></div>
   <div class="mrow"><div class="mlabel">소리</div><div class="mbg"><div class="mfill" id="bar-snd" style="width:50%"></div></div><div class="mval" id="val-snd">0.50</div></div>
-  <div class="hint">안개·바람·빛←이미지 · 소리←사운드 · 전부 ×감정</div>
 
   <div class="sec">사운드 변환</div>
   <button class="btn on fxbtn" id="b-fx" onclick="toggleFx()">변환 듣는 중 · 원음으로</button>
-  <div class="grow"><span class="gk">피치</span><span class="gv" id="g-rate">-</span></div>
-  <div class="grow"><span class="gk">공간 · 대역</span><span class="gv" id="g-space">-</span></div>
-  <div class="sub2">창발 변조 <i>가만히 둬도 계속 움직입니다</i></div>
+  <div class="sub2" title="가만히 둬도 계속 움직입니다 · 잔향 ← DB 근접도 · 호흡 ← 유전자 · 피치요동 ← 소용돌이">창발 변조</div>
   <div class="emg" id="g-aemg">-</div>
-  <div class="hint2">잔향←DB근접도 · 호흡←유전자 · 피치요동←소용돌이</div>
-  <div class="grow"><span class="gk">체인</span><span class="gv" id="g-chain">-</span></div>
 
   <div class="sec">아피찻퐁 DB · 유전 알고리즘</div>
   <div class="mrow"><div class="mlabel">근접도</div><div class="mbg"><div class="mfill" id="bar-near" style="width:0%"></div></div><div class="mval" id="val-near">-</div></div>
-  <div class="grow"><span class="gk">채도 화면/목표</span><span class="gv" id="g-meas">-</span></div>
-  <div class="grow"><span class="gk">난색 화면/목표</span><span class="gv" id="g-warm">-</span></div>
-  <div class="grow"><span class="gk">색 보정</span><span class="gv" id="g-col">-</span></div>
   <div class="grow"><span class="gk">세대 · 적합도</span><span class="gv" id="g-gen">-</span></div>
-  <div class="grow"><span class="gk">해체(돌연변이율)</span><span class="gv" id="g-mut">-</span></div>
-  <div class="grow"><span class="gk">아피찻퐁 DB</span><span class="gv" id="g-db">-</span></div>
-  <div class="grow"><span class="gk">구도 관여</span><span class="gv" id="g-comp">-</span></div>
-</div>
 
-<div id="foot">STANDBY</div>
+  <details id="more">
+    <summary>상세</summary>
+    <div class="sub2">감정 배율</div>
+    <div class="hint info" id="g-emoW">-</div>
+    <div class="hint info" id="g-file">-</div>
+    <div class="sub2">확인용 기록</div>
+    <button class="btn navbtn" id="b-fix1" onclick="toggleFixRec(true)">이 장면만 mp4 · 흐름 확인용</button>
+    <button class="btn navbtn" id="b-rec" onclick="toggleRecord()" title="실시간 화면 + 엔진이 변형한 소리를 webm 으로 — 이 컴퓨터에선 느리게 돈다">녹화 (webm · 소리 포함)</button>
+    <div class="sub2">사운드</div>
+    <div class="grow"><span class="gk">피치</span><span class="gv" id="g-rate">-</span></div>
+    <div class="grow"><span class="gk">공간 · 대역</span><span class="gv" id="g-space">-</span></div>
+    <div class="grow"><span class="gk">체인</span><span class="gv" id="g-chain">-</span></div>
+    <div class="sub2">DB · 유전 알고리즘</div>
+    <div class="grow"><span class="gk">채도 화면/목표</span><span class="gv" id="g-meas">-</span></div>
+    <div class="grow"><span class="gk">난색 화면/목표</span><span class="gv" id="g-warm">-</span></div>
+    <div class="grow"><span class="gk">색 보정</span><span class="gv" id="g-col">-</span></div>
+    <div class="grow"><span class="gk">해체(돌연변이율)</span><span class="gv" id="g-mut">-</span></div>
+    <div class="grow"><span class="gk">아피찻퐁 DB</span><span class="gv" id="g-db">-</span></div>
+    <div class="grow"><span class="gk">구도 관여</span><span class="gv" id="g-comp">-</span></div>
+  </details>
+</div>
 
 <script>
 /* ════════════════════════════════════════════════════════════════════
@@ -1028,8 +1038,8 @@ async function showSource() {
   try { info = await (await fetch(SERVER + '/api/source')).json(); } catch (e) { return; }
   SRC_INFO = info;
   const kind = info.mode === 'storyboard' ? '2팀 스토리보드' : '더미 기준 자료';
-  $('g-src').textContent = '입력 · ' + kind + ' (' + (info.file || '없음') + ') · ' +
-                           info.drawable + '/' + info.total + '장면 그림';
+  $('g-src').textContent = '입력 · ' + kind + ' · ' + info.drawable + '/' + info.total + '장면 그림';
+  $('g-file').textContent = '파일 · ' + (info.file || '없음');   // 경로는 길어 패널 폭을 넘는다 → [상세]에서 줄바꿈
   if (!scenes.length) {
     $('g-title').textContent = '그릴 배경 이미지 없음';
     sceneWarn = info.total
@@ -2310,10 +2320,6 @@ function updateUI() {
   st('g-comp', Object.keys(AP_MAP).length
       ? (AP_COMP < 0.005 ? '꺼짐 (09-13 동작)' : '×' + AP_COMP.toFixed(2) + ' (12x8)') : '없음');
 
-  const foot = $('foot');
-  if (foot) foot.textContent = isRunning
-    ? actName + '  ·  ' + ACTS[actName].name + '  ·  GEN ' + String(generation).padStart(4, '0')
-    : 'STANDBY';
 }
 
 /* ── 10. 시작 & 루프 ─────────────────────────── */
@@ -2472,6 +2478,7 @@ function maybeExport() {
    - video.json 에 장면별 시작 시각을 적는다 — 4팀이 장면 전환에 맞춰 자를 수 있게.
    ※ 탭이 가려지면 브라우저가 그리기를 멈춰 영상도 멈춘다. 녹화 중에는 탭을 앞에 둔다. */
 let rec = null, recDest = null;
+const REC_LABEL = '녹화 (webm · 소리 포함)';   // 10-07 패널 정리 — [상세]로 옮기며 무엇을 담는지 이름에 적었다
 function recMime() {
   const c = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
   return c.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
@@ -2531,7 +2538,7 @@ function stepRecord() {
 function stopRecord() {
   if (!rec) return;
   if (rec.state === 'wait') {                // 시작 전이면 취소만
-    rec = null; setBtn('b-rec', false, '녹화', 'rec'); expMsg('녹화 취소'); return;
+    rec = null; setBtn('b-rec', false, REC_LABEL, 'rec'); expMsg('녹화 취소'); return;
   }
   if (rec.state !== 'rec') return;
   rec.state = 'stop'; rec.dur = recTime();
@@ -2564,7 +2571,7 @@ function uploadRecord() {
     }).catch(e => {
       expMsg('녹화 저장 실패 — 서버를 확인하세요');
       console.error('[녹화]', e);
-    }).finally(() => { rec = null; setBtn('b-rec', false, '녹화', 'rec'); });
+    }).finally(() => { rec = null; setBtn('b-rec', false, REC_LABEL, 'rec'); });
 }
 
 /* ── 영상 mp4 — 프레임 고정 녹화 (09-29) ─────────────────────
