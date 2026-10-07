@@ -1,0 +1,169 @@
+{
+ "run": "20261007-154653_storyboard",
+ "scenes": [
+  {
+   "stage": "기",
+   "title": "물방울 떨어지는 천장과 젖은 바닥",
+   "emotion": "공포",
+   "emotion_src": "2팀 대표 감정(main_emotion)",
+   "intensity": 0.8,
+   "backgrounds": [
+    "물방울 떨어지는 천장과 젖은 바닥",
+    "걸을수록 넓어지는 녹슨 철판 방",
+    "냉동액 섞인 웅덩이 주변 공간"
+   ],
+   "reference_artists": "아피찻퐁 93% · 디갈라카스 7%",
+   "artist_weights": {
+    "digalakis": 0.067
+   },
+   "artist_basis": {
+    "digalakis": [
+     "물결",
+     "얼음"
+    ]
+   },
+   "dream_laws": [],
+   "dream_laws_total": 5,
+   "moisture": [],
+   "source_image": "/media/scene_01.png",
+   "width": 1920,
+   "height": 1080,
+   "captured_scene_frame": 2250,
+   "captured_at": "2026-10-07T06:48:24.830Z",
+   "engine": {
+    "GLOW_SIZE": 0.7,
+    "BASE_ALPHA": 0.01,
+    "AP_COMP": 0.8,
+    "NP2": 14000
+   },
+   "act": 1,
+   "files": {
+    "background": "scene_01.png",
+    "with_title": "scene_01_title.png"
+   }
+  },
+  {
+   "stage": "승",
+   "title": "복도",
+   "emotion": "공포",
+   "emotion_src": "2팀 대표 감정(main_emotion)",
+   "intensity": 0.8,
+   "backgrounds": [
+    "복도",
+    "불규칙하게 깜박이는 형광등",
+    "금이 간 타일 바닥",
+    "색 바랜 초록 벽과 벗겨진 페인트",
+    "푸른빛 냉동액 웅덩이"
+   ],
+   "reference_artists": "아피찻퐁 83% · 폰타나 17%",
+   "artist_weights": {
+    "fontana": 0.167
+   },
+   "artist_basis": {
+    "fontana": [
+     "푸른"
+    ]
+   },
+   "dream_laws": [],
+   "dream_laws_total": 7,
+   "moisture": [],
+   "source_image": "/media/scene_02.png",
+   "width": 1920,
+   "height": 1080,
+   "captured_scene_frame": 2250,
+   "captured_at": "2026-10-07T06:56:07.408Z",
+   "engine": {
+    "GLOW_SIZE": 0.7,
+    "BASE_ALPHA": 0.01,
+    "AP_COMP": 0.8,
+    "NP2": 14000
+   },
+   "act": 2,
+   "files": {
+    "background": "scene_02.png",
+    "with_title": "scene_02_title.png"
+   }
+  },
+  {
+   "stage": "전",
+   "title": "금이 간 타일 바닥",
+   "emotion": "공포",
+   "emotion_src": "2팀 대표 감정(main_emotion)",
+   "intensity": 0.75,
+   "backgrounds": [
+    "금이 간 타일 바닥",
+    "낡은 선반이 늘어선 복도",
+    "흔들리는 알전구 조명"
+   ],
+   "reference_artists": "아피찻퐁 100%",
+   "artist_weights": {},
+   "artist_basis": {},
+   "dream_laws": [],
+   "dream_laws_total": 5,
+   "moisture": [],
+   "source_image": "/media/scene_03.png",
+   "width": 1920,
+   "height": 1080,
+   "captured_scene_frame": 2250,
+   "captured_at": "2026-10-07T07:03:29.441Z",
+   "engine": {
+    "GLOW_SIZE": 0.7,
+    "BASE_ALPHA": 0.01,
+    "AP_COMP": 0.8,
+    "NP2": 14000
+   },
+   "act": 3,
+   "files": {
+    "background": "scene_03.png",
+    "with_title": "scene_03_title.png"
+   }
+  },
+  {
+   "stage": "결",
+   "title": "좁은 서가 통로",
+   "emotion": "공포",
+   "emotion_src": "2팀 대표 감정(main_emotion)",
+   "intensity": 0.8,
+   "backgrounds": [
+    "좁은 서가 통로",
+    "녹슨 철제 선반",
+    "흔들리는 알전구 조명"
+   ],
+   "reference_artists": "아피찻퐁 97% · 디갈라카스 3%",
+   "artist_weights": {
+    "digalakis": 0.033
+   },
+   "artist_basis": {
+    "digalakis": [
+     "정적"
+    ]
+   },
+   "dream_laws": [],
+   "dream_laws_total": 3,
+   "moisture": [],
+   "source_image": "/media/scene_04.png",
+   "width": 1920,
+   "height": 1080,
+   "captured_scene_frame": 2250,
+   "captured_at": "2026-10-07T07:13:04.845Z",
+   "engine": {
+    "GLOW_SIZE": 0.7,
+    "BASE_ALPHA": 0.01,
+    "AP_COMP": 0.8,
+    "NP2": 14000
+   },
+   "act": 4,
+   "files": {
+    "background": "scene_04.png",
+    "with_title": "scene_04_title.png"
+   }
+  }
+ ],
+ "input_mode": "storyboard",
+ "input_file": "input/storyboard/dream_scenes.json",
+ "layers": {
+  "background": "서사 표지 없는 배경 — 오브제 합성용",
+  "with_title": "화면 그대로 (막 · 제목 · 감정 표지)"
+ },
+ "note": "장면 한가운데(sceneFrame 2250)의 대표 프레임. 실시간 캔버스이므로 같은 입력이어도 매번 조금씩 다르다(창발)."
+}
