@@ -21,6 +21,8 @@
   translations.json                        번역 기록 — 이상한 번역은 여기서 고치고 다시 돌리면 된다
 
 필요 패키지: pip install pillow "rembg[cpu]" deep-translator scipy
+누끼 모델은 --rembg-model 로 고른다 (기본 birefnet-general, 처음 실행 때 1GB 안팎 내려받음).
+최종 제출물은 output_objects_raw 의 원본으로 여러 모델을 돌려 손으로 고르는 것이 가장 낫다 (compare.py).
 ComfyUI 는 미리 켜 두고(run_nvidia_gpu.bat), models/loras 에 dream_object_lora.safetensors 가 있어야 한다.
 """
 import argparse
@@ -32,7 +34,7 @@ import urllib.request
 from io import BytesIO
 
 import numpy as np
-from PIL import Image, ImageChops, ImageFilter
+from PIL import Image
 
 # 지난 스토리보드에서 검수한 번역 — 자동 번역보다 우선한다
 OBJ_ENGLISH_MAP = {
@@ -184,36 +186,49 @@ def get_image(server, filename, subfolder, folder_type):
 
 
 # ─────────────────────────────────────────────
-# 누끼 — 두 모델 마스크를 합치고(흰 물체가 흰 배경에 지워지지 않게) 안쪽 구멍을 메운다
+# 누끼 — rembg 한 모델로 따고, 물체 '안쪽'에 뚫린 구멍 중 배경색이 아닌 것만 메운다
+#   (밤색 서류철 가운데 검은 마름모처럼 물체의 일부가 구멍으로 잘리는 것을 막고,
+#    그림자 형상의 팔 사이처럼 진짜 배경이 보이는 틈은 그대로 둔다)
+#   모델 비교: u2net · isnet-general-use · birefnet-general · bria-rmbg — 손으로 고를 때는 compare.py
 # ─────────────────────────────────────────────
-_sessions = None
+_session = None
 
 
-def remove_bg(img):
-    global _sessions
+def remove_bg(img, model="birefnet-general", hole_min_diff=30.0):
+    global _session
     from rembg import new_session, remove
-    from scipy.ndimage import binary_fill_holes
-    if _sessions is None:
-        _sessions = (new_session("u2net"), new_session("isnet-general-use"))
+    from scipy.ndimage import binary_fill_holes, label
+    if _session is None or _session[0] != model:
+        _session = (model, new_session(model))
     src = img.convert("RGB")
-    a1 = remove(src, session=_sessions[0], only_mask=True).convert("L")
-    a2 = remove(src, session=_sessions[1], only_mask=True).convert("L")
-    a = np.array(ImageChops.lighter(a1, a2))
-    solid = binary_fill_holes(a > 64)
-    a = np.where(solid, 255, a).astype(np.uint8)
+    a = np.array(remove(src, session=_session[1], only_mask=True).convert("L"))
+    rgb = np.asarray(src).astype(np.float32)
+    border = np.concatenate([rgb[:4].reshape(-1, 3), rgb[-4:].reshape(-1, 3), rgb[:, :4].reshape(-1, 3), rgb[:, -4:].reshape(-1, 3)])
+    bg = np.median(border, 0)  # 배경색 — 테두리의 대표색
+    solid = a > 64
+    holes = binary_fill_holes(solid) & ~solid
+    lab, n = label(holes)
+    for k in range(1, n + 1):
+        m = lab == k
+        if np.linalg.norm(rgb[m].mean(0) - bg) > hole_min_diff:  # 배경색과 다르면 물체의 일부 → 메운다
+            a[m] = 255
     out = src.convert("RGBA")
-    out.putalpha(Image.fromarray(a).filter(ImageFilter.GaussianBlur(0.8)))
+    out.putalpha(Image.fromarray(a))
     return out
 
 
 # ─────────────────────────────────────────────
 def main():
+    global TRANSLATIONS
     ap = argparse.ArgumentParser(description="꿈 오브제 생성 (ComfyUI + LoRA)")
     ap.add_argument("--story", default="dream_scenes.json")
     ap.add_argument("--out", default="output_objects")
     ap.add_argument("--server", default="http://127.0.0.1:8188")
     ap.add_argument("--lora", default="dream_object_lora.safetensors", help="빈 문자열이면 LoRA 없이")
     ap.add_argument("--lora-strength", type=float, default=0.6)
+    ap.add_argument("--rembg-model", default="birefnet-general",
+                    help="누끼 모델: birefnet-general(기본) · bria-rmbg · isnet-general-use · u2net")
+    ap.add_argument("--translations", default=TRANSLATIONS, help="번역 기록 파일 (시험할 때는 다른 이름으로)")
     ap.add_argument("--dry-run", action="store_true", help="번역·프롬프트만 확인하고 생성하지 않음")
     args = ap.parse_args()
 
@@ -224,12 +239,13 @@ def main():
         data = json.load(f)
     scenes = data.get("scenes", data) if isinstance(data, dict) else data
 
+    TRANSLATIONS = args.translations
     tr = load_translations()
     raw_dir = args.out + "_raw"
     manifest = {"story": os.path.basename(args.story), "checkpoint": "dreamshaper_8.safetensors",
                 "lora": args.lora or None, "lora_strength": args.lora_strength if args.lora else None,
                 "style_prompt": STYLE_PROMPT, "negative": NEGATIVE,
-                "background_removal": "rembg u2net + isnet-general-use 마스크 합집합 + 구멍 메우기", "scenes": []}
+                "background_removal": f"rembg {args.rembg_model} + 배경색이 아닌 안쪽 구멍만 메움", "scenes": []}
 
     for scene_data in scenes:
         n = int(scene_data.get("scene"))
@@ -263,7 +279,7 @@ def main():
                 info = hist["outputs"]["9"]["images"][0]
                 img = Image.open(BytesIO(get_image(args.server, info["filename"], info["subfolder"], info["type"])))
                 img.save(os.path.join(raw_folder, fname))
-                remove_bg(img).save(save_path, "PNG")
+                remove_bg(img, args.rembg_model).save(save_path, "PNG")
                 print(f"      저장 → {save_path}")
             except urllib.error.URLError:
                 print("      ! ComfyUI 에 연결할 수 없습니다 — run_nvidia_gpu.bat 으로 먼저 켜 주세요")
