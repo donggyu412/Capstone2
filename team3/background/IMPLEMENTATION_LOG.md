@@ -190,6 +190,8 @@ output/                  실행하면 자동 생성 — 장면별 배경판·표
 - **push 준비 확인:** `team3-background`(`7712f70`) 대비 실제 변경 = `index.html` 48줄(16:9 고정 · 30fps) + `PROJECT_BRIEF.md` 2줄 + 로그. `app.py`·`readme.txt` 는 줄바꿈만 다름. 새 파일: 2팀 wav 5개(`input/storyboard/`, 약 108MB · 단일 52MB) — 올릴지 사용자 결정.
 - **4팀(`team4` `0f8e65b`, 10-04 이후 변경 없음) 검토:** `INTERFACE.md` 의 'Team 3 확인 필요' 항목 = 우리가 답할 내용(파일명 · 경로 · 해상도 · 배경/완성 구분 · 오브제 폴더 · `scenes.json`). 입력 사본 `dream_scenes.json` = 우리와 동일. 렌더러·사운드 `NotImplementedError`. 브랜치에 10-03 `team3/` 사본 50개. → 바탕화면 `4팀_자료전달_문의_1007.md`(전달 자료 · 참고 2건 · 질문 7개).
 - **사운드 담당 정리(사용자):** 10/15 '독자적 창발 사운드'는 원래 3·4팀 몫이었으나, 1·2팀이 여유가 있어 각자 만들어 넘겨줌 → 4팀 문서에서 사운드 질문 삭제. push 는 2팀 wav 제외.
+- **push 완료(사용자 승인):** `team3-background` `7712f70 → 1277815` — `index.html`(16:9 고정 · 30fps) · BRIEF · 로그 3파일. wav · output 제외, `team3/background/` 밖 변경 0. 이유: 제출용 5분 배경·통합 mp4 가 이 엔진으로 기록됐는데 이전 깃 버전(창 크기 · 60fps)으로는 재현 불가.
+- **주석 정리 → push:** 10-03 에 지운 `tools/measure_dream.py` 를 가리키던 주석 2곳(`app.py` 39~40행 · `index.html` 787행)을 "지웠다"로 고침. 동작 변화 없음(`--dummy` 코드 경로는 그때 결정대로 남김). 원본은 `../Capstone2_Team3_1001/tools/` 에 있음.
 - **Next Step:** push(사용자와) → 4팀 답 → 통합 브랜치.
 
 ## [2026-10-07 · 52] 5분 통합 mp4 완료 · 2팀 5분 음원 결합
