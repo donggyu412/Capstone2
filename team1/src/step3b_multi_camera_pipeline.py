@@ -251,7 +251,10 @@ def analyze_emotion_batch(face_crops, exclude_neutral=True):
 
         # 모델 내부에서 np.array(리스트)로 한 번에 묶으려 하므로,
         # 크기가 제각각이면 실패한다 → 여기서 미리 동일 크기로 맞춘다.
-        resized = [cv2.resize(c, (224, 224)) for c in face_crops]
+        # DeepFace.analyze()는 내부에서 얼굴을 0~1로 정규화한 뒤 모델에 넣는다.
+        # 모델을 직접 호출할 때도 똑같이 정규화해야 한다. (0~255 그대로 넣으면
+        # 출력이 한 감정에 100%로 쏠려서 confidence가 0 아니면 100만 나옴)
+        resized = [cv2.resize(c, (224, 224)).astype("float32") / 255.0 for c in face_crops]
         predictions = model.predict(resized)   # shape: (n, 7) — 각 행이 한 얼굴의 7개 감정 점수
         predictions = np.atleast_2d(predictions)
 
@@ -285,12 +288,71 @@ def analyze_emotion_batch(face_crops, exclude_neutral=True):
         print(f"[감정분석 소요시간] {elapsed_ms:.1f} ms ({len(face_crops)}명 배치, 1명당 {per_face:.1f} ms)")
 
 
+class ScreenCapture:
+    """PC 화면을 카메라처럼 읽는다 (cv2.VideoCapture와 같은 isOpened/read/release 제공)
+
+    --sources 에 넣는 형식
+      screen              : 1번 모니터 전체
+      screen:2            : 2번 모니터 전체
+      screen:x,y,w,h      : 화면의 일부 영역 (예: screen:0,0,1280,720)
+    """
+    def __init__(self, token):
+        self._ok = False
+        try:
+            import mss
+        except ImportError:
+            print("[오류] 화면 캡처에는 mss가 필요합니다: pip install mss")
+            return
+        try:
+            # mss 10부터 mss.mss 대신 mss.MSS 권장 (구버전 호환 유지)
+            self._sct = (getattr(mss, "MSS", None) or mss.mss)()
+        except Exception as e:
+            print(f"[오류] 화면 캡처를 시작할 수 없습니다: {e}")
+            return
+        spec = token.split(":", 1)[1] if ":" in token else "1"
+        try:
+            if "," in spec:
+                x, y, w, h = [int(v) for v in spec.split(",")]
+                self._mon = {"left": x, "top": y, "width": w, "height": h}
+            else:
+                idx = int(spec)
+                if not 1 <= idx < len(self._sct.monitors):
+                    print(f"[오류] 모니터 {idx}번이 없습니다 (사용 가능: 1~{len(self._sct.monitors) - 1})")
+                    return
+                self._mon = self._sct.monitors[idx]
+        except ValueError:
+            print(f"[오류] 화면 소스 형식이 잘못됐습니다: {token}  (예: screen, screen:2, screen:0,0,1280,720)")
+            return
+        print(f"[화면 캡처] {token} → {self._mon['width']}x{self._mon['height']} "
+              f"(좌상단 {self._mon['left']},{self._mon['top']})")
+        self._ok = True
+
+    def isOpened(self):
+        return self._ok
+
+    def read(self):
+        if not self._ok:
+            return False, None
+        img = np.array(self._sct.grab(self._mon))          # BGRA
+        return True, cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+
+    def release(self):
+        if self._ok:
+            self._sct.close()
+            self._ok = False
+
+
+def is_screen_token(token):
+    return isinstance(token, str) and token.lower().startswith("screen")
+
+
 class CameraSource:
     def __init__(self, index, token):
         self.index = index
         self.token = token
-        self.label = f"cam{index}"
-        self.cap = cv2.VideoCapture(token)
+        self.is_screen = is_screen_token(token)
+        self.label = f"screen{index}" if self.is_screen else f"cam{index}"
+        self.cap = ScreenCapture(token) if self.is_screen else cv2.VideoCapture(token)
         self.tracker = SimpleTracker()
         self.last_emotion = {}
         self.last_analysis_time = -999.0
@@ -373,9 +435,9 @@ def main(source_tokens, output_path, interval_sec, narration_path=None,
 
                         if do_analysis and crops:
                             if use_batch:
-                                batch_results = analyze_emotion_batch(crops)
+                                batch_results = analyze_emotion_batch(crops, exclude_neutral=False)
                             else:
-                                batch_results = [analyze_emotion_single(c) for c in crops]
+                                batch_results = [analyze_emotion_single(c, exclude_neutral=False) for c in crops]
                         else:
                             batch_results = [None] * len(crops)
 
@@ -401,6 +463,10 @@ def main(source_tokens, output_path, interval_sec, narration_path=None,
                                 cv2.putText(frame, label, (x1, max(20, y1 - 10)),
                                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
+                    if cs.is_screen and frame.shape[1] > 640:
+                        # 화면 캡처는 미리보기를 작게 (미리보기 창이 다시 캡처되는 것 방지)
+                        scale = 640 / frame.shape[1]
+                        frame = cv2.resize(frame, None, fx=scale, fy=scale)
                     cv2.imshow(cs.window_name, frame)
 
                 if not any_frame_read:
