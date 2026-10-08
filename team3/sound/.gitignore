@@ -1,0 +1,6 @@
+# 그림 인식 결과 캐시 (다시 만들 수 있다)
+cache/
+# 결과물 — generate_sound.py 가 만드는 output/ 폴더 전체 (wav·mp3·해설·조각·만드는 중인 _building/)는 깃에 올리지 않는다
+output/
+__pycache__/
+*.pyc
