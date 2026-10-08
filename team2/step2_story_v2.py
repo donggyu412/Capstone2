@@ -217,46 +217,47 @@ def load_blueprint_scene1(blueprint_path: str = "team1/output/assembled_blueprin
             return None
         s = scenes[0]
 
-        # 배경
-        bg_raw = s.get("배경", "")
-        if isinstance(bg_raw, dict):
-            bg_list = [bg_raw.get("장소", "")] + list(bg_raw.get("분위기_상태", []))
-        elif isinstance(bg_raw, str) and bg_raw:
-            bg_list = [bg_raw]
-        else:
-            bg_list = bg_raw if isinstance(bg_raw, list) else []
+        def names(value, place_key=None, extra_key=None):
+            """문자열 / dict / 리스트가 섞여 오는 1팀 필드에서 이름만 꺼낸다.
 
-        bg_detail = s.get("배경_상세", "")
-        if isinstance(bg_detail, str) and bg_detail:
-            bg_list.append(bg_detail)
-        bg_list = [b for b in bg_list if b]
+            dict 항목의 이름은 '키워드'에 있다. '새_표현'은 새로 생성된 표현인지를
+            뜻하는 boolean 플래그이므로 이름으로 쓰면 True가 섞여 들어온다.
+            """
+            if value is None:
+                return []
+            if isinstance(value, str):
+                return [value.strip()] if value.strip() else []
+            if isinstance(value, dict):
+                # scene_handoff 형식: {"장소": ..., "분위기_상태": [...]}
+                if place_key and place_key in value:
+                    return names(value.get(place_key)) + names(value.get(extra_key))
+                for k in ("키워드", "이름", "항목"):
+                    v = value.get(k)
+                    if isinstance(v, str) and v.strip():
+                        return [v.strip()]
+                return []
+            if isinstance(value, list):
+                out = []
+                for item in value:
+                    out += names(item)
+                return out
+            return []
 
-        # 오브제 (주체 목록에서 키워드 또는 새_표현)
-        obj_list = []
-        for item in s.get("주체", []):
-            if isinstance(item, dict):
-                name = item.get("새_표현") or item.get("키워드") or item.get("이름", "")
-            else:
-                name = str(item)
-            if name:
-                obj_list.append(name)
-        # 엔티티_오브제 형식(scene_handoff)도 허용
-        for item in s.get("엔티티_오브제", []):
-            if isinstance(item, dict):
-                name = item.get("이름", "")
-            else:
-                name = str(item)
-            if name and name not in obj_list:
-                obj_list.append(name)
+        # 배경: 장소 + 분위기 상태
+        bg_list = names(s.get("배경"), place_key="장소", extra_key="분위기_상태")
+        bg_list += names(s.get("상태"))
+
+        # 오브제: 주체(엔티티·사물) + 사운드
+        obj_list = names(s.get("주체")) + names(s.get("엔티티_오브제")) + names(s.get("사운드"))
 
         # 감정
-        emo_raw = s.get("감정", "")
-        if isinstance(emo_raw, str) and emo_raw:
-            emo_list = [e.strip() for e in re.split(r"[,、]", emo_raw) if e.strip()]
-        elif isinstance(emo_raw, list):
-            emo_list = [str(e) for e in emo_raw if e]
-        else:
-            emo_list = []
+        emo_list = []
+        for e in names(s.get("감정")):
+            emo_list += [x.strip() for x in re.split(r"[,、]", e) if x.strip()]
+
+        bg_list = list(dict.fromkeys(b for b in bg_list if b))
+        obj_list = list(dict.fromkeys(o for o in obj_list if o))
+        emo_list = list(dict.fromkeys(emo_list))
 
         if not bg_list and not obj_list and not emo_list:
             print("  [blueprint] 재료 추출 실패 → 폴백")

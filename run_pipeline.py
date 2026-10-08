@@ -5,8 +5,13 @@ run_pipeline.py — 1팀 감정 추출 → 2팀 꿈 이야기 생성까지 한 �
 [흐름]
   1) team1/src/step3b_multi_camera_pipeline.py  관객 감정 → session_*.csv
   2) team1/src/step4_detect_peaks.py            감정 CSV + 타임테이블 → emotion_peaks.txt
-  3) team2/step1_parse.py                       emotion_peaks.txt → parsed_scenes.json
-  4) team2/step2_story_v2.py                    parsed_scenes.json → dream_scenes.json
+  3) team1/src/step5_extract_keywords.py        emotion_peaks.txt → keyword_pool.json
+     team1/src/step6_assemble_blueprint.py      keyword_pool.json → assembled_blueprint.json
+  4) team2/step1_parse.py                       emotion_peaks.txt → parsed_scenes.json
+  5) team2/step2_story_v2.py                    parsed_scenes.json → dream_scenes.json
+
+step6의 설계도는 team2 step2가 장면1 재료로 쓴다. 설계도가 없으면 step2가
+emotion_peaks에서 직접 재료를 뽑는 대안 경로로 동작한다.
 
 각 스크립트는 수정하지 않고 그대로 호출합니다. 경로는 전부 절대 경로로 넘겨서
 어느 폴더에서 실행하든 같은 결과가 나옵니다.
@@ -39,10 +44,12 @@ TEAM2_OUT = TEAM2 / "output"
 
 STEP3B = TEAM1_SRC / "step3b_multi_camera_pipeline.py"
 STEP4 = TEAM1_SRC / "step4_detect_peaks.py"
+STEP5 = TEAM1_SRC / "step5_extract_keywords.py"
+STEP6 = TEAM1_SRC / "step6_assemble_blueprint.py"
 T2_STEP1 = TEAM2 / "step1_parse.py"
 T2_STEP2 = TEAM2 / "step2_story_v2.py"
 
-STAGES = ["capture", "peaks", "parse", "story"]
+STAGES = ["capture", "peaks", "blueprint", "parse", "story"]
 
 
 # ──────────────────────────────────────────────────────────
@@ -130,6 +137,16 @@ def main():
                     help="혼자 테스트할 땐 1")
     pk.add_argument("--include-neutral", action="store_true")
 
+    # step5·6 옵션
+    bp = ap.add_argument_group("step5·6 설계도 진화")
+    bp.add_argument("--iters", type=int, default=20000,
+                    help="step6 진화 탐색 횟수 (기본 20000, 약 25초)")
+    bp.add_argument("--bins", type=int, default=8, help="MAP-Elites 격자 한 변 칸 수")
+    bp.add_argument("--seed", type=int, default=None,
+                    help="고정하면 매번 같은 설계도, 비우면 매번 다른 꿈")
+    bp.add_argument("--curiosity", type=float, default=0.3,
+                    help="설계도 선택 시 기묘함 가중치 (높이면 더 기괴한 꿈)")
+
     # 실행 범위
     ap.add_argument("--until", choices=STAGES, default="story",
                     help="이 단계까지만 실행 (기본: story = 끝까지)")
@@ -152,18 +169,21 @@ def main():
         require_file(args.narration, "내레이션")
     if args.emotion_csv:
         require_file(args.emotion_csv, "감정 CSV")
-    if stop_at >= STAGES.index("story") and not load_api_key():
+    # step5도 키워드 뱅크에 없는 장면은 LLM으로 뽑으므로 키가 필요하다
+    if stop_at >= STAGES.index("blueprint") and not load_api_key():
         sys.exit("[중단] ANTHROPIC_API_KEY가 없습니다. 환경변수나 Capstone2/.env 또는 team2/.env에 넣어주세요.\n"
-                 "       (story 단계 없이 돌리려면 --until parse)")
+                 "       (LLM 단계 없이 돌리려면 --until peaks)")
 
     emotion_csv = Path(args.emotion_csv).resolve() if args.emotion_csv \
         else TEAM1_OUT / f"session_{session}.csv"
     peaks_txt = TEAM1_OUT / "emotion_peaks.txt"
+    keyword_pool = TEAM1_OUT / "keyword_pool.json"
+    blueprint_json = TEAM1_OUT / "assembled_blueprint.json"
     parsed_json = TEAM2_OUT / "parsed_scenes.json"
 
     # ── 1) step3b: 감정 추출 ─────────────────────────────────────
     if args.sources:
-        banner("1/4  [1팀 step3b] 관객 감정 추출  (q 누르면 종료)")
+        banner("1/5  [1팀 step3b] 관객 감정 추출  (q 누르면 종료)")
         cmd = [sys.executable, STEP3B,
                "--sources", *args.sources,
                "--output", emotion_csv,
@@ -177,7 +197,7 @@ def main():
         run(cmd, TEAM1_SRC, "step3b")
         require_file(emotion_csv, "step3b 결과 CSV")
     else:
-        banner("1/4  [1팀 step3b] 건너뜀 — 기존 CSV 사용")
+        banner("1/5  [1팀 step3b] 건너뜀 — 기존 CSV 사용")
         print(f"감정 CSV: {emotion_csv}")
 
     if stop_at == STAGES.index("capture"):
@@ -185,7 +205,7 @@ def main():
         return
 
     # ── 2) step4: 공감 피크 ──────────────────────────────────────
-    banner("2/4  [1팀 step4] 공감 피크 탐지")
+    banner("2/5  [1팀 step4] 공감 피크 탐지")
     cmd = [sys.executable, STEP4,
            "--timetable", Path(args.timetable).resolve(),
            "--emotion_csv", emotion_csv,
@@ -212,21 +232,47 @@ def main():
         print("\n--until peaks → 여기서 종료.")
         return
 
-    # ── 3) 2팀 step1: 피크 파싱 ──────────────────────────────────
-    banner("3/4  [2팀 step1] 피크 → parsed_scenes.json")
+    # ── 3) 1팀 step5·6: 키워드 풀 → 설계도 진화 ──────────────────
+    banner("3/5  [1팀 step5·6] 키워드 풀 + 설계도 진화")
+    run([sys.executable, STEP5,
+         "--peaks", peaks_txt,
+         "--timetable", Path(args.timetable).resolve(),
+         "--bank", TEAM1_OUT / "keyword_bank.json",
+         "--output", keyword_pool], TEAM1_SRC, "step5")
+    require_file(keyword_pool, "step5 결과 키워드 풀")
+
+    cmd = [sys.executable, STEP6,
+           "--pool", keyword_pool,
+           "--out-dir", TEAM1_OUT,
+           "--iters", args.iters,
+           "--bins", args.bins,
+           "--curiosity", args.curiosity]
+    if args.seed is not None:
+        cmd += ["--seed", args.seed]
+    run(cmd, TEAM1_SRC, "step6")
+    require_file(blueprint_json, "step6 결과 설계도")
+    print(f"설계도 → {blueprint_json}")
+
+    if stop_at == STAGES.index("blueprint"):
+        print(f"\n--until blueprint → 여기서 종료. 결과: {blueprint_json}")
+        return
+
+    # ── 4) 2팀 step1: 피크 파싱 ──────────────────────────────────
+    banner("4/5  [2팀 step1] 피크 → parsed_scenes.json")
     run([sys.executable, T2_STEP1, peaks_txt, TEAM2_OUT], ROOT, "team2 step1")
 
     if stop_at == STAGES.index("parse"):
         print(f"\n--until parse → 여기서 종료. 결과: {parsed_json}")
         return
 
-    # ── 4) 2팀 step2: 꿈 이야기 ──────────────────────────────────
-    banner("4/4  [2팀 step2] 꿈 이야기 4장면 생성")
+    # ── 5) 2팀 step2: 꿈 이야기 ──────────────────────────────────
+    banner("5/5  [2팀 step2] 꿈 이야기 4장면 생성")
     run([sys.executable, T2_STEP2, parsed_json, TEAM2_OUT], ROOT, "team2 step2")
 
     banner("전체 완료")
     print(f"  감정 CSV     : {emotion_csv}")
     print(f"  공감 피크    : {peaks_txt}")
+    print(f"  설계도       : {blueprint_json}")
     print(f"  파싱 결과    : {parsed_json}")
     print(f"  꿈 이야기    : {TEAM2_OUT / 'dream_scenes.json'}")
 
