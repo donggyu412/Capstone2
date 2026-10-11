@@ -337,6 +337,53 @@ const EMO = Object.assign({}, EMO_NEUTRAL);          // 지금 실제로 걸려 
 let emoTarget = Object.assign({}, EMO_NEUTRAL);      // 이번 장면이 요구하는 가중치
 let emoName = '중립';                                // 패널 표기용
 
+/* ── 1-b'. 감정 색조 (10-11) ─────
+   10/8 발표 검토: "흑백 중심의 이미지 외에 … 감정 상태에 따라 다양한 색감 … 때로는 어둡게, 때로는 화려하게".
+   위 EMOTIONS 는 전부 1.0 근처에 묶여 있고 DB 과녁도 허용편차 절반 안이라, 감정이 달라도 화면 색은
+   거의 같았다(10-11 실측: 엔진 화면 채도 기·승·전 0.17~0.23). 여기서는 감정마다 색조 하나를 정해
+   파편과 안개의 색을 '휘도는 그대로 둔 채' 그 색 쪽으로 옮긴다. 밝은 파편(하이라이트)도 함께 옮긴다 —
+   화면이 흑백으로 읽힌 까닭이 DB 색 보정을 받지 않는 흰 하이라이트였기 때문이다.
+     c     색조 (R,G,B)
+     amt   옮기는 깊이 (0 = 원래 색, 1 = 완전히 그 색) — intensity 가 곱해진다
+     warm  난색인가 (0/1) — DB 난색 과녁을 같은 쪽으로 민다. 안 밀면 폐루프가 색조를 오차로 읽어 되감는다
+     lum   밝기 배율 — '때로는 어둡게, 때로는 화려하게'. 빛 배율(glowNow)에 곱한다. 1 = 그대로
+     simple 단순함 (0~1) — '때로는 단순하게'. 평평한 중간 톤에 앉은 파편을 비워 윤곽만 남긴다(막의 sparse 에 더한다)
+   ※ 1팀 7종에만 건다. 옛 라벨(불안·우울…)은 더미와 측정 기준값이 쓰므로 그대로 둔다.
+   ※ 값은 잠정 — 사용자 육안으로 확정한다.
+   시험: `?tone=0` 이 단계 전체를 끈다(이전 화면) · `?emo=기쁨,슬픔,분노,놀람` 장면 순서대로 감정을 바꿔 본다
+         · `?lum=0` 밝기 축만 끈다 · `?simple=0` 단순함 축만 끈다 · `?wash=0~1` 잔상 색의 세기. */
+const EMO_TONE = {
+  '기쁨': { c:[255,196, 92], amt:0.55, warm:1, lum:1.35, simple:0.0 },   // 금빛 — 밝게
+  '슬픔': { c:[ 84,128,235], amt:0.50, warm:0, lum:0.70, simple:0.6 },   // 깊은 파랑 — 어둡고 단순하게
+  '분노': { c:[240, 62, 44], amt:0.60, warm:1, lum:1.15, simple:0.0 },   // 붉음
+  '공포': { c:[104, 78,200], amt:0.35, warm:0, lum:0.85, simple:0.0 },   // 남보라 — 어둡게
+  '놀람': { c:[255,120,210], amt:0.55, warm:0, lum:1.50, simple:0.0 },   // 자홍 — 화려하게
+  '혐오': { c:[132,160, 60], amt:0.45, warm:0, lum:0.80, simple:0.4 },   // 탁한 풀빛 — 조금 비운다
+};
+const TONE_LUM_ON = new URLSearchParams(location.search).get('lum') !== '0';
+const TONE_SIMPLE_ON = new URLSearchParams(location.search).get('simple') !== '0';
+const TONE_ON = new URLSearchParams(location.search).get('tone') !== '0';
+const EMO_TEST = (new URLSearchParams(location.search).get('emo') || '').split(',').map(s => s.trim()).filter(Boolean);
+const TONE_WASH = (() => { const v = new URLSearchParams(location.search).get('wash'); return v === null || isNaN(+v) ? 0.08 : clamp(+v, 0, 1); })();   // 잔상에 색이 도는 세기(drawVeil ③) · 시험 `?wash=0~1`
+const TONE_SAT = 0.45;                              // 색조가 온전히 걸렸을 때 폐루프가 쫓을 화면 채도
+const TONE = { r: 1, g: 1, b: 1, amt: 0, warm: 0, lum: 1, simple: 0 };  // 지금 걸려 있는 색조 (r·g·b 는 휘도 1 로 맞춘 배율)
+let toneT = Object.assign({}, TONE);
+
+/* 색 하나를 감정 색조 쪽으로 옮긴다. 결과는 gradeRGB 와 같이 gR·gG·gB 에 담는다.
+   색조를 휘도 1 로 맞춰 두었으므로 (TONE.r−1, TONE.g−1, TONE.b−1) 은 휘도가 0 인 방향이다 — 밝기는 안 변한다.
+   0~255 를 벗어나면 gradeRGB 처럼 채널을 자르지 않고 색 성분만 줄인다. */
+function toneRGB(r, g, b) {
+  const a = TONE.amt, lu = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const dr = (r - lu) * (1 - a) + (TONE.r - 1) * lu * a;
+  const dg = (g - lu) * (1 - a) + (TONE.g - 1) * lu * a;
+  const db = (b - lu) * (1 - a) + (TONE.b - 1) * lu * a;
+  let t = 1;
+  if (lu + dr > 255) t = Math.min(t, (255 - lu) / dr); else if (lu + dr < 0) t = Math.min(t, -lu / dr);
+  if (lu + dg > 255) t = Math.min(t, (255 - lu) / dg); else if (lu + dg < 0) t = Math.min(t, -lu / dg);
+  if (lu + db > 255) t = Math.min(t, (255 - lu) / db); else if (lu + db < 0) t = Math.min(t, -lu / db);
+  gR = lu + dr * t; gG = lu + dg * t; gB = lu + db * t;
+}
+
 /* 라벨 한 줄 → 가중치 한 벌. 모르는 말이면 중립으로 둔다(지어내지 않는다). */
 function setEmotion(label, intensity) {
   const raw = (label || '').toString().trim();
@@ -352,12 +399,21 @@ function setEmotion(label, intensity) {
   // 패널에 '불안 0.9' 와 '우울' 이 섞여 떠서 '우울은 왜 숫자가 없나'로 읽혔다(사용자 확인, 09-25).
   emoName = key ? key + ' ' + w.toFixed(1)
                 : (raw ? raw + '(미정의)' : '중립 —');
+
+  // 색조 — 표에 없는 감정(중립·옛 라벨)이면 깊이만 0 으로 내린다. 색은 그대로 두어 빠지는 동안 다른 색을 거치지 않는다
+  const tn = TONE_ON && key ? EMO_TONE[key] : null;
+  if (tn) {
+    const l = 0.2126 * tn.c[0] + 0.7152 * tn.c[1] + 0.0722 * tn.c[2];
+    toneT = { r: tn.c[0] / l, g: tn.c[1] / l, b: tn.c[2] / l, amt: tn.amt * w, warm: tn.warm,
+              lum: TONE_LUM_ON ? 1 + (tn.lum - 1) * w : 1, simple: TONE_SIMPLE_ON ? tn.simple * w : 0 };
+  } else toneT = { r: TONE.r, g: TONE.g, b: TONE.b, amt: 0, warm: TONE.warm, lum: 1, simple: 0 };
 }
 
 /* 막과 똑같은 속도로 스며든다 — 감정이 장면과 함께 건너오지, 툭 바뀌지 않는다. */
 function driftEmo() {
   const k = 1 / curXfade * 2.2;
   for (const key in EMO) EMO[key] += (emoTarget[key] - EMO[key]) * k;
+  for (const key in TONE) TONE[key] += (toneT[key] - TONE[key]) * k;
 }
 
 /* ── 1-c. 꿈의 물리 법칙 — 2팀 physics_laws (09-27) ─────
@@ -664,7 +720,7 @@ function assignHomes(snap) {
          AP_COMP 가 0 이면 가중치가 1 이 되어 09-13 동작과 완전히 같다. */
       const w = (1 - AP_COMP) + AP_COMP *
                 Math.pow(apCompAt(x / SW, y / SH) / (ref().MX || 1), AP_SHARP);
-      const pr = (b * b * 0.94 + 0.03) * w;
+      const pr = (b * b * 0.94 + 0.03) * w;   // 10-11 제곱을 1.3 · 0.8 로 낮춰 중간 톤에도 앉혀 봤으나 윤곽 일치가 오히려 내려감(0.251 → 0.241 → 0.221, LOG 62) — 그대로 둔다
       if (pr > bw) { bw = pr; bx = x; by = y; }   // 지금까지 본 후보 중 가장 좋은 자리를 기억해 둔다
       if (rnd() < pr) break;
       /* ★ 끝내 못 고르면 '마지막 후보'가 아니라 '가장 좋았던 후보'를 쓴다.
@@ -1147,8 +1203,11 @@ function gotoScene(i) {
   /* ①-b 감정 라벨(1·2팀 데이터) → 막 위에 얹히는 얇은 가중치.
      막을 대신하지 않는다. 여기서 목표만 세우고, driftEmo 가 막과 같은
      속도로 스며들게 한다 — 감정이 장면과 함께 건너온다. */
-  setEmotion(sc.emotion, sc.intensity);
-  setLaws(sc.laws);        // ①-c 꿈의 물리 법칙 — 목표만 세우고 driftLaws 가 스며들게 한다
+  if (EMO_TEST.length) {   // 시험(?emo=) — 입력이 준 감정이 아니므로 패널에 그렇게 적는다
+    setEmotion(EMO_TEST[sceneIdx % EMO_TEST.length], 1);
+    emoName += ' · 시험';
+  } else setEmotion(sc.emotion, sc.intensity);
+  setLaws(sc.laws);       // ①-c 꿈의 물리 법칙 — 목표만 세우고 driftLaws 가 스며들게 한다
   setMoist(sc.moist);      // ①-d 공기 중의 물기(비·눈·서리·김)
 
   /* ② 이미지 — 이전 것을 남겨두고 새로 구워 크로스페이드 */
@@ -1263,7 +1322,7 @@ let GLOW_CAP = 0.50;   // 09-13 실측: 타오르다 화면 명도 0.68 → 0.42
 let sceneMean = 0.3, sceneMeanTarget = 0.3;
 function glowNow() {
   const e = sceneMean * A.glow;
-  return e > GLOW_CAP ? A.glow * GLOW_CAP / e : A.glow;
+  return (e > GLOW_CAP ? A.glow * GLOW_CAP / e : A.glow) * TONE.lum;   // 감정 밝기(10-11) — 노출 제한 뒤에 곱한다. 앞에 곱하면 상한이 도로 깎는다
 }
 
 function sceneMood() {
@@ -1373,9 +1432,14 @@ function colOf() { return COL[sceneIdx] || (COL[sceneIdx] = { warm: 0, mist: 1 }
 function dbTarget() {
   const R = ref(), T = R.T, D = R.D || {};
   const lim = (v, t, d) => clamp(v, t - d * 0.5, t + d * 0.5);
+  const sat  = clamp(lim(T.sat * EMO.sat, T.sat, D.sat || 0.10), 0, 1);
+  const warm = clamp(lim(T.warm + EMO.warm, T.warm, D.warm || 0.10), 0, 1);
+  // 감정 색조(10-11)가 걸린 만큼은 과녁도 그 색 쪽으로 — 여기서는 허용편차 절반의 묶음을 일부러 푼다
+  // (10/8 발표 검토: 감정에 따라 다양한 색감). 색조가 0 이면 위 값 그대로다.
+  const a = TONE.amt;
   return {
-    sat:  clamp(lim(T.sat * EMO.sat, T.sat, D.sat || 0.10), 0, 1),
-    warm: clamp(lim(T.warm + EMO.warm, T.warm, D.warm || 0.10), 0, 1),
+    sat:  sat + (Math.max(sat, TONE_SAT) - sat) * a,
+    warm: warm + (TONE.warm - warm) * a,
   };
 }
 
@@ -1880,6 +1944,7 @@ function updateParticles() {
     // DB 색 보정 — 휘도는 그대로, 채도·색 온도만. 밝은 파편일수록 약하게(하이라이트는 원래 빛).
     const ga = br < 0.45 ? 1 : Math.max(0, 1 - (br - 0.45) / 0.25);   // 밝기 0.7 이상은 원래 빛
     gradeRGB(vr, vg, vb, ga, 1);
+    if (TONE.amt > 0.004) toneRGB(gR, gG, gB);   // 감정 색조 — 하이라이트까지 함께
     vr = gR; vg = gG; vb = gB;
     const qr = (QGAMMA[vr | 0] + 0.5) | 0;
     const qg = (QGAMMA[vg | 0] + 0.5) | 0;
@@ -1887,7 +1952,8 @@ function updateParticles() {
     pbucket[i] = (qr*QL + qg)*QL + qb;
     if (pkeep[i] > yb) { pbucket[i] = 0; pbr[i] = 0; }   // 여백 — 이 파편은 지금 비어 있다(0번 버킷은 안 그린다)
     // 화면 안 여백 — 평평한 중간 톤에 앉은 파편을 비운다. 막이 바뀌며 값이 스며드는 동안의 잔여(<0.02)는 무시.
-    else if (A.sparse > 0.02 && psp[i] < A.sparse * (1 - pform[i])) { pbucket[i] = 0; pbr[i] = 0; }
+    // 감정 단순함(10-11) — 막의 여백에 더한다. 형태 지도가 높은 자리(윤곽)는 남는다
+    else if (A.sparse + TONE.simple * 0.8 > 0.02 && psp[i] < Math.min(0.95, A.sparse + TONE.simple * 0.8) * (1 - pform[i])) { pbucket[i] = 0; pbr[i] = 0; }
     // 가늘어져 사라짐 — 여백과 같은 순서표(psp)로 차례로 비운다. 형체와 무관하게 전체가 성겨진다
     else if (thinK > 0.005 && psp[i] < thinK) { pbucket[i] = 0; pbr[i] = 0; }
   }
@@ -2033,7 +2099,7 @@ function drawMoist() {
    0917 미팅(4팀 항목) "점 형태의 거친 결과보다 깨끗한 원본 이미지가 점진적으로 변형되는 방식"과 같은 방향.
    ※ 매 프레임 조금씩 덮고, 잔상 감쇠(drawVeil)와 균형을 이뤄 일정 농도로 수렴한다 —
      한 번에 진하게 그리지 않는다. 장면 전환 크로스페이드(fadeT)를 따라가 두 원본이 섞인다. */
-let BASE_ALPHA = 0.01;   // 09-27 사용자 결정: 필터처럼 보이는 것을 피한다(피드백 ⑤). 0.02~0.04 는 형체가 더 또렷하나 "사진 + 필터" 로 읽힌다. 0 = 09-13 동작
+let BASE_ALPHA = (() => { const v = new URLSearchParams(location.search).get('base'); return v === null || isNaN(+v) ? 0.01 : clamp(+v, 0, 0.2); })();   // 09-27 사용자 결정 0.01 유지 · 10-11 선명도 재검토에서 0.025 로 올려 봤으나 사용자 육안 "확실히 사진 + 필터 느낌" → 되돌림(LOG 60·61). 시험 `?base=0~0.2`
                          // 09-27 재확인(Work Log 33): 흐리게 뭉갠 바탕·선명 0.03 과 나란히 보고 사용자가 이 값을 골랐다. 뭉갠 바탕은 등고선 띠가 생긴다
 function drawBase() {
   if (BASE_ALPHA <= 0 || !imgCur) return;
@@ -2080,6 +2146,7 @@ function drawVeil() {
      ★ 'lighter'(가산)로 덮지 말 것 — 매 프레임 누적돼 화면이 하늘색으로 타버린다.
        덮어쓰기(source-over)는 그 색으로 수렴할 뿐 안 넘친다. */
   gradeRGB(150, 170, 190, 0, mistChroma);   // 안개는 색조를 고정하고 채도(색의 강도)만 — 온도를 걸면 난색 비율이 0/1 로 뒤집힌다(실측)
+  if (TONE.amt > 0.004) toneRGB(gR, gG, gB);   // 감정 색조 — 어두운 화면의 색은 이 안개가 정한다
   const mr = gR | 0, mg = gG | 0, mb = gB | 0;
   const mist = (0.006 + fogDensity * 0.010) * A.fog;
 
@@ -2088,6 +2155,19 @@ function drawVeil() {
      밝아져 방향이 엉켰다(상관계수 0.03). 구도는 비네트가 맡는다. */
   ctx.fillStyle = 'rgba(' + mr + ',' + mg + ',' + mb + ',' + mist.toFixed(4) + ')';
   ctx.fillRect(0, 0, W, H);
+
+  /* ③ 잔상의 색 (10-11) — 감정 색조에서 먼 채널일수록 잔상이 빨리 삭는다.
+     파편 색만 옮겨서는 밝은 장면(승·전)에 색이 안 실렸다(LOG 57): 빛이 겹쳐 세 채널이 모두 255 에 붙으면 흰색이다.
+     여기서 채널별 감쇠를 달리하면, 색조에서 먼 채널은 매 프레임 더 많은 빛을 받아야 255 에 머문다 —
+     빛의 한가운데는 그대로 희고, 가장자리와 잔상부터 색이 돈다. 가장 센 채널은 건드리지 않는다. */
+  if (TONE.amt > 0.004 && TONE_WASH > 0) {
+    const mx = Math.max(TONE.r, TONE.g, TONE.b), k = TONE.amt * TONE_WASH;
+    const f = v => (255 * (1 - k * (1 - v / mx)) + 0.5) | 0;
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = 'rgb(' + f(TONE.r) + ',' + f(TONE.g) + ',' + f(TONE.b) + ')';
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'source-over';
+  }
 }
 
 /* ★ 구도 비네트 — 아피찻퐁이 빛을 두는 자리만 남기고 나머지를 눌러 덮는다 (09-25).
