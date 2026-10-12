@@ -25,6 +25,20 @@
 
   빠른 미리보기 (장면당 10초 · 절반 해상도)
     python object_engine.py --scene-sec 10 --scale 0.5 --out preview.mp4
+    ※ 등장·반전은 75초 기준으로 맞춘 움직임이라, 짧은 미리보기에서는 실제보다 급하게 보인다
+
+  10/15 반영 (교수님 10/8 검토)
+    점에서 시작하는 등장 (--emerge point · 기본)
+      오브제마다 한 점에서 출발 — 앞 장면 잔해 중 그 자리에 가장 가까운 한 점에서 태어난다.
+      격자 8칸 → 4칸 → 2칸 → 1칸 간격 입자 순서로 태어나 '점 → 성긴 윤곽 → 촘촘한 전체'로 약 16초에 걸쳐 드러난다.
+      오브제 사이 간격 7.5초 · 원본 윤곽은 거의 다 드러난 뒤에야 옅게 깔린다. 예전 방식은 --emerge cloud.
+    전(轉) 장면 반전 (--reversal 0.6 · 기본 = 전 장면 시작 후 45초 · 4장면 5분이면 전체 3:15)
+      모였던 오브제 전부가 한순간에 터지듯 흩어졌다가(약 1초), 위아래가 뒤집히고 1.15배 커지고
+      감정 색조의 반대색으로 바뀐 채 약 3초 안에 다시 모인다. 반전 시각은 결과 json 의 "reversal" 에 적힌다
+      (배경·사운드를 이 시각에 맞춘다). 끄려면 --no-reversal.
+    병렬 렌더 (--jobs auto · 기본)
+      장면마다 따로 동시에 렌더해 이어 붙인다. 각 장면은 앞 장면을 그리지 않고 계산만 빨리 감은 뒤 시작해서,
+      한 줄로 돌린 것과 화소 단위로 같은 결과가 나온다(무손실 비교로 확인). 한 줄로 돌리려면 --jobs 1.
 
 필요 패키지: pip install numpy pillow opencv-python imageio-ffmpeg
 """
@@ -32,6 +46,8 @@ import argparse
 import hashlib
 import json
 import math
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -63,6 +79,12 @@ EMOTIONS = {
     '놀람': dict(sat=1.05, warm=+0.02, turb=1.12, glow=1.15),
     '혐오': dict(sat=0.85, warm=-0.06, turb=0.95, glow=0.88),
     '중립': dict(sat=1.00, warm=0.00, turb=1.00, glow=1.00),
+}
+
+# 전(轉) 반전 때 오브제가 바뀌는 색 — 배경 감정 색조(기쁨 금빛 · 슬픔 파랑 · 분노 붉음 · 공포 남보라 · 놀람 자홍 · 혐오 풀빛)의 반대색
+REVERSAL_TINT = {
+    '기쁨': (0.35, 0.75, 1.00), '슬픔': (1.00, 0.68, 0.30), '분노': (0.30, 0.90, 0.90),
+    '공포': (1.00, 0.72, 0.30), '놀람': (0.60, 1.00, 0.40), '혐오': (1.00, 0.42, 0.80), '중립': (1.00, 0.72, 0.30),
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -197,7 +219,8 @@ def load_objects_index(obj_dir, scene_no, names):
 # 4. 장면 하나 — 입자를 만들고 매 프레임 움직인다
 # ─────────────────────────────────────────────────────────────
 class Scene:
-    def __init__(self, sc, idx, n_scenes, files, W, H, prev_cloud, rng, style='analog', cell=12):
+    def __init__(self, sc, idx, n_scenes, files, W, H, prev_cloud, rng, style='analog', cell=12,
+                 emerge='point', reversal=0.6, quiet=False):
         self.W, self.H = W, H
         self.style, self.cell = style, cell
         digital = style == 'digital'
@@ -254,6 +277,7 @@ class Scene:
                 col = small[ys, xs, :3] / np.maximum(small[ys, xs, 3:4], 1e-3)
                 a = np.ones(len(xs), np.float32)
                 lx, ly = (xs + 0.5) * dw / gw - dw / 2, (ys + 0.5) * dh / gh - dh / 2
+                gi, gj = xs, ys
             else:
                 ys, xs = np.mgrid[0:dh:step, 0:dw:step]
                 a = arr[ys, xs, 3]
@@ -264,8 +288,18 @@ class Scene:
                     sel = rng.choice(len(xs), cap, replace=False)
                     xs, ys, a = xs[sel], ys[sel], a[sel]
                 col = arr[ys, xs, :3]
-                lx, ly = xs - dw / 2, ys - dh / 2
+                gi, gj = xs // step, ys // step
+                # 표본 격자가 무늬로 비치지 않게 칸 안에서 살짝 흔든다 (난수 대신 번호로 정해 결과가 매번 같다)
+                hsh = np.arange(len(xs), dtype=np.float64)
+                jx = (np.modf(np.sin(hsh * 12.9898) * 43758.5453)[0] % 1.0) - 0.5
+                jy = (np.modf(np.sin(hsh * 78.233) * 12345.6789)[0] % 1.0) - 0.5
+                lx, ly = xs - dw / 2 + jx * step * 0.9, ys - dh / 2 + jy * step * 0.9
             cnt = len(xs)
+            # 점 → 성긴 윤곽 → 촘촘한 전체 : 격자 8칸 · 4칸 · 2칸 · 1칸 간격의 입자 순서로 태어난다
+            lv = np.full(cnt, 3.0)
+            lv[(gi % 2 == 0) & (gj % 2 == 0)] = 2
+            lv[(gi % 4 == 0) & (gj % 4 == 0)] = 1
+            lv[(gi % 8 == 0) & (gj % 8 == 0)] = 0
             b = beh[j]
             # 풀리는 순서 — 지워짐은 위에서부터(글자부터 지워진다) · 재처럼은 가장자리부터 · 그 밖은 흩어서
             r = np.sqrt((lx / (dw / 2)) ** 2 + (ly / (dh / 2)) ** 2)
@@ -275,8 +309,19 @@ class Scene:
                 thr = 0.7 * (1 - np.clip(r, 0, 1)) + 0.3 * rng.random(cnt)
             else:
                 thr = rng.random(cnt)
-            # 태어나는 자리 — 앞 장면의 잔해에서 (장면 사이 변환) · 결과가 먼저면 위에서 떨어져 모인다
-            if b.get('precede'):
+            # 태어나는 자리
+            #   point : 한 점에서 시작한다 — 앞 장면 잔해 중 이 오브제 자리에 가장 가까운 한 점 (장면 사이가 이어진다)
+            #           결과가 먼저(인과 역전)면 그 점이 오브제 위쪽에 있어 아래로 내려앉으며 드러난다
+            #   cloud : 예전 방식 — 넓은 구름에서 모인다
+            if emerge == 'point':
+                if b.get('precede'):
+                    seed_pt = np.array([ax, ay - H * 0.30])
+                elif prev_cloud is not None and len(prev_cloud):
+                    seed_pt = prev_cloud[np.argmin(((prev_cloud - [ax, ay]) ** 2).sum(1))]
+                else:
+                    seed_pt = np.array([ax, ay])
+                sp = seed_pt + rng.normal(0, 1.5 * H / 1080, (cnt, 2))
+            elif b.get('precede'):
                 sp = np.stack([ax + lx * 1.6 + rng.normal(0, dw * 0.25, cnt),
                                ay - H * (0.15 + 0.55 * rng.random(cnt))], 1)
             elif prev_cloud is not None and len(prev_cloud):
@@ -288,14 +333,26 @@ class Scene:
                 sp = np.stack([ax + rr * np.cos(ang), ay + rr * np.sin(ang)], 1)
             P_local.append(np.stack([lx, ly], 1)); P_col.append(col); P_alpha.append(a)
             P_obj.append(np.full(cnt, j)); P_thr.append(thr); P_grp.append(np.clip(((ly + dh / 2) / dh * 8).astype(int), 0, 7))  # 가로 띠 8장 — 책장처럼 한 장씩 있다 없다 한다
-            P_birth.append(rng.random(cnt)); P_spawn.append(sp)
+            P_birth.append((lv + rng.random(cnt)) / 4 if emerge == 'point' else rng.random(cnt)); P_spawn.append(sp)
 
         # 오브제별 시간표 (장면 안 비율 u)
-        self.enter = np.array([0.04 + 0.13 * j for j in range(n)])
-        self.formed = self.enter + 0.16
+        #   point : 점에서 시작해 약 16초(0.22)에 걸쳐 드러난다 · 오브제 사이 간격 0.10(7.5초)
+        self.emerge = emerge
+        if emerge == 'point':
+            gap_e = min(0.10, 0.40 / max(n - 1, 1))
+            self.enter = np.array([0.03 + gap_e * j for j in range(n)])
+            self.formed = self.enter + 0.22
+        else:
+            self.enter = np.array([0.04 + 0.13 * j for j in range(n)])
+            self.formed = self.enter + 0.16
         dis = np.array([min(0.82, self.A['dissolve'] + 0.04 * j) for j in range(n)])
         pre = np.array([b.get('precede', 0) for b in beh])
-        self.dissolve = dis - 0.16 * pre
+        self.dissolve = np.maximum(dis - 0.16 * pre, self.formed + 0.08)
+        # 전(轉) 반전 — 모였던 형상이 한순간에 터지듯 흩어졌다가, 위아래가 뒤집히고 크기·색이 바뀐 채 다시 모인다
+        self.rev = reversal if (reversal is not None and self.act == '전') else None
+        if self.rev is not None:
+            self.dissolve = np.maximum(self.dissolve, self.rev + 0.10)
+        self.rev_fired = False
         self.beh_arr = {k2: np.array([b.get(k2, 0.0) for b in beh]) for k2, _ in LAW_RULES}
         self.anchors = np.array(anchors, np.float32)
         self.sizes = np.array(sizes, np.float32)
@@ -327,16 +384,32 @@ class Scene:
             g = col.mean(1, keepdims=True)
             col = posterize_hsv(np.clip(g + (col - g) * 1.3, 0, 1))
         self.col = np.clip(col, 0, 1).astype(np.float32)
+        tint = np.array(REVERSAL_TINT.get(self.emo_label, REVERSAL_TINT['중립']), np.float32)
+        lum2 = self.col @ np.array([0.299, 0.587, 0.114], np.float32)
+        rcol = np.clip(np.maximum(lum2, 0.25)[:, None] * tint * 1.25 + 0.12 * self.col, 0, 1)
+        self.rev_col = (posterize_hsv(rcol) if digital else rcol).astype(np.float32)
         self.alpha = np.concatenate(P_alpha).astype(np.float32)
         self.obj = np.concatenate(P_obj)
         self.thr = np.concatenate(P_thr).astype(np.float32)
         self.grp = np.concatenate(P_grp)
         stagger = np.where(np.array([b.get('precede', 0) for b in beh])[self.obj] > 0, 0.14, 0.06)
+        if emerge == 'point':
+            stagger = np.full(len(self.obj), 0.16)  # 태어나는 데 12초 — 점이 먼저, 촘촘한 입자가 나중
         self.birth = self.enter[self.obj] + stagger * np.concatenate(P_birth)  # 결과가 먼저면 비처럼 오래 내려앉는다
         self.pos = np.concatenate(P_spawn).astype(np.float32)
         self.vel = np.zeros_like(self.pos)
         self.released = np.zeros(len(self.pos), bool)
-        print(f'  장면 {sc.get("scene")} · {self.act} · {self.emo_label} · 오브제 {n}개 · 입자 {len(self.pos):,}')
+        if not quiet:
+            rv = f' · 반전 {self.rev:.2f}' if self.rev is not None else ''
+            print(f'  장면 {sc.get("scene")} · {self.act} · {self.emo_label} · 오브제 {n}개 · 입자 {len(self.pos):,}{rv}')
+
+    def rev_phase(self, u):
+        """반전 진행 — (뒤집힘 0/1, 끌림 배율, 색 섞임)"""
+        if self.rev is None or u < self.rev:
+            return 0.0, 1.0, 0.0
+        # 약 1초 흩어졌다가 3초 안에 다시 모인다 — 다시 모일 때는 평소보다 2배 세게 끌어 형태를 빨리 세운다
+        pull = float(smoothstep(self.rev + 0.012, self.rev + 0.05, u)) * (1 + float(smoothstep(self.rev + 0.012, self.rev + 0.03, u)) * (1 - float(smoothstep(self.rev + 0.08, self.rev + 0.12, u))))
+        return 1.0, pull, float(smoothstep(self.rev, self.rev + 0.03, u))
 
     # 오브제 하나의 '지금 모양' — 동작 세기 × 시간
     def transforms(self, u, t):
@@ -360,6 +433,10 @@ class Scene:
         gap = B['crack'] * 0.012 * H * stair
         burst = np.maximum(0, np.sin(2 * np.pi * t / 4.5 + self.phase)) ** 3
         flut = B['flutter'] * 0.035 * H * burst
+        flip, _, _ = self.rev_phase(u)
+        if flip:
+            tilt = tilt + np.pi  # 위아래가 뒤집힌 채 다시 모인다
+            scale = scale * 1.15
         return F, dx, dy, sx, tilt, scale, stretch, gap, flut
 
     def step(self, u, t):
@@ -392,6 +469,15 @@ class Scene:
         still = self.beh_arr['still'][o]
         k = A['settle'] * Fi * (1 + 0.5 * still) * self.k_mul
         k = np.where(self.released, 0.0, k)
+        flip, pull, cmix = self.rev_phase(u)
+        if flip and not self.rev_fired:  # 반전 순간 — 모든 입자를 바깥으로 한 번에 터뜨린다
+            self.rev_fired = True
+            live = born & ~self.released
+            d = self.pos - self.anchors[o]
+            d = d / (np.linalg.norm(d, axis=1, keepdims=True) + 1.0)
+            spd = self.H * 0.022 * (0.6 + 0.8 * self.thr)
+            self.vel[live] += d[live] * spd[live, None]
+        k = k * pull
         # 난류 — 위치마다 세기·방향이 다른 결 (형태가 서기 전일수록 거세다)
         p = self.pos
         T = t * 0.8
@@ -428,15 +514,19 @@ class Scene:
         if self.style == 'digital':
             v = np.round(v * 2) / 2  # 디지털 — 서서히 꺼지지 않고 켜짐·반·꺼짐 세 단계로 깜박인다
         ash_col = np.where((ash > 0) & rel, 1, 0)[:, None]
-        col = self.col * (1 - 0.6 * ash_col) + 0.55 * ash_col * np.array([0.75, 0.72, 0.70], np.float32)
+        base_col = self.col if cmix == 0 else self.col * (1 - cmix) + self.rev_col * cmix
+        col = base_col * (1 - 0.6 * ash_col) + 0.55 * ash_col * np.array([0.75, 0.72, 0.70], np.float32)
         return v.astype(np.float32), col.astype(np.float32), F, dx, dy, sx, tilt, scale, gap
 
     def ghost_layer(self, u, F, dx, dy, sx, tilt, scale, gap, canvas_rgb, canvas_a):
         """원본 PNG 를 아주 옅게 — 입자가 흩어져도 무엇인지 읽히도록 윤곽을 받친다"""
         W, H = self.W, self.H
         D = smoothstep(self.dissolve, self.dissolve + 0.10, u)
+        GF = F ** 3 if self.emerge == 'point' else F
+        flip, pull, _ = self.rev_phase(u)
+        rev_k = pull if flip else 1.0
         for j in range(self.n):
-            g = self.A['ghost'] * F[j] * (1 - D[j]) * (1 + 0.8 * self.beh_arr['still'][j]) * (1 - 0.6 * min(1, gap[j] / (0.05 * H + 1e-6)))
+            g = self.A['ghost'] * GF[j] * rev_k * (1 - D[j]) * (1 + 0.8 * self.beh_arr['still'][j]) * (1 - 0.6 * min(1, gap[j] / (0.05 * H + 1e-6)))
             if g < 0.004:
                 continue
             img = self.ghosts[j]
@@ -571,6 +661,77 @@ def label_overlay(sc_obj, W, H):
     return a
 
 
+def run_parallel(args, jobs):
+    """장면마다 따로 렌더해(동시에 jobs 개) 이어 붙인다 — 결과는 한 줄로 돌린 것과 같다"""
+    import time
+    story = json.load(open(args.story, encoding='utf-8'))
+    scenes = story['scenes'] if isinstance(story, dict) else story
+    nums = sorted(s.get('scene', i + 1) for i, s in enumerate(scenes))
+    out = Path(args.out).resolve()
+    tmp = out.parent / f'{out.stem}_parts'
+    tmp.mkdir(exist_ok=True)
+    threads = max(1, (os.cpu_count() or 2) // jobs)
+    base = [sys.executable, str(Path(__file__).resolve()), '--story', str(Path(args.story).resolve()),
+            '--objects', str(Path(args.objects).resolve()), '--scene-sec', str(args.scene_sec), '--fps', str(args.fps),
+            '--size', args.size, '--scale', str(args.scale), '--style', args.style, '--block', str(args.block),
+            '--crf', str(args.crf), '--emerge', args.emerge, '--reversal', str(args.reversal), '--worker',
+            '--threads', str(threads)]
+    if args.bg: base += ['--bg', str(Path(args.bg).resolve())]
+    if args.bg_json: base += ['--bg-json', str(Path(args.bg_json).resolve())]
+    if args.no_label: base += ['--no-label']
+    if args.no_reversal: base += ['--no-reversal']
+    per = int(round(args.scene_sec * args.fps))
+    total = per * len(nums)
+    print(f'병렬 렌더 · 장면 {len(nums)}개를 동시에 {jobs}개씩 (프로세스당 스레드 {threads}) → {out.name}')
+    waiting, running, parts = list(nums), {}, {}
+    t0 = time.time()
+    while waiting or running:
+        while waiting and len(running) < jobs:
+            k = waiting.pop(0)
+            part, pf = tmp / f'part_{k:02d}.mp4', tmp / f'part_{k:02d}.progress'
+            pf.write_text('0')
+            log = open(tmp / f'part_{k:02d}.log', 'w', encoding='utf-8')
+            env = dict(os.environ, PYTHONIOENCODING='utf-8')
+            running[k] = (subprocess.Popen(base + ['--scenes', str(k), '--out', str(part), '--progress-file', str(pf)],
+                                           stdout=log, stderr=subprocess.STDOUT, env=env), log)
+            parts[k] = part
+        time.sleep(2)
+        for k in list(running):
+            p, log = running[k]
+            if p.poll() is not None:
+                log.close()
+                if p.returncode != 0:
+                    sys.exit(f'장면 {k} 렌더 실패 — {tmp / f"part_{k:02d}.log"} 를 확인하세요')
+                (tmp / f'part_{k:02d}.progress').write_text(str(per))
+                del running[k]
+        done = sum(int((tmp / f'part_{k:02d}.progress').read_text() or 0) for k in parts)
+        el = time.time() - t0
+        eta = el / done * (total - done) if done else 0
+        print(f'\r  {done}/{total} 프레임 · {el:.0f}초 경과 · 남은 시간 약 {eta:.0f}초   ', end='', flush=True)
+    print()
+    lst = tmp / 'concat.txt'
+    lst.write_text(''.join(f"file '{parts[k].as_posix()}'\n" for k in nums), encoding='utf-8')
+    subprocess.run([ffmpeg_exe(), '-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', str(lst),
+                    '-c', 'copy', '-movflags', '+faststart', str(out)], check=True)
+    metas = [json.load(open(parts[k].with_suffix('.json'), encoding='utf-8')) for k in nums]
+    meta = dict(metas[0])
+    meta['video'] = out.name
+    meta['scenes'], meta['law_map'], meta['reversal'] = [], [], []
+    for i, m in enumerate(metas):
+        off = i * per
+        for mk in m['scenes']:
+            meta['scenes'].append(dict(mk, start_frame=mk['start_frame'] + off, start_sec=round((mk['start_frame'] + off) / args.fps, 2)))
+        meta['law_map'] += m['law_map']
+        for r in m.get('reversal', []):
+            meta['reversal'].append(dict(r, global_sec=round(r['global_sec'] + off / args.fps, 2)))
+    json.dump(meta, open(out.with_suffix('.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
+    shutil.rmtree(tmp, ignore_errors=True)
+    for r in meta['reversal']:
+        g = r['global_sec']
+        print(f'  ★ 반전: 장면 {r["scene"]} 시작 후 {r["local_sec"]}초 = 전체 {int(g // 60)}:{g % 60:04.1f}')
+    print(f'완료 → {out}  ·  {time.time() - t0:.0f}초  ·  장면 시각·법칙 대응표 → {out.with_suffix(".json")}')
+
+
 def main():
     ap = argparse.ArgumentParser(description='꿈 오브제 창발 엔진 (시도 A · 파티클)')
     ap.add_argument('--story', default='dream_scenes.json', help='2팀 스토리보드 json')
@@ -587,13 +748,27 @@ def main():
     ap.add_argument('--style', choices=['analog', 'digital'], default='analog', help='analog: 빛 입자 · digital: 사각 블록')
     ap.add_argument('--block', type=int, default=12, help='digital 블록 크기(1080p 기준 픽셀)')
     ap.add_argument('--crf', type=int, default=18)
+    ap.add_argument('--emerge', choices=['point', 'cloud'], default='point', help='point: 한 점에서 서서히 드러남 · cloud: 예전 방식')
+    ap.add_argument('--reversal', type=float, default=0.6, help='전(轉) 장면 반전 시점 (장면 안 비율 · 0.6 = 75초 중 45초)')
+    ap.add_argument('--no-reversal', action='store_true', help='반전 끄기')
+    ap.add_argument('--jobs', default='auto', help='동시에 렌더할 장면 수 (auto = CPU 에 맞춰 최대 4 · 1 = 한 줄로)')
+    ap.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
+    ap.add_argument('--progress-file', default='', help=argparse.SUPPRESS)
+    ap.add_argument('--threads', type=int, default=0, help=argparse.SUPPRESS)
     args = ap.parse_args()
+    if args.threads:
+        cv2.setNumThreads(args.threads)
+    reversal = None if args.no_reversal else args.reversal
 
     W, H = [int(int(v) * args.scale) // 2 * 2 for v in args.size.lower().split('x')]
     digital = args.style == 'digital'
     cell = max(4, round(args.block * H / 1080))
     if digital and args.out == 'object_emergence.mp4':
         args.out = 'object_emergence_digital.mp4'
+    if not args.worker and not args.scenes:
+        jobs = (min(4, max(1, (os.cpu_count() or 2) // 2)) if args.jobs == 'auto' else int(args.jobs))
+        if jobs > 1:
+            return run_parallel(args, jobs)
     story = json.load(open(args.story, encoding='utf-8'))
     scenes = story['scenes'] if isinstance(story, dict) else story
     scenes = sorted(scenes, key=lambda s: s.get('scene', 0))
@@ -626,14 +801,30 @@ def main():
     prev_cloud = None
     frames_per_scene = int(round(args.scene_sec * args.fps))
     total = frames_per_scene * len(order)
+    last = max(order) if order else -1
     fog_col = np.array([0.10, 0.11, 0.14], np.float32)
     done = 0
     import time
     t0 = time.time()
-    for si in order:
+    reversals = []
+    for si in range(last + 1):
         sc = scenes[si]
         files = load_objects_index(args.objects, sc.get('scene', si + 1), sc.get('objects') or [])
-        S = Scene(sc, si, n_all, files, W, H, prev_cloud, rng, args.style, cell)
+        if si not in order:
+            # 앞 장면 빨리 감기 — 그리지 않고 입자 계산만 한다. 다음 장면이 앞 장면 잔해에서 태어나므로,
+            # 장면을 나눠 렌더해도 한 번에 돌린 것과 같은 결과가 나오게 한다.
+            S = Scene(sc, si, n_all, files, W, H, prev_cloud, rng, args.style, cell, args.emerge, reversal, quiet=True)
+            for f in range(frames_per_scene):
+                S.step(f / frames_per_scene, f / args.fps)
+            prev_cloud = S.cloud()
+            print(f'  장면 {sc.get("scene")} 빨리 감기 완료')
+            continue
+        S = Scene(sc, si, n_all, files, W, H, prev_cloud, rng, args.style, cell, args.emerge, reversal)
+        if S.rev is not None:
+            loc = S.rev * args.scene_sec
+            g = done / args.fps + loc
+            reversals.append({'scene': sc.get('scene'), 'local_sec': round(loc, 2), 'global_sec': round(g, 2)})
+            print(f'    ★ 반전: 장면 {sc.get("scene")} 시작 후 {loc:.1f}초 (이 영상의 {int(g // 60)}:{g % 60:04.1f})')
         law_map.append({'scene': sc.get('scene'), 'act': S.act, 'emotion': S.emo_label,
                         'objects': S.names, 'laws': S.law_log})
         for e in S.law_log:
@@ -657,6 +848,8 @@ def main():
                     frame = frame * (1 - la) + label[..., :3] * la
                 enc.stdin.write((np.clip(frame, 0, 1) * 255).astype(np.uint8).tobytes())
                 done += 1
+                if args.progress_file and done % 30 == 0:
+                    Path(args.progress_file).write_text(str(done))
                 if done % (args.fps * 5) == 0 or done == total:
                     el = time.time() - t0
                     print(f'\r  {done}/{total} 프레임 · {el:.0f}초 경과 · 남은 시간 약 {el / done * (total - done):.0f}초   ', end='', flush=True)
@@ -683,6 +876,8 @@ def main():
                 frame = frame * (1 - la) + label[..., :3] * la
             enc.stdin.write((np.clip(frame, 0, 1) * 255).astype(np.uint8).tobytes())
             done += 1
+            if args.progress_file and done % 30 == 0:
+                Path(args.progress_file).write_text(str(done))
             if done % (args.fps * 5) == 0 or done == total:
                 el = time.time() - t0
                 print(f'\r  {done}/{total} 프레임 · {el:.0f}초 경과 · 남은 시간 약 {el / done * (total - done):.0f}초   ', end='', flush=True)
@@ -691,7 +886,8 @@ def main():
     enc.stdin.close()
     enc.wait()
     meta = {'video': out.name, 'fps': args.fps, 'size': [W, H], 'scene_sec': args.scene_sec, 'seed': seed,
-            'mode': 'integrated' if composite else 'objects_only', 'style': args.style, 'scenes': marks, 'law_map': law_map}
+            'mode': 'integrated' if composite else 'objects_only', 'style': args.style, 'emerge': args.emerge,
+            'reversal': reversals, 'scenes': marks, 'law_map': law_map}
     json.dump(meta, open(out.with_suffix('.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
     print(f'완료 → {out}  ·  장면 시각·법칙 대응표 → {out.with_suffix(".json")}')
 
