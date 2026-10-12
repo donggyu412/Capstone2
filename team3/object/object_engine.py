@@ -66,11 +66,12 @@ from PIL import Image, ImageDraw, ImageFont
 #    dissolve 풀리기 시작하는 시점(장면 안 비율)
 # ─────────────────────────────────────────────────────────────
 ACT_NAMES = ['기', '승', '전', '결']
+RELEASE_SPAN = 0.10  # 풀리기 시작해서 마지막 입자가 놓일 때까지 (장면 안 비율)
 ACTS = {
-    '기': dict(settle=0.022, fric=0.90, turb=1.00, swirl=0.00, glow=0.80, ghost=0.07, fog=0.10, spread=1.00, dissolve=0.74),
-    '승': dict(settle=0.060, fric=0.86, turb=0.22, swirl=0.00, glow=1.00, ghost=0.16, fog=0.04, spread=0.60, dissolve=0.76),
-    '전': dict(settle=0.034, fric=0.90, turb=0.45, swirl=0.55, glow=1.55, ghost=0.10, fog=0.04, spread=0.80, dissolve=0.74),
-    '결': dict(settle=0.026, fric=0.92, turb=0.30, swirl=0.00, glow=0.70, ghost=0.20, fog=0.35, spread=0.90, dissolve=0.60),
+    '기': dict(settle=0.022, fric=0.90, turb=1.00, swirl=0.00, glow=0.80, ghost=0.07, fog=0.10, spread=1.00, dissolve=0.79),
+    '승': dict(settle=0.060, fric=0.86, turb=0.22, swirl=0.00, glow=1.00, ghost=0.16, fog=0.04, spread=0.60, dissolve=0.79),
+    '전': dict(settle=0.034, fric=0.90, turb=0.45, swirl=0.55, glow=1.55, ghost=0.10, fog=0.04, spread=0.80, dissolve=0.79),
+    '결': dict(settle=0.026, fric=0.92, turb=0.30, swirl=0.00, glow=0.70, ghost=0.20, fog=0.35, spread=0.90, dissolve=0.78),
 }
 
 # 감정 — 1팀 7종. 값은 1.0 근처에서 얇게 곱한다 (intensity 만큼만 중립에서 밀어낸다)
@@ -223,7 +224,7 @@ def load_objects_index(obj_dir, scene_no, names):
 # ─────────────────────────────────────────────────────────────
 class Scene:
     def __init__(self, sc, idx, n_scenes, files, W, H, prev_cloud, rng, style='analog', cell=12,
-                 emerge='point', reversal=0.6, quiet=False):
+                 emerge='point', reversal=0.6, quiet=False, seed_glow=1.0, dissolve_shift=0.0):
         self.W, self.H = W, H
         self.style, self.cell = style, cell
         digital = style == 'digital'
@@ -251,6 +252,7 @@ class Scene:
         box_w = W * spacing * 0.95
         anchors, sizes, ghosts = [], [], []
         P_local, P_col, P_alpha, P_obj, P_thr, P_grp, P_birth, P_spawn = [], [], [], [], [], [], [], []
+        P_seed = []
         step = max(1, round(2 * H / 1080))
         for j, oi in enumerate(keep):
             img = Image.open(files[oi]).convert('RGBA')
@@ -324,6 +326,7 @@ class Scene:
                 else:
                     seed_pt = np.array([ax, ay])
                 sp = seed_pt + rng.normal(0, 1.5 * H / 1080, (cnt, 2))
+                P_seed.append(seed_pt)
             elif b.get('precede'):
                 sp = np.stack([ax + lx * 1.6 + rng.normal(0, dw * 0.25, cnt),
                                ay - H * (0.15 + 0.55 * rng.random(cnt))], 1)
@@ -343,19 +346,23 @@ class Scene:
         self.emerge = emerge
         if emerge == 'point':
             gap_e = min(0.10, 0.40 / max(n - 1, 1))
-            self.enter = np.array([0.03 + gap_e * j for j in range(n)])
+            self.enter = np.array([0.015 + gap_e * j for j in range(n)])  # 첫 점은 장면 시작 약 1초 뒤
             self.formed = self.enter + 0.22
         else:
             self.enter = np.array([0.04 + 0.13 * j for j in range(n)])
             self.formed = self.enter + 0.16
-        dis = np.array([min(0.82, self.A['dissolve'] + 0.04 * j) for j in range(n)])
+        base = self.A['dissolve'] + dissolve_shift
+        dis = np.array([min(base + 0.015 * j, 0.86) for j in range(n)])
         pre = np.array([b.get('precede', 0) for b in beh])
-        self.dissolve = np.maximum(dis - 0.16 * pre, self.formed + 0.08)
+        self.dissolve = np.maximum(dis - 0.08 * pre, self.formed + 0.08)  # 결과가 먼저면 조금 일찍 풀린다
         # 전(轉) 반전 — 모였던 형상이 한순간에 터지듯 흩어졌다가, 위아래가 뒤집히고 크기·색이 바뀐 채 다시 모인다
         self.rev = reversal if (reversal is not None and self.act == '전') else None
         if self.rev is not None:
             self.dissolve = np.maximum(self.dissolve, self.rev + 0.10)
         self.rev_fired = False
+        # 시작점 빛 — 오브제가 드러나기 전, 그 자리에 은은하게 깜박이는 빛점 (점에서 시작함이 눈에 보이게)
+        self.seed_glow_k = seed_glow if emerge == 'point' else 0.0
+        self.seed_pts = np.array(P_seed, np.float32) if len(P_seed) == n else None
         self.beh_arr = {k2: np.array([b.get(k2, 0.0) for b in beh]) for k2, _ in LAW_RULES}
         self.anchors = np.array(anchors, np.float32)
         self.sizes = np.array(sizes, np.float32)
@@ -387,6 +394,13 @@ class Scene:
             g = col.mean(1, keepdims=True)
             col = posterize_hsv(np.clip(g + (col - g) * 1.3, 0, 1))
         self.col = np.clip(col, 0, 1).astype(np.float32)
+        oid = np.concatenate(P_obj)
+        sc_col = []
+        for j in range(n):
+            m = self.col[oid == j].mean(0) if (oid == j).any() else np.ones(3, np.float32)
+            m = 0.55 * m + 0.45  # 오브제 색을 띤 밝은 빛
+            sc_col.append(m / max(float(m @ np.array([0.299, 0.587, 0.114])), 1e-3) * 0.95)
+        self.seed_col = np.clip(np.array(sc_col, np.float32), 0, 1)
         tint = np.array(REVERSAL_TINT.get(self.emo_label, REVERSAL_TINT['중립']), np.float32)
         self.rev_tint = tint
         lum2 = self.col @ np.array([0.299, 0.587, 0.114], np.float32)
@@ -444,6 +458,7 @@ class Scene:
         return F, dx, dy, sx, tilt, scale, stretch, gap, flut
 
     def step(self, u, t):
+        self.u_now, self.t_now = u, t
         A, emo = self.A, self.emo
         F, dx, dy, sx, tilt, scale, stretch, gap, flut = self.transforms(u, t)
         o = self.obj
@@ -467,7 +482,7 @@ class Scene:
         home = np.stack([hx, hy], 1)
 
         born = u >= self.birth
-        rel_u = self.dissolve[o] + 0.12 * self.thr
+        rel_u = self.dissolve[o] + RELEASE_SPAN * self.thr
         self.released |= u >= rel_u
         Fi = F[o]
         still = self.beh_arr['still'][o]
@@ -509,6 +524,8 @@ class Scene:
 
         # 보이는 정도
         v = self.alpha * smoothstep(0, 0.03, u - self.birth)
+        if self.emerge == 'point':  # 막 태어난 성긴 입자는 더 밝게 — 형태가 서기 전에도 무엇이 자라고 있는지 보이게
+            v = v * (1 + 1.2 * (1 - F[o]))
         v = v * (1 - smoothstep(rel_u, rel_u + 0.05, u))
         fl = self.beh_arr['flicker'][o]
         if fl.any():  # 있다 없다 — 무리마다 1.4초에 한 번씩 켜지고 꺼진다 (페이지 수가 변한다)
@@ -521,6 +538,17 @@ class Scene:
         base_col = self.col if cmix == 0 else self.col * (1 - cmix) + self.rev_col * cmix
         col = base_col * (1 - 0.6 * ash_col) + 0.55 * ash_col * np.array([0.75, 0.72, 0.70], np.float32)
         return v.astype(np.float32), col.astype(np.float32), F, dx, dy, sx, tilt, scale, gap
+
+    def seed_lights(self, u, t):
+        """시작점 빛 — (위치, 세기, 색). 오브제가 태어나기 1.5초 전부터 깜박이다가 형태가 서면서 사라진다"""
+        if self.seed_pts is None or self.seed_glow_k <= 0:
+            return None
+        on = smoothstep(self.enter - 0.02, self.enter, u) * (1 - smoothstep(self.enter + 0.10, self.enter + 0.20, u))
+        pulse = 0.75 + 0.25 * np.sin(2 * np.pi * t / 1.6 + self.phase)
+        k = on * pulse * self.seed_glow_k
+        if not (k > 0.01).any():
+            return None
+        return self.seed_pts, k, self.seed_col
 
     def ghost_layer(self, u, F, dx, dy, sx, tilt, scale, gap, canvas_rgb, canvas_a):
         """원본 PNG 를 아주 옅게 — 입자가 흩어져도 무엇인지 읽히도록 윤곽을 받친다"""
@@ -683,6 +711,45 @@ def contrast_object(objC, objA, lb, strength, min_gap=0.30):
     return np.clip(objC * ratio[..., None], 0, 1)
 
 
+_SPRITES = {}
+
+
+def _sprite(H, digital=False, cell=12):
+    key = (H, digital, cell)
+    if key not in _SPRITES:
+        if digital:  # 디지털 — 가운데 한 칸이 가장 밝은 3×3 블록 점
+            k = np.array([[0.25, 0.55, 0.25], [0.55, 1.0, 0.55], [0.25, 0.55, 0.25]], np.float32)
+            _SPRITES[key] = np.kron(k, np.ones((cell, cell), np.float32))
+        else:  # 아날로그 — 작은 심 + 넓은 번짐
+            r = int(40 * H / 1080) + 4
+            yy, xx = np.mgrid[-r:r + 1, -r:r + 1].astype(np.float32)
+            d2 = xx ** 2 + yy ** 2
+            sc, sh = 3.5 * H / 1080 + 0.8, 16 * H / 1080 + 2
+            _SPRITES[key] = np.exp(-d2 / (2 * sc ** 2)) * 1.1 + np.exp(-d2 / (2 * sh ** 2)) * 0.55
+    return _SPRITES[key]
+
+
+def draw_seed_lights(frame, lights, H, W, digital=False, cell=12):
+    if lights is None:
+        return frame
+    pts, ks, cols = lights
+    sp = _sprite(H, digital, cell)
+    h, w = sp.shape
+    for (x, y), k, c in zip(pts, ks, cols):
+        if k <= 0.01:
+            continue
+        if digital:
+            x, y = (int(x // cell) - 1) * cell, (int(y // cell) - 1) * cell
+        else:
+            x, y = int(round(x)) - w // 2, int(round(y)) - h // 2
+        x0, y0, x1, y1 = max(0, x), max(0, y), min(W, x + w), min(H, y + h)
+        if x1 <= x0 or y1 <= y0:
+            continue
+        patch = sp[y0 - y:y1 - y, x0 - x:x1 - x][..., None] * (c * k)
+        frame[y0:y1, x0:x1] = frame[y0:y1, x0:x1] + patch
+    return frame
+
+
 def compose_analog(S, frame, out, u, composite, contrast, fog_col):
     v, col, F, dx, dy, sx, tilt, scale, gap = out
     W, H = S.W, S.H
@@ -703,6 +770,7 @@ def compose_analog(S, frame, out, u, composite, contrast, fog_col):
     frame = frame * (1 - np.clip(ga, 0, 1)[..., None]) + gr
     frame = frame * (1 - objA[..., None]) + objC * objA[..., None]
     frame += glow * (0.35 * S.A['glow'] * S.emo['glow']) * glow_k
+    frame = draw_seed_lights(frame, S.seed_lights(u, S.t_now), H, W)
     if not composite:
         frame = frame * (1 - S.A['fog'] * 0.25) + fog_col * (S.A['fog'] * 0.25)
     return frame
@@ -715,7 +783,8 @@ def compose_digital(S, frame, out, contrast, cell, gap_mask):
     if contrast > 0:
         frame, lb, _ = contrast_prepare(frame, objA, contrast, H, W)
         objC = contrast_object(objC, objA, lb, contrast)
-    return frame * (1 - objA[..., None]) + objC * gap_mask * objA[..., None]
+    frame = frame * (1 - objA[..., None]) + objC * gap_mask * objA[..., None]
+    return draw_seed_lights(frame, S.seed_lights(S.u_now, S.t_now), H, W, True, cell)
 
 
 def label_overlay(sc_obj, W, H):
@@ -746,7 +815,7 @@ def run_parallel(args, jobs):
             '--objects', str(Path(args.objects).resolve()), '--scene-sec', str(args.scene_sec), '--fps', str(args.fps),
             '--size', args.size, '--scale', str(args.scale), '--style', args.style, '--block', str(args.block),
             '--crf', str(args.crf), '--emerge', args.emerge, '--reversal', str(args.reversal), '--worker',
-            '--contrast', str(args.contrast),
+            '--contrast', str(args.contrast), '--seed-glow', str(args.seed_glow), '--dissolve-shift', str(args.dissolve_shift),
             '--threads', str(threads)]
     if args.bg: base += ['--bg', str(Path(args.bg).resolve())]
     if args.bg_json: base += ['--bg-json', str(Path(args.bg_json).resolve())]
@@ -823,6 +892,8 @@ def main():
     ap.add_argument('--emerge', choices=['point', 'cloud'], default='point', help='point: 한 점에서 서서히 드러남 · cloud: 예전 방식')
     ap.add_argument('--reversal', type=float, default=0.6, help='전(轉) 장면 반전 시점 (장면 안 비율 · 0.6 = 75초 중 45초)')
     ap.add_argument('--no-reversal', action='store_true', help='반전 끄기')
+    ap.add_argument('--seed-glow', type=float, default=1.0, help='오브제가 드러나기 전 시작점 빛의 세기 (0 = 끔)')
+    ap.add_argument('--dissolve-shift', type=float, default=0.0, help='오브제가 풀리는 시점 앞뒤 조정 (장면 비율 · +0.02 = 1.5초 늦게)')
     ap.add_argument('--contrast', type=float, default=-1, help='밝은·색 배경 대비 보정 세기 0~1 (기본: 통합이면 1, 오브제만이면 0)')
     ap.add_argument('--jobs', default='auto', help='동시에 렌더할 장면 수 (auto = CPU 에 맞춰 최대 4 · 1 = 한 줄로)')
     ap.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
@@ -887,13 +958,15 @@ def main():
         if si not in order:
             # 앞 장면 빨리 감기 — 그리지 않고 입자 계산만 한다. 다음 장면이 앞 장면 잔해에서 태어나므로,
             # 장면을 나눠 렌더해도 한 번에 돌린 것과 같은 결과가 나오게 한다.
-            S = Scene(sc, si, n_all, files, W, H, prev_cloud, rng, args.style, cell, args.emerge, reversal, quiet=True)
+            S = Scene(sc, si, n_all, files, W, H, prev_cloud, rng, args.style, cell, args.emerge, reversal, quiet=True,
+                      seed_glow=args.seed_glow, dissolve_shift=args.dissolve_shift)
             for f in range(frames_per_scene):
                 S.step(f / frames_per_scene, f / args.fps)
             prev_cloud = S.cloud()
             print(f'  장면 {sc.get("scene")} 빨리 감기 완료')
             continue
-        S = Scene(sc, si, n_all, files, W, H, prev_cloud, rng, args.style, cell, args.emerge, reversal)
+        S = Scene(sc, si, n_all, files, W, H, prev_cloud, rng, args.style, cell, args.emerge, reversal,
+                  seed_glow=args.seed_glow, dissolve_shift=args.dissolve_shift)
         if S.rev is not None:
             loc = S.rev * args.scene_sec
             g = done / args.fps + loc
