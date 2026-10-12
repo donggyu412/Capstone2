@@ -36,6 +36,9 @@
       모였던 오브제 전부가 한순간에 터지듯 흩어졌다가(약 1초), 위아래가 뒤집히고 1.15배 커지고
       감정 색조의 반대색으로 바뀐 채 약 3초 안에 다시 모인다. 반전 시각은 결과 json 의 "reversal" 에 적힌다
       (배경·사운드를 이 시각에 맞춘다). 끄려면 --no-reversal.
+    밝은·색 배경 대비 (--contrast · 통합이면 기본 1, 오브제만이면 0)
+      배경이 밝은 자리일수록 오브제 몸통 둘레에 부드러운 어두운 받침을 깔고(어두운 자리에는 거의 없음),
+      오브제 밝기가 바로 뒤 배경 밝기와 일정 이상 벌어지도록 색은 지킨 채 밝기만 맞춘다. 번짐 빛도 밝은 배경에서는 줄인다.
     병렬 렌더 (--jobs auto · 기본)
       장면마다 따로 동시에 렌더해 이어 붙인다. 각 장면은 앞 장면을 그리지 않고 계산만 빨리 감은 뒤 시작해서,
       한 줄로 돌린 것과 화소 단위로 같은 결과가 나온다(무손실 비교로 확인). 한 줄로 돌리려면 --jobs 1.
@@ -385,6 +388,7 @@ class Scene:
             col = posterize_hsv(np.clip(g + (col - g) * 1.3, 0, 1))
         self.col = np.clip(col, 0, 1).astype(np.float32)
         tint = np.array(REVERSAL_TINT.get(self.emo_label, REVERSAL_TINT['중립']), np.float32)
+        self.rev_tint = tint
         lum2 = self.col @ np.array([0.299, 0.587, 0.114], np.float32)
         rcol = np.clip(np.maximum(lum2, 0.25)[:, None] * tint * 1.25 + 0.12 * self.col, 0, 1)
         self.rev_col = (posterize_hsv(rcol) if digital else rcol).astype(np.float32)
@@ -543,7 +547,10 @@ class Scene:
                 continue
             M2 = M.copy(); M2[:, 2] -= [x0, y0]
             roi = cv2.warpAffine(img, M2, (x1 - x0, y1 - y0), flags=cv2.INTER_LINEAR, borderValue=0)
-            canvas_rgb[y0:y1, x0:x1] += roi[..., :3] * g
+            rgb = roi[..., :3]
+            if flip:  # 반전 뒤에는 원본 윤곽도 반대색으로 — 흰 원본이 비쳐 하얗게 번지지 않게
+                rgb = (rgb @ LUMW)[..., None] * self.rev_tint * 1.25
+            canvas_rgb[y0:y1, x0:x1] += rgb * g
             canvas_a[y0:y1, x0:x1] += roi[..., 3] * g
 
     def cloud(self):
@@ -647,6 +654,70 @@ def render_digital(pos, v, col, W, H, cell):
     return up(c).astype(np.float32), up(a)[..., 0].astype(np.float32)
 
 
+LUMW = np.array([0.299, 0.587, 0.114], np.float32)
+
+
+def contrast_prepare(bg, objA, strength, H, W):
+    """밝거나 색이 짙은 배경 위에서도 오브제가 드러나게 — 배경 쪽 손질
+    오브제 둘레에 부드러운 어두운 받침을 깐다. 받침은 배경이 밝은 자리일수록 짙고, 어두운 자리에서는 거의 없다.
+    돌려주는 것: 손질된 배경 · 오브제 자리의 배경 밝기(흐림) · 번짐 빛 배율"""
+    qw, qh = max(8, W // 4), max(8, H // 4)
+    # 흩어진 입자·옅은 연기 자국은 빼고 촘촘한 몸통에만 받침을 깐다 (받침이 옅은 연기를 드러내 하얀 테두리처럼 보이지 않게)
+    occ = cv2.resize(smoothstep(0.25, 0.65, objA).astype(np.float32), (qw, qh), interpolation=cv2.INTER_AREA)
+    halo = np.clip(cv2.GaussianBlur(occ, (0, 0), 4.0 * H / 1080 + 1.0) * 2.4, 0, 1)
+    lb = cv2.GaussianBlur(cv2.resize(bg, (qw, qh), interpolation=cv2.INTER_AREA) @ LUMW, (0, 0), 3.0 * H / 1080 + 0.5)
+    shade = strength * 0.78 * halo * smoothstep(0.12, 0.55, lb)
+    bg = bg * (1 - cv2.resize(shade, (W, H), interpolation=cv2.INTER_LINEAR)[..., None])
+    lb_after = cv2.resize(lb * (1 - shade), (W, H), interpolation=cv2.INTER_LINEAR)
+    glow_k = 1 - 0.75 * smoothstep(0.30, 0.75, lb_after)
+    return bg, lb_after, glow_k
+
+
+def contrast_object(objC, objA, lb, strength, min_gap=0.30):
+    """오브제 쪽 손질 — 오브제 밝기가 바로 뒤 배경 밝기와 min_gap 이상 벌어지게 (색은 지킨 채 밝기만)
+    입자가 촘촘히 모인 몸통에만 건다 — 흩어진 입자까지 밝히면 오브제 둘레가 하얗게 번진다"""
+    lo = objC @ LUMW
+    target = np.where(lb < 0.5, np.maximum(lo, lb + min_gap), np.minimum(lo, lb - min_gap))
+    ratio = np.clip(target / np.maximum(lo, 0.03), 0.35, 2.6)
+    ratio = 1 + (ratio - 1) * strength * smoothstep(0.35, 0.75, objA)
+    return np.clip(objC * ratio[..., None], 0, 1)
+
+
+def compose_analog(S, frame, out, u, composite, contrast, fog_col):
+    v, col, F, dx, dy, sx, tilt, scale, gap = out
+    W, H = S.W, S.H
+    acc = splat(S.pos, v, col, W, H)
+    acc = cv2.GaussianBlur(acc, (0, 0), 0.7 * H / 1080 + 0.3)
+    aw = acc[..., 3]
+    objA = 1 - np.exp(-aw * 1.6)
+    objC = acc[..., :3] / (aw[..., None] + 1e-6)
+    small = cv2.resize(acc[..., :3], (W // 4, H // 4), interpolation=cv2.INTER_AREA)
+    glow = cv2.resize(cv2.GaussianBlur(small, (0, 0), 6 * H / 1080 + 1), (W, H), interpolation=cv2.INTER_LINEAR)
+    gr = np.zeros((H, W, 3), np.float32); ga = np.zeros((H, W), np.float32)
+    S.ghost_layer(u, F, dx, dy, sx, tilt, scale, gap, gr, ga)
+    glow_k = 1.0
+    if contrast > 0:
+        frame, lb, glow_k = contrast_prepare(frame, np.clip(objA + ga, 0, 1), contrast, H, W)
+        objC = contrast_object(objC, objA, lb, contrast)
+        glow_k = glow_k[..., None]
+    frame = frame * (1 - np.clip(ga, 0, 1)[..., None]) + gr
+    frame = frame * (1 - objA[..., None]) + objC * objA[..., None]
+    frame += glow * (0.35 * S.A['glow'] * S.emo['glow']) * glow_k
+    if not composite:
+        frame = frame * (1 - S.A['fog'] * 0.25) + fog_col * (S.A['fog'] * 0.25)
+    return frame
+
+
+def compose_digital(S, frame, out, contrast, cell, gap_mask):
+    v, col = out[0], out[1]
+    W, H = S.W, S.H
+    objC, objA = render_digital(S.pos, v, col, W, H, cell)
+    if contrast > 0:
+        frame, lb, _ = contrast_prepare(frame, objA, contrast, H, W)
+        objC = contrast_object(objC, objA, lb, contrast)
+    return frame * (1 - objA[..., None]) + objC * gap_mask * objA[..., None]
+
+
 def label_overlay(sc_obj, W, H):
     font = find_font(max(12, int(H * 0.022)))
     small = find_font(max(10, int(H * 0.017)))
@@ -675,6 +746,7 @@ def run_parallel(args, jobs):
             '--objects', str(Path(args.objects).resolve()), '--scene-sec', str(args.scene_sec), '--fps', str(args.fps),
             '--size', args.size, '--scale', str(args.scale), '--style', args.style, '--block', str(args.block),
             '--crf', str(args.crf), '--emerge', args.emerge, '--reversal', str(args.reversal), '--worker',
+            '--contrast', str(args.contrast),
             '--threads', str(threads)]
     if args.bg: base += ['--bg', str(Path(args.bg).resolve())]
     if args.bg_json: base += ['--bg-json', str(Path(args.bg_json).resolve())]
@@ -751,6 +823,7 @@ def main():
     ap.add_argument('--emerge', choices=['point', 'cloud'], default='point', help='point: 한 점에서 서서히 드러남 · cloud: 예전 방식')
     ap.add_argument('--reversal', type=float, default=0.6, help='전(轉) 장면 반전 시점 (장면 안 비율 · 0.6 = 75초 중 45초)')
     ap.add_argument('--no-reversal', action='store_true', help='반전 끄기')
+    ap.add_argument('--contrast', type=float, default=-1, help='밝은·색 배경 대비 보정 세기 0~1 (기본: 통합이면 1, 오브제만이면 0)')
     ap.add_argument('--jobs', default='auto', help='동시에 렌더할 장면 수 (auto = CPU 에 맞춰 최대 4 · 1 = 한 줄로)')
     ap.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
     ap.add_argument('--progress-file', default='', help=argparse.SUPPRESS)
@@ -778,6 +851,7 @@ def main():
         order = [i for i in order if scenes[i].get('scene') in want]
     n_all = len(scenes)
     composite = bool(args.bg)
+    contrast = (1.0 if composite else 0.0) if args.contrast < 0 else args.contrast
     seed = int(hashlib.sha1(json.dumps(scenes, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:8], 16)
     rng = np.random.default_rng(seed)
     print(f'꿈 오브제 창발 엔진 · {args.style} · {W}x{H} · {args.fps}fps · 장면당 {args.scene_sec:g}초 · {"통합" if composite else "오브제만"} · 시드 {seed}')
@@ -837,11 +911,9 @@ def main():
         for f in range(frames_per_scene):
             tau = f / args.fps
             u = f / frames_per_scene
-            v, col, F, dx, dy, sx, tilt, scale, gap = S.step(u, tau)
+            step_out = S.step(u, tau)
             if digital:
-                objC, objA = render_digital(S.pos, v, col, W, H, cell)
-                frame = bg.get(si, tau)
-                frame = frame * (1 - objA[..., None]) + objC * gap_mask * objA[..., None]
+                frame = compose_digital(S, bg.get(si, tau), step_out, contrast, cell, gap_mask)
                 edge = min(1.0, tau / 1.0, (args.scene_sec - tau) / 1.0) if not composite else 1.0
                 if label is not None:
                     la = label[..., 3:4] * edge
@@ -854,21 +926,7 @@ def main():
                     el = time.time() - t0
                     print(f'\r  {done}/{total} 프레임 · {el:.0f}초 경과 · 남은 시간 약 {el / done * (total - done):.0f}초   ', end='', flush=True)
                 continue
-            acc = splat(S.pos, v, col, W, H)
-            acc = cv2.GaussianBlur(acc, (0, 0), 0.7 * H / 1080 + 0.3)
-            aw = acc[..., 3]
-            objA = 1 - np.exp(-aw * 1.6)
-            objC = acc[..., :3] / (aw[..., None] + 1e-6)
-            small = cv2.resize(acc[..., :3], (W // 4, H // 4), interpolation=cv2.INTER_AREA)
-            glow = cv2.resize(cv2.GaussianBlur(small, (0, 0), 6 * H / 1080 + 1), (W, H), interpolation=cv2.INTER_LINEAR)
-            frame = bg.get(si, tau)
-            gr = np.zeros((H, W, 3), np.float32); ga = np.zeros((H, W), np.float32)
-            S.ghost_layer(u, F, dx, dy, sx, tilt, scale, gap, gr, ga)
-            frame = frame * (1 - np.clip(ga, 0, 1)[..., None]) + gr
-            frame = frame * (1 - objA[..., None]) + objC * objA[..., None]
-            frame += glow * (0.35 * S.A['glow'] * S.emo['glow'])
-            if not composite:
-                frame = frame * (1 - S.A['fog'] * 0.25) + fog_col * (S.A['fog'] * 0.25)
+            frame = compose_analog(S, bg.get(si, tau), step_out, u, composite, contrast, fog_col)
             # 장면 경계 — 들어오고 나갈 때 1초씩 부드럽게
             edge = min(1.0, tau / 1.0, (args.scene_sec - tau) / 1.0) if not composite else 1.0
             if label is not None:
