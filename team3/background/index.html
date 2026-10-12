@@ -368,6 +368,51 @@ const TONE_WASH = (() => { const v = new URLSearchParams(location.search).get('w
 const TONE_SAT = 0.45;                              // 색조가 온전히 걸렸을 때 폐루프가 쫓을 화면 채도
 const TONE = { r: 1, g: 1, b: 1, amt: 0, warm: 0, lum: 1, simple: 0 };  // 지금 걸려 있는 색조 (r·g·b 는 휘도 1 로 맞춘 배율)
 let toneT = Object.assign({}, TONE);
+const TONE0 = Object.assign({}, TONE);              // 반전이 걸리기 전의 색조 — driftEmo 는 이것을 움직이고, TONE 은 여기에 반전을 얹은 값이다
+let toneKey = null;                                 // 지금 장면의 감정(표에 없으면 null) — 반전 색을 고른다
+
+/* ── 1-b''. 전(轉) 반전 (10-12) ─────
+   10/8 발표 검토: "클라이맥스 부분에서 (배경 및 오브제 이미지, 사운드 등) 획기적 반전 필요".
+   오브제 엔진(`team3/object/object_engine.py` --reversal 0.6)과 같은 시각 — 전 장면 시작 후 60%(75초 중 45초 · 5분이면 3:15).
+   오브제는 한순간에 흩어졌다가(약 2초) 위아래가 뒤집히고 감정 색의 반대색으로 약 4초 안에 다시 모인다. 배경도 같은 박자로:
+     그 순간   파편 전부가 빛(소용돌이 중심)에서 바깥으로 터진다. 붙드는 힘(안착·윤곽 붙들기·빨려듦)을 약 2초 놓았다가 4초에 되돌린다
+     그 뒤로   소용돌이가 거꾸로 돌고 · 떠오르던 빛이 가라앉고 · 감정 밝기가 뒤집힌다(어둡던 감정은 밝게, 밝던 감정은 어둡게) — 장면 끝까지
+     색        감정 색의 반대색(오브제의 REVERSAL_TINT 와 같은 표)이 화면을 훑고 지나간다 — 4초 머문 뒤 6초에 걸쳐 원래 색조로.
+               끝까지 반대색에 두지 않는 까닭: 오브제가 반전 뒤 바로 그 색이 되므로, 배경까지 그 색이면 오브제가 묻힌다(선명도).
+               끝까지 두고 보려면 `?revtone=stay`.
+   전 장면이 아니면 아무 일도 없다. 시험: `?rev=0` 끔 · `?revat=0.6` 시점(장면 안 비율) · `?sec=10` 이면 6초에 일어난다. */
+const REV_ON = new URLSearchParams(location.search).get('rev') !== '0';
+const REV_AT = (() => { const v = +new URLSearchParams(location.search).get('revat'); return v > 0 && v < 1 ? v : 0.6; })();
+const REV_FRAME = Math.round(REV_AT * SCENE_PERIOD);
+const REV_TONE_STAY = new URLSearchParams(location.search).get('revtone') === 'stay';
+const REV_TINT = {   // 오브제 엔진 REVERSAL_TINT 와 같은 값 (0~255)
+  '기쁨': [ 89,191,255], '슬픔': [255,173, 77], '분노': [ 77,230,230],
+  '공포': [255,184, 77], '놀람': [153,255,102], '혐오': [255,107,204], '중립': [255,184, 77],
+};
+let revF = -1;          // 반전 뒤 지난 프레임 (-1 = 아직)
+let REV = 0;            // 뒤집힌 정도 0~1 — 반전 뒤 1.5초에 걸쳐 1, 다음 장면으로 넘어가며 0
+let revPull = 1;        // 붙드는 힘 배율 — 터진 직후 0, 4초에 1
+let revTone = 0;        // 반대색이 걸린 정도 0~1
+const sstep = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+
+/* 프레임마다 한 번 — 반전 시각이 되었는지 보고 위 네 값을 움직인다. 터뜨려야 하는 바로 그 프레임에만 true */
+function stepReversal() {
+  let fire = false;
+  if (REV_ON && revF < 0 && actName === '전' && sceneFrame >= REV_FRAME && fadeT >= 1) {
+    revF = 0; fire = true;
+    if (fix && fix.state === 'rec')   // 영상 기록에 반전 시각을 남긴다 — 오브제 json 의 "reversal" 과 같은 꼴
+      fix.reversal.push({ scene: sceneIdx + 1, local_sec: +(sceneFrame / 60).toFixed(2), global_sec: +(fix.n / 60).toFixed(2) });
+  } else if (revF >= 0) revF++;
+  if (revF >= 0) {
+    REV += (1 - REV) * 0.04;
+    revPull = sstep(110, 240, revF);
+    revTone = REV_TONE_STAY ? sstep(0, 60, revF) : sstep(0, 60, revF) * (1 - sstep(240, 600, revF));
+  } else {   // 다음 장면 — 막과 같은 속도로 풀린다
+    const k = 1 / curXfade * 2.2;
+    REV += (0 - REV) * k; revTone += (0 - revTone) * k; revPull = 1;
+  }
+  return fire;
+}
 
 /* 색 하나를 감정 색조 쪽으로 옮긴다. 결과는 gradeRGB 와 같이 gR·gG·gB 에 담는다.
    색조를 휘도 1 로 맞춰 두었으므로 (TONE.r−1, TONE.g−1, TONE.b−1) 은 휘도가 0 인 방향이다 — 밝기는 안 변한다.
@@ -402,18 +447,32 @@ function setEmotion(label, intensity) {
 
   // 색조 — 표에 없는 감정(중립·옛 라벨)이면 깊이만 0 으로 내린다. 색은 그대로 두어 빠지는 동안 다른 색을 거치지 않는다
   const tn = TONE_ON && key ? EMO_TONE[key] : null;
+  toneKey = key;
   if (tn) {
     const l = 0.2126 * tn.c[0] + 0.7152 * tn.c[1] + 0.0722 * tn.c[2];
     toneT = { r: tn.c[0] / l, g: tn.c[1] / l, b: tn.c[2] / l, amt: tn.amt * w, warm: tn.warm,
               lum: TONE_LUM_ON ? 1 + (tn.lum - 1) * w : 1, simple: TONE_SIMPLE_ON ? tn.simple * w : 0 };
-  } else toneT = { r: TONE.r, g: TONE.g, b: TONE.b, amt: 0, warm: TONE.warm, lum: 1, simple: 0 };
+  } else toneT = { r: TONE0.r, g: TONE0.g, b: TONE0.b, amt: 0, warm: TONE0.warm, lum: 1, simple: 0 };
 }
 
 /* 막과 똑같은 속도로 스며든다 — 감정이 장면과 함께 건너오지, 툭 바뀌지 않는다. */
 function driftEmo() {
   const k = 1 / curXfade * 2.2;
   for (const key in EMO) EMO[key] += (emoTarget[key] - EMO[key]) * k;
-  for (const key in TONE) TONE[key] += (toneT[key] - TONE[key]) * k;
+  for (const key in TONE0) TONE0[key] += (toneT[key] - TONE0[key]) * k;
+  Object.assign(TONE, TONE0);
+  if (REV < 0.002 && revTone < 0.002) return;   // 반전이 없으면 여기까지 — 예전과 같은 값이다
+  // 전(轉) 반전 — 감정 밝기는 1 을 가운데 두고 뒤집고(장면 끝까지), 색은 반대색을 얹는다
+  if (TONE_LUM_ON) TONE.lum = TONE0.lum + (clamp(2 - TONE0.lum, 0.6, 1.5) - TONE0.lum) * REV;
+  if (TONE_ON && revTone > 0.002) {
+    const c = REV_TINT[toneKey] || REV_TINT['중립'], l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    const m = TONE0.amt > 0.004 ? revTone : 1;   // 색조가 없던 장면이면 섞을 원래 색이 없다 — 깊이만 올린다
+    TONE.r = TONE0.r + (c[0] / l - TONE0.r) * m;
+    TONE.g = TONE0.g + (c[1] / l - TONE0.g) * m;
+    TONE.b = TONE0.b + (c[2] / l - TONE0.b) * m;
+    TONE.amt = TONE0.amt + (Math.max(TONE0.amt, 0.55) - TONE0.amt) * revTone;
+    TONE.warm = TONE0.warm + ((c[0] > c[2] ? 1 : 0) - TONE0.warm) * revTone;   // DB 난색 과녁도 같은 쪽으로 — 안 밀면 폐루프가 되감는다
+  }
 }
 
 /* ── 1-c. 꿈의 물리 법칙 — 2팀 physics_laws (09-27) ─────
@@ -1192,6 +1251,7 @@ window.addEventListener('keydown', e => {
 function gotoScene(i) {
   sceneIdx = ((i % scenes.length) + scenes.length) % scenes.length;
   sceneFrame = 0;
+  revF = -1;   // 전(轉) 반전은 장면마다 한 번 — 뒤집혔던 값은 stepReversal 이 막과 같은 속도로 푼다
   const sc = scenes[sceneIdx];
   if (rec && rec.state === 'rec') recMark(sc);
   if (fix && fix.state === 'rec') fixMark(sc);
@@ -1839,6 +1899,17 @@ function updateParticles() {
   const brth  = LAW.breathe * (0.05 + 10 * A.settle) * Math.sin(sceneFrame * 2 * Math.PI / 240);
   const thinK = 0.60 * LAW.thin * progress;                                      // 가늘어져 사라짐 — 장면 끝에 최대 60%
 
+  /* 전(轉) 반전 — 그 프레임에 한 번, 모든 파편을 빛에서 바깥으로 터뜨린다(파편마다 세기가 다르다 · 순서표 psp).
+     마찰이 곧 잡아 주므로 150~250px 쯤 밀려난다. 그 뒤 revDir(1 → −1)이 소용돌이의 도는 방향과 부양의 위아래를 뒤집는다. */
+  if (stepReversal()) {
+    const sp = H * 0.012;
+    for (let i = 0; i < NP2; i++) {
+      const dx = px[i] - lightX, dy = py[i] - lightY, d = Math.sqrt(dx*dx + dy*dy) + 1, s = sp * (0.6 + 0.8 * psp[i]);
+      pvx[i] += dx / d * s; pvy[i] += dy / d * s;
+    }
+  }
+  const revDir = 1 - 2 * REV;
+
   for (let i = 0; i < NP2; i++) {
     suck(px[i], py[i], jitter);
     const br = sbr;
@@ -1847,7 +1918,7 @@ function updateParticles() {
     /* ① 안착 — 제 자리로 끌린다 (승에서 형태가 맺히는 힘).
        소리가 잦아들수록 형태가 또렷이 맺힌다. */
     if (A.settle > 0.0005) {
-      const k = A.settle * (0.55 + (1 - sndLevel) * 0.85);
+      const k = A.settle * (0.55 + (1 - sndLevel) * 0.85) * revPull;
       pvx[i] += (hx[i] - px[i]) * k;
       pvy[i] += (hy[i] - py[i]) * k;
     }
@@ -1866,8 +1937,8 @@ function updateParticles() {
       const d = Math.sqrt(dx*dx + dy*dy) + 1;
       // spiral 유전자가 소용돌이의 세기를 흔든다 (GA 연결 ④)
       const pull = A.swirl * (0.35 + br) * (0.6 + Math.abs(gene.spiral) * 0.28) / d;
-      pvx[i] += dx * pull * 1.6;   pvy[i] += dy * pull * 1.6;   // 구심 성분 = 빨려듦
-      pvx[i] += -dy * pull * 1.2;  pvy[i] += dx * pull * 1.2;   // 접선 성분 = 회전
+      pvx[i] += dx * pull * 1.6 * revPull;   pvy[i] += dy * pull * 1.6 * revPull;   // 구심 성분 = 빨려듦 (반전 직후엔 놓는다)
+      pvx[i] += -dy * pull * 1.2 * revDir;   pvy[i] += dx * pull * 1.2 * revDir;    // 접선 성분 = 회전 (반전 뒤엔 거꾸로 돈다)
       // ※ 더 세게 걸면 입자가 초당 700px 넘게 튀어 점이 띄엄띄엄 찍히고
       //   소용돌이가 아니라 노이즈로 보인다. 이 값이 상한이다.
     }
@@ -1876,13 +1947,13 @@ function updateParticles() {
        소용돌이는 모든 파편을 빛 쪽으로 끌어내 방·복도의 형체를 지웠다. 밝은 파편은
        그대로 빨려들게 두고 어두운 파편만 붙들어, 절정의 소용돌이와 흐릿한 윤곽이 함께 남는다. */
     if (A.hold > 0.0005 && br < 0.5) {
-      const t = 1 - br / 0.5, h = A.hold * t * t;   // 밝기 0.5 이상은 0 — 밝은 파편의 소용돌이는 건드리지 않는다
+      const t = 1 - br / 0.5, h = A.hold * t * t * revPull;   // 밝기 0.5 이상은 0 — 밝은 파편의 소용돌이는 건드리지 않는다
       pvx[i] += (hx[i] - px[i]) * h;
       pvy[i] += (hy[i] - py[i]) * h;
     }
 
     /* ④ 부양 — 밝은 곳에서 빛이 위로 떠오른다 */
-    pvy[i] -= br * br * A.rise;
+    pvy[i] -= br * br * A.rise * revDir;   // 반전 뒤엔 가라앉는다
 
     /* ⑤ 바람 — ★ 위치마다 세기·방향이 달라야 '바람'으로 읽힌다.
        예전엔 모든 입자를 같은 방향으로 같은 세기로 밀어서 카메라 팬처럼 보였다.
@@ -2716,7 +2787,7 @@ function toggleFixRec(one) {
   const cv = document.createElement('canvas');
   cv.width = W - W % 2; cv.height = H - H % 2;
   const only = one ? Math.max(0, sceneIdx) : null;
-  fix = { state: 'wait', cv, g: null, enc: null, sent: 0, n: 0, v: 0, inflight: 0, marks: [], err: null, codec: null, only,
+  fix = { state: 'wait', cv, g: null, enc: null, sent: 0, n: 0, v: 0, inflight: 0, marks: [], reversal: [], err: null, codec: null, only,
           total: (only !== null ? 1 : scenes.length) * SCENE_PERIOD,
           run: stamp() + '_' + ((SRC_INFO && SRC_INFO.mode) || 'input') + (only !== null ? '_scene' + String(scenes[only].act).padStart(2, '0') : '') + '_mp4' };
   fixBtn(fix, true, '영상 준비 · 누르면 취소');
@@ -2809,7 +2880,7 @@ function stopFixRec() {
       sound: '없음 — 프레임 고정 녹화는 소리를 담지 않는다 (소리까지는 [녹화] webm)',
       layers: '화면 그대로 (비네트 + 막 · 제목 · 감정 표지) — 글자 없는 판은 [장면 저장]의 scene_NN.png',
       input_mode: SRC_INFO ? SRC_INFO.mode : null, input_file: SRC_INFO ? SRC_INFO.file : null,
-      scenes: f.marks, only_scene: f.only !== null ? scenes[f.only].act : null, recorded_at: new Date().toISOString(),
+      scenes: f.marks, reversal: f.reversal, only_scene: f.only !== null ? scenes[f.only].act : null, recorded_at: new Date().toISOString(),
       engine: { GLOW_SIZE, BASE_ALPHA, AP_COMP, NP2 },
       error: f.err ? String(f.err.message || f.err) : null,
       note: '프레임 고정 녹화 — 엔진 한 프레임 = 1/60초, 두 프레임에 한 장씩 30fps 로 담는다. 컴퓨터 속도와 상관없이 장면당 ' + SCENE_SEC + '초. 같은 입력이어도 매번 조금씩 다르다(창발).',
