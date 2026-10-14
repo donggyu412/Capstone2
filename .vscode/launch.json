@@ -1,0 +1,85 @@
+{
+  // F5로 실행. 좌측 "실행 및 디버그" 패널 드롭다운에서 설정을 고른다.
+  // 공통: 작업 폴더를 저장소 루트로 고정하고(코드가 상대 경로를 쓴다),
+  //       venv 파이썬을 직접 지정하며, 한글 출력이 깨지지 않게 UTF-8을 강제한다.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "전체 파이프라인 (테스트 CSV)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/run_pipeline.py",
+      "python": "${workspaceFolder}/venv/Scripts/python.exe",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": { "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8" },
+      "args": [
+        "--emotion-csv",
+        "team1/testdata/session_20261005_005030.csv"
+      ]
+    },
+    {
+      "name": "피크까지만 (API 비용 없음)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/run_pipeline.py",
+      "python": "${workspaceFolder}/venv/Scripts/python.exe",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": { "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8" },
+      "args": [
+        "--emotion-csv",
+        "team1/testdata/session_20261005_005030.csv",
+        "--until",
+        "peaks"
+      ]
+    },
+    {
+      // run_pipeline.py에 포함되지 않은 단계. 전체 흐름을 쓰려면
+      // "피크까지만" 실행 후 이 두 개를 순서대로 돌리고, 그다음 "step2만"을 돌린다.
+      "name": "1팀 step5 (키워드 풀)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/team1/src/step5_extract_keywords.py",
+      "python": "${workspaceFolder}/venv/Scripts/python.exe",
+      "cwd": "${workspaceFolder}/team1/src",
+      "console": "integratedTerminal",
+      "env": { "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8" }
+    },
+    {
+      "name": "1팀 step6 (설계도 진화)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/team1/src/step6_assemble_blueprint.py",
+      "python": "${workspaceFolder}/venv/Scripts/python.exe",
+      "cwd": "${workspaceFolder}/team1/src",
+      "console": "integratedTerminal",
+      "env": { "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8" },
+      "args": []
+    },
+    {
+      "name": "2팀 step2만 (글 다시 생성)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/team2/step2_story_v2.py",
+      "python": "${workspaceFolder}/venv/Scripts/python.exe",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": { "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8" },
+      "args": [
+        "team2/output/parsed_scenes.json",
+        "team2/output"
+      ]
+    },
+    {
+      "name": "현재 열린 파일 실행",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "python": "${workspaceFolder}/venv/Scripts/python.exe",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": { "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8" }
+    }
+  ]
+}
