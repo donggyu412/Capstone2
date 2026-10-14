@@ -3,9 +3,9 @@ from dataclasses import replace
 import pickle,unittest
 import numpy as np
 from team4.DreamModel.config import RenderConfig
-from team4.DreamModel.dream_pipeline import prepare
-from team4.DreamModel.dream_world import DreamWorld
-from team4.DreamModel.dream_surfaces import DreamSurfaces
+from team4.DreamModel.runtime.dream_pipeline import prepare
+from team4.DreamModel.runtime.dream_world import DreamWorld
+from team4.DreamModel.runtime.dream_surfaces import DreamSurfaces
 
 
 class FullDreamTests(unittest.TestCase):

@@ -4,7 +4,7 @@ DreamModel은 4장면의 배경과 오브제를 각각 다른 과정으로 형�
 
 ## 배경의 3가지 기법
 
-모두 [background_openended.py](../background_openended.py)에 구현되어 있다.
+모두 [background_openended.py](../runtime/background_openended.py)에 구현되어 있다.
 
 | 기법 | 실제 규칙 | 화면 / 조건 연결 |
 |---|---|---|
@@ -16,7 +16,7 @@ DreamModel은 4장면의 배경과 오브제를 각각 다른 과정으로 형�
 
 ## 오브제의 4가지 기법
 
-구조 진화·선택·상속은 [dream_world.py](../dream_world.py), 가시 형태 문법은 [dream_surfaces.py](../dream_surfaces.py)에 구현되어 있다.
+구조 진화·선택·상속은 [dream_world.py](../runtime/dream_world.py), 가시 형태 문법은 [dream_surfaces.py](../runtime/dream_surfaces.py)에 구현되어 있다.
 
 | 기법 | 실제 규칙 | 구현 범위 |
 |---|---|---|
@@ -38,7 +38,7 @@ DreamModel은 4장면의 배경과 오브제를 각각 다른 과정으로 형�
 
 ## 검증과 한계
 
-[validate_urgent.py](../validate_urgent.py)는 같은 입력과 seed에서 조건별 제거 비교와 재실행 재현성을 확인한다. 기존 10Hz 비교에서는 story/emotion/sound/collective 각각이 배경과 오브제 양쪽의 픽셀에 영향을 주었다. 배경 진화·경쟁 제거도 배경 결과를 바꿨으며, 국소 소멸·기억 재생 사건을 기록했다. 비교용 시뮬레이션 주기와 전달 영상의 30fps는 구분한다.
+[validate_conditions.py](../tools/validate_conditions.py)는 같은 입력과 seed에서 조건별 제거 비교와 재실행 재현성을 확인한다. 기존 10Hz 비교에서는 story/emotion/sound/collective 각각이 배경과 오브제 양쪽의 픽셀에 영향을 주었다. 배경 진화·경쟁 제거도 배경 결과를 바꿨으며, 국소 소멸·기억 재생 사건을 기록했다. 비교용 시뮬레이션 주기와 전달 영상의 30fps는 구분한다.
 
 [tests](../tests)는 입력 계약, 구조·선택·기억, 초기 형성, 장면 경계의 직렬화 상태 복원, 최종 소멸과 영상 출력을 검사한다. 완성본 제작에서는 1920×1080·30fps·9,000프레임·300초 전체 디코딩과 원본 음원 동기를 별도로 확인했다.
 

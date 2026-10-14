@@ -2,14 +2,14 @@
 from dataclasses import replace
 import unittest
 import numpy as np
-from team4.DreamModel.audience import AudienceAtmosphere
-from team4.DreamModel.background_evolution import BackgroundEvolution
-from team4.DreamModel.evolving_brush import EvolvingBrush
-from team4.DreamModel.geometric_evolution import Evolution
-from team4.DreamModel.input_loader import load_inputs
+from team4.DreamModel.runtime.audience import AudienceAtmosphere
+from team4.DreamModel.archive.background_evolution import BackgroundEvolution
+from team4.DreamModel.archive.evolving_brush import EvolvingBrush
+from team4.DreamModel.archive.geometric_evolution import Evolution
+from team4.DreamModel.runtime.input_loader import load_inputs
 from team4.DreamModel.main import parse_config
-from team4.DreamModel.memory_grammar import MemoryField
-from team4.DreamModel.semantic_conditioning import SemanticLibrary
+from team4.DreamModel.archive.memory_grammar import MemoryField
+from team4.DreamModel.runtime.semantic_conditioning import SemanticLibrary
 from team4.DreamModel.tests import test_input_loader as fixtures
 
 

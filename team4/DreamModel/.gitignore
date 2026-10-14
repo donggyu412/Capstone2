@@ -2,11 +2,5 @@
 __pycache__/
 *.pyc
 
-# Local review notes, handoff prompts, and superseded working documents.
-# Keep the current shared implementation guide.
-/DESIGN_AUDIT.md
-/ROLE_AND_INTERFACE.md
-/URGENT_REVIEW.md
-/WORK_REPORT.md
-/docs/*
-!/docs/IMPLEMENTATION.md
+# Local working notes; shared documentation lives in docs/.
+/archive/notes/

@@ -1,4 +1,4 @@
-"""Render a normal-speed excerpt around the first dream transition."""
+"""Render a preview or the complete four-act DreamModel animation."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from team4.DreamModel.config import REPO_ROOT, RenderConfig
-from team4.DreamModel.dream_pipeline import render
-from team4.DreamModel.audience import AudienceAtmosphere
+from team4.DreamModel.runtime.dream_pipeline import render
+from team4.DreamModel.runtime.audience import AudienceAtmosphere
 
 
 def parse_config(argv: list[str] | None = None) -> tuple[RenderConfig, Path | None]:
@@ -30,13 +30,15 @@ def parse_config(argv: list[str] | None = None) -> tuple[RenderConfig, Path | No
     parser.add_argument("--audio", type=Path, help="명시적 오디오 파일. 미지정 시 공통 입력에서 탐색")
     parser.add_argument("--output", type=Path, help="MP4 저장 경로")
     parser.add_argument("--report", type=Path, help="실행 보고서 JSON 저장 경로")
-    parser.add_argument("--transition-seconds", type=float, help="장면 마지막 전환 구간의 길이")
+    parser.add_argument("--transition-seconds", type=float, help=argparse.SUPPRESS)
     parser.add_argument("--semantic-config", type=Path, help="예술적 감정·스토리 규칙 설정 JSON")
     parser.add_argument('--audience-arousal',type=float,default=.5,help='관객 집단 활성도 0–1; 기본값은 관측 데이터가 아님')
     parser.add_argument('--audience-tension',type=float,default=.5,help='관객 집단 긴장도 0–1')
     parser.add_argument('--audience-coherence',type=float,default=.5,help='관객 집단 반응 일치도 0–1')
     parser.add_argument('--audience-source',default='preview defaults; no measured audience aggregate supplied')
     args = parser.parse_args(argv)
+    if args.transition_seconds is not None:
+        parser.error("Current DreamModel uses fixed transition growth at 65, 140 and 215 seconds; --transition-seconds is unsupported.")
     smoke = not args.final
     output_dir = REPO_ROOT / "team4/DreamModel/output"
     config = RenderConfig(output_path=output_dir/'collective_dream_final.mp4',
@@ -75,9 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         if config.smoke:
             render(config, audio_path)
         else:
-            # User reviewed the three previews and explicitly approved the
-            # complete 4 x 75-second delivery on 2026-10-08.
-            from team4.DreamModel.render_final import render as render_final
+            from team4.DreamModel.runtime.render_final import render as render_final
             render_final(config, audio_path)
     except (ValueError, OSError, RuntimeError) as error:
         print(f"[오류] {error}", file=sys.stderr)

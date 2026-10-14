@@ -5,11 +5,11 @@ import unittest
 import cv2
 import numpy as np
 from team4.DreamModel.config import REPO_ROOT,RenderConfig
-from team4.DreamModel.developmental_pipeline import prepare,render
-from team4.DreamModel.developmental_world import DevelopmentalWorld
-from team4.DreamModel.developmental_renderer import DevelopmentalRenderer
-from team4.DreamModel.story_events import StoryEvents
-from team4.DreamModel.audience import AudienceAtmosphere
+from team4.DreamModel.archive.developmental_pipeline import prepare,render
+from team4.DreamModel.archive.developmental_world import DevelopmentalWorld
+from team4.DreamModel.archive.developmental_renderer import DevelopmentalRenderer
+from team4.DreamModel.archive.story_events import StoryEvents
+from team4.DreamModel.runtime.audience import AudienceAtmosphere
 
 
 class StorySurfaceTests(unittest.TestCase):

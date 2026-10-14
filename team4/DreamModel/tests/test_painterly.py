@@ -2,15 +2,15 @@
 from dataclasses import replace
 import unittest
 import numpy as np
-from team4.DreamModel.brush_painter import BrushMemory,BrushPainter
+from team4.DreamModel.archive.brush_painter import BrushMemory,BrushPainter
 from team4.DreamModel.config import RenderConfig
-from team4.DreamModel.input_loader import load_inputs
+from team4.DreamModel.runtime.input_loader import load_inputs
 from team4.DreamModel.main import parse_config
-from team4.DreamModel.painterly_pipeline import render
-from team4.DreamModel.scene_composition import build_composition
-from team4.DreamModel.semantic_conditioning import SemanticLibrary
-from team4.DreamModel.memory_grammar import MemoryField
-from team4.DreamModel.evolving_brush import EvolvingBrush
+from team4.DreamModel.archive.painterly_pipeline import render
+from team4.DreamModel.archive.scene_composition import build_composition
+from team4.DreamModel.runtime.semantic_conditioning import SemanticLibrary
+from team4.DreamModel.archive.memory_grammar import MemoryField
+from team4.DreamModel.archive.evolving_brush import EvolvingBrush
 from team4.DreamModel.tests import test_input_loader as fixtures
 
 

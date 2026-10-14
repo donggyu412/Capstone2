@@ -6,13 +6,13 @@ import unittest
 import wave
 import numpy as np
 
-from team4.DreamModel.audio_analyzer import AudioAnalyzer, prepare_preview_audio
-from team4.DreamModel.scene_composition import build_composition
-from team4.DreamModel.scene_formation import AdaptiveBalance, FormationMemory, FormationRenderer, ParticleFormation
-from team4.DreamModel.semantic_conditioning import SemanticLibrary
+from team4.DreamModel.runtime.audio_analyzer import AudioAnalyzer, prepare_preview_audio
+from team4.DreamModel.archive.scene_composition import build_composition
+from team4.DreamModel.archive.scene_formation import AdaptiveBalance, FormationMemory, FormationRenderer, ParticleFormation
+from team4.DreamModel.runtime.semantic_conditioning import SemanticLibrary
 from team4.DreamModel.tests import test_input_loader as fixtures
-from team4.DreamModel.input_loader import load_inputs
-from team4.DreamModel.transition_controller import TransitionMode, TransitionState
+from team4.DreamModel.runtime.input_loader import load_inputs
+from team4.DreamModel.archive.transition_controller import TransitionMode, TransitionState
 
 
 class FormationTests(unittest.TestCase):

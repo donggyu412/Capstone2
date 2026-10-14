@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from team4.DreamModel.input_loader import load_inputs
+from team4.DreamModel.runtime.input_loader import load_inputs
 
 
 class InputLoaderTests(unittest.TestCase):

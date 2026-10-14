@@ -3,9 +3,12 @@
 from dataclasses import dataclass,field
 import math
 from pathlib import Path
-from .audience import AudienceAtmosphere
+from team4.DreamModel.runtime.audience import AudienceAtmosphere
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+MODEL_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = MODEL_ROOT.parents[1]
+CONFIG_ROOT = MODEL_ROOT / "configs"
+OUTPUT_ROOT = MODEL_ROOT / "output"
 MODEL_VERSION = "1.2.0"
 
 
@@ -19,13 +22,13 @@ class RenderConfig:
     seed: int = 101
     smoke: bool = False
     input_root: Path = REPO_ROOT / "team4" / "input"
-    output_path: Path = REPO_ROOT / "team4" / "output" / "dreammodel_final.mp4"
-    report_path: Path = REPO_ROOT / "team4" / "output" / "dreammodel_run_report.json"
+    output_path: Path = OUTPUT_ROOT / "dreammodel_final.mp4"
+    report_path: Path = OUTPUT_ROOT / "dreammodel_run_report.json"
     trace_width: int = 128
     trace_height: int = 72
     trace_decay: float = 0.980
     memory_retention: float = 0.35
-    semantic_config: Path = Path(__file__).with_name("semantic_config.json")
+    semantic_config: Path = CONFIG_ROOT / "semantic_config.json"
     conditioning_off: str | None = None
     scene_count: int = 4
     preview_start_seconds: float | None = None

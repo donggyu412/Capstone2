@@ -4,10 +4,10 @@ import unittest
 
 import numpy as np
 
-from team4.DreamModel.adaptive_exploration import AdaptiveExploration
-from team4.DreamModel.object_dynamics import ObjectDynamics
-from team4.DreamModel.trace_memory import TraceMemory
-from team4.DreamModel.transition_controller import (
+from team4.DreamModel.archive.adaptive_exploration import AdaptiveExploration
+from team4.DreamModel.archive.object_dynamics import ObjectDynamics
+from team4.DreamModel.archive.trace_memory import TraceMemory
+from team4.DreamModel.archive.transition_controller import (
     TransitionController, TransitionMode, TransitionState, mode_for_stage,
 )
 

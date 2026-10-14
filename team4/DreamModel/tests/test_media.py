@@ -12,8 +12,8 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from audio_analyzer import AudioAnalyzer
-from frame_renderer import FrameRenderer, VideoWriter, find_ffmpeg, load_background, load_sprite, subprocess_options
+from team4.DreamModel.runtime.audio_analyzer import AudioAnalyzer
+from team4.DreamModel.archive.frame_renderer import FrameRenderer, VideoWriter, find_ffmpeg, load_background, load_sprite, subprocess_options
 
 
 def write_wav(path: Path, samples: np.ndarray, sample_rate: int = 16000) -> None:

@@ -4,11 +4,11 @@ from pathlib import Path
 import tempfile
 import unittest
 import numpy as np
-from team4.DreamModel.input_loader import load_inputs
-from team4.DreamModel.memory_grammar import MemoryField
-from team4.DreamModel.semantic_conditioning import SemanticLibrary
-from team4.DreamModel.geometric_evolution import Evolution, GeometricRenderer
-from team4.DreamModel.geometric_pipeline import render
+from team4.DreamModel.runtime.input_loader import load_inputs
+from team4.DreamModel.archive.memory_grammar import MemoryField
+from team4.DreamModel.runtime.semantic_conditioning import SemanticLibrary
+from team4.DreamModel.archive.geometric_evolution import Evolution, GeometricRenderer
+from team4.DreamModel.archive.geometric_pipeline import render
 from team4.DreamModel.config import RenderConfig
 from team4.DreamModel.tests import test_input_loader as fixtures
 

@@ -4,9 +4,9 @@ import unittest
 import numpy as np
 import cv2
 from team4.DreamModel.config import RenderConfig
-from team4.DreamModel.developmental_pipeline import prepare
-from team4.DreamModel.emergence_renderer import EmergenceRenderer
-from team4.DreamModel.developmental_world import DevelopmentalWorld
+from team4.DreamModel.archive.developmental_pipeline import prepare
+from team4.DreamModel.archive.emergence_renderer import EmergenceRenderer
+from team4.DreamModel.archive.developmental_world import DevelopmentalWorld
 
 
 class EmergenceTests(unittest.TestCase):

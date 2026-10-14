@@ -6,7 +6,7 @@ DreamModel은 이야기·감정·받은 사운드를 생성 조건으로 사용�
 
 ## 설치
 
-저장소 루트에서 Python 3.12 이상으로 실행한다.
+저장소 루트에서 Python 3.12 기준으로 실행한다.
 
 ```powershell
 python -m venv team4/DreamModel/.venv
@@ -21,7 +21,7 @@ python -m venv team4/DreamModel/.venv
 | 배경의 공간 기억 | `team3/background/input/storyboard/scene_01.png` ~ `scene_04.png` |
 | 오브제 | `team4/input/objects/objects.json`과 장면별 RGBA 이미지 13개 |
 | 사운드 | 별도로 전달받은 300초 음원을 `--audio`로 지정 |
-| 구도 | `assumed_layout.json`의 정규화 좌표. 상류에서 확정한 배치가 아닌 명시적 가정 |
+| 구도 | `configs/assumed_layout.json`의 정규화 좌표. 상류에서 확정한 배치가 아닌 명시적 가정 |
 | 집단 감응 | `--audience-arousal`, `--audience-tension`, `--audience-coherence` |
 
 배경·오브제·이야기 원본은 읽기 전용 입력으로 사용한다. 2팀 내부 vector는 사용하지 않는다. 실측 관객 데이터가 없는 기본 집단 조건은 `SIMULATION`으로 보고한다.
@@ -35,7 +35,7 @@ python -m venv team4/DreamModel/.venv
 .\team4\DreamModel\.venv\Scripts\python.exe -m team4.DreamModel.main --preview --preview-start 65 --preview-seconds 25 --audio "received_sound.wav" --output team4/DreamModel/output/transition_v1.mp4
 
 # 배경 단독 / 오브제 단독 / 통합 프리뷰
-.\team4\DreamModel\.venv\Scripts\python.exe -m team4.DreamModel.urgent_previews --audio "received_sound.wav" --output team4/DreamModel/output/review_v1
+.\team4\DreamModel\.venv\Scripts\python.exe -m team4.DreamModel.tools.preview_layers --audio "received_sound.wav" --output team4/DreamModel/output/review_v1
 
 # 기승전결 각 75초, 전체 300초
 .\team4\DreamModel\.venv\Scripts\python.exe -m team4.DreamModel.main --final --audio "received_sound.wav" --output team4/DreamModel/output/Collective_Dreaming_Final_1080p_300s.mp4
@@ -47,28 +47,30 @@ python -m venv team4/DreamModel/.venv
 
 ```powershell
 .\team4\DreamModel\.venv\Scripts\python.exe -m unittest discover -s team4/DreamModel/tests -q
-.\team4\DreamModel\.venv\Scripts\python.exe -m team4.DreamModel.validate_urgent --audio "received_sound.wav" --output team4/DreamModel/output/validation_v1
+.\team4\DreamModel\.venv\Scripts\python.exe -m team4.DreamModel.tools.validate_conditions --audio "received_sound.wav" --output team4/DreamModel/output/validation_v1
 ```
 
-`validate_urgent`는 동일 seed에서 story/emotion/sound/collective 및 진화·경쟁·기억·선택 조건을 하나씩 제거해 상태와 실제 프레임 차이를 비교한다. 같은 seed 재실행의 재현성도 확인한다.
+`tools.validate_conditions`는 동일 seed에서 story/emotion/sound/collective 및 진화·경쟁·기억·선택 조건을 하나씩 제거해 상태와 실제 프레임 차이를 비교한다. 같은 seed 재실행의 재현성도 확인한다.
 
-2026-10-08 생성한 완성본은 9,000프레임 전체 디코딩, H.264/AAC, 300초, 원본 음원 동기 검증을 통과했다. 당시 음량 곡선 상관은 0.999864였다. MP4와 상세 실행·검증 JSON은 로컬 생성물이며 저장소에 포함하지 않는다. `verify_final_delivery.py`는 해당 제작 기록용 도구로, 기본적으로 로컬 보호 파일 해시 목록도 요구한다. 다른 환경에서는 `--protected`로 그 환경의 기준 목록을 지정해야 한다.
+2026-10-08 생성한 완성본은 9,000프레임 전체 디코딩, H.264/AAC, 300초, 원본 음원 동기 검증을 통과했다. 당시 음량 곡선 상관은 0.999864였다. MP4와 상세 실행·검증 JSON은 로컬 생성물이며 저장소에 포함하지 않는다. `tools.verify_delivery`는 같은 버전으로 렌더한 영상과 보고서를 검사한다. 보호 파일 해시 목록은 선택적으로 `--protected`로 지정한다. 과거 보고서는 당시 소스 기준으로 보존한다.
 
 ## 활성 코드
 
 | 파일 | 책임 |
 |---|---|
 | [main.py](main.py) | 실행 옵션과 프리뷰 / 완성본 분기 |
-| [dream_pipeline.py](dream_pipeline.py) | 공통 입력·생성 상태 준비, 단일 시간창 프리뷰 |
-| [render_final.py](render_final.py) | 4구간 상태 전달, 전체 렌더와 음원 포함 |
-| [background_openended.py](background_openended.py) | 기억 조건 반응·확산, 파라미터 진화, 다중 규모 경쟁 |
-| [dream_world.py](dream_world.py) | 오브제 구조 진화·선택·기억 상속, 공통 세계 시계 |
-| [dream_surfaces.py](dream_surfaces.py) | 소스의 윤곽·색 통계 추출, 성장 표면과 소멸 렌더 |
-| [dream_score.py](dream_score.py) | 4장면의 이야기·physics_laws 20개를 시각적 동작과 시간으로 연결 |
-| [input_loader.py](input_loader.py) / [semantic_conditioning.py](semantic_conditioning.py) | 공유 입력 계약과 공개 감정·스토리 조건 |
-| [audio_analyzer.py](audio_analyzer.py) | 받은 음원의 에너지와 변화량 분석 |
+| [dream_pipeline.py](runtime/dream_pipeline.py) | 공통 입력·생성 상태 준비, 단일 시간창 프리뷰 |
+| [render_final.py](runtime/render_final.py) | 4구간 상태 전달, 전체 렌더와 음원 포함 |
+| [background_openended.py](runtime/background_openended.py) | 기억 조건 반응·확산, 파라미터 진화, 다중 규모 경쟁 |
+| [dream_world.py](runtime/dream_world.py) | 오브제 구조 진화·선택·기억 상속, 공통 세계 시계 |
+| [dream_surfaces.py](runtime/dream_surfaces.py) | 소스의 윤곽·색 통계 추출, 성장 표면과 소멸 렌더 |
+| [dream_score.py](runtime/dream_score.py) | 4장면의 이야기·physics_laws 20개를 시각적 동작과 시간으로 연결 |
+| [input_loader.py](runtime/input_loader.py) / [semantic_conditioning.py](runtime/semantic_conditioning.py) | 공유 입력 계약과 공개 감정·스토리 조건 |
+| [audio_analyzer.py](runtime/audio_analyzer.py) | 받은 음원의 에너지와 변화량 분석 |
 
-7가지 기법의 규칙과 구현 범위는 [구현 설명](docs/IMPLEMENTATION.md)에 정리했다. 이전 `emergence_*`, `developmental_*`, `geometric_*` 등은 비교 실험과 회귀 테스트를 위해 보존하며, 현재 `main.py`의 최종 렌더 경로는 위 표를 따른다.
+설치·사용법·구조·생성 원리는 [기술 문서](docs/GUIDE.md)에 정리했다. 현재 실행 코드는 `runtime/`, 검수 도구는 `tools/`, 설정은 `configs/`, 이전 실험은 `archive/`로 나뉜다.
+
+7가지 기법의 규칙과 구현 범위는 [구현 설명](docs/IMPLEMENTATION.md)에 정리했다. `archive/`의 이전 `emergence_*`, `developmental_*`, `geometric_*` 등은 비교 실험과 회귀 테스트를 위해 보존하며, 현재 `main.py`의 최종 렌더 경로는 위 표를 따른다. 현재 실행은 archive를 import하지 않는다. GridModel과 공통 input은 별도로 유지한다.
 
 ## 구현 범위
 

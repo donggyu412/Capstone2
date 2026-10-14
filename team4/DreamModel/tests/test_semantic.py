@@ -6,12 +6,12 @@ import unittest
 import numpy as np
 
 from team4.DreamModel.config import REPO_ROOT
-from team4.DreamModel.frame_renderer import FrameRenderer
-from team4.DreamModel.input_loader import load_inputs
+from team4.DreamModel.archive.frame_renderer import FrameRenderer
+from team4.DreamModel.runtime.input_loader import load_inputs
 from team4.DreamModel.main import parse_config
-from team4.DreamModel.object_dynamics import ObjectDynamics
-from team4.DreamModel.semantic_conditioning import SemanticLibrary, SceneConditioning
-from team4.DreamModel.trace_memory import TraceMemory
+from team4.DreamModel.archive.object_dynamics import ObjectDynamics
+from team4.DreamModel.runtime.semantic_conditioning import SemanticLibrary, SceneConditioning
+from team4.DreamModel.archive.trace_memory import TraceMemory
 
 
 class SemanticTests(unittest.TestCase):

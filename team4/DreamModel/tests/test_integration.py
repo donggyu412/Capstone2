@@ -14,7 +14,7 @@ import numpy as np
 from team4.DreamModel.config import RenderConfig
 from team4.DreamModel.main import parse_config
 # Archived 1.2 regression coverage. Active geometric pipeline has its own tests.
-from team4.DreamModel.formation_pipeline import render
+from team4.DreamModel.archive.formation_pipeline import render
 from team4.DreamModel.tests import test_input_loader as fixtures
 
 

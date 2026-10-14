@@ -2,7 +2,7 @@
 import unittest
 from types import SimpleNamespace
 import numpy as np
-from team4.DreamModel.dream_surfaces import DreamSurfaces
+from team4.DreamModel.runtime.dream_surfaces import DreamSurfaces
 
 
 class FinalTraceFadeTests(unittest.TestCase):
