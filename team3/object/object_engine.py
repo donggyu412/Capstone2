@@ -18,10 +18,14 @@
     오브제만     python object_engine.py
     배경과 통합  python object_engine.py --bg dream.mp4 --bg-json video.json --out integrated.mp4
 
-  두 가지 그리기 방식 (--style)
+  세 가지 그리기 방식 (--style)
     analog   부드러운 빛 입자 · 번짐 · 안개 — 아날로그 꿈 (기본)
     digital  격자에 맞물리는 사각 블록 · 평평한 색 · 통통 튀는 조립 — 로봇의 꿈 (추상·기하·단순·원초적)
-    python object_engine.py --style digital
+    line     굵은 손그림 선의 기하 도형 — 오브제 윤곽을 다각형·원으로 단순화하고, 물리 법칙을 덧그림 기호로
+             (부유 = 물결 · 회전 = 나선 · 갈라짐 = 지그재그 · 바스러짐 = 흩어진 짧은 선 · 팔락임 = 옆 지그재그 …).
+             획이 하나씩 그려졌다가 지워지고, 장면의 오브제 조각이 메아리처럼 작게 떠다닌다.
+             기승전결에 따라 커졌다가(전 = 절정 · 반전 때 획이 화면 가득 터짐) 다시 작아진다. (교수님 10/15 예제 영상 방향)
+    python object_engine.py --style line
 
   빠른 미리보기 (장면당 10초 · 절반 해상도)
     python object_engine.py --scene-sec 10 --scale 0.5 --out preview.mp4
@@ -787,6 +791,296 @@ def compose_digital(S, frame, out, contrast, cell, gap_mask):
     return draw_seed_lights(frame, S.seed_lights(S.u_now, S.t_now), H, W, True, cell)
 
 
+# ─────────────────────────────────────────────────────────────
+# 7. 선화(line) 스타일 — 오브제를 굵은 손그림 선의 기하 도형으로 다시 그린다 (교수님 예제 영상 방향)
+#    오브제 PNG 의 윤곽 → 다각형·원으로 단순화 + 안쪽 큰 선 몇 개 → 색 선 몇 획
+#    물리 법칙 → 덧그림 기호 (부유 = 물결 · 회전 = 나선 · 갈라짐 = 지그재그 · 바스러짐 = 흩어진 짧은 선 …)
+#    획이 하나씩 그려졌다가(점에서 시작) 지워지며, 장면의 오브제 조각이 작게 메아리처럼 떠다닌다
+#    기승전결에 따라 크기가 커졌다가(전 = 절정) 다시 작아진다
+# ─────────────────────────────────────────────────────────────
+LINE_PAL = {'주황': (255, 140, 40), '초록': (80, 220, 120), '하늘': (70, 190, 255), '분홍': (255, 90, 170),
+            '노랑': (255, 220, 60), '보라': (170, 110, 255), '흰': (240, 240, 240), '빨강': (255, 80, 80)}
+LINE_EMO_ORDER = {  # 흰색은 맨 뒤 — 예제처럼 선명한 색이 대부분이 되게
+    '공포': ['하늘', '보라', '빨강', '초록', '분홍', '노랑', '주황', '흰'],
+    '기쁨': ['노랑', '주황', '분홍', '초록', '하늘', '보라', '빨강', '흰'],
+    '슬픔': ['하늘', '보라', '초록', '분홍', '노랑', '주황', '빨강', '흰'],
+    '분노': ['빨강', '주황', '노랑', '분홍', '보라', '하늘', '초록', '흰'],
+    '놀람': ['분홍', '노랑', '초록', '하늘', '주황', '보라', '빨강', '흰'],
+    '혐오': ['초록', '보라', '노랑', '하늘', '분홍', '주황', '빨강', '흰'],
+    '중립': ['주황', '초록', '하늘', '분홍', '노랑', '보라', '빨강', '흰'],
+}
+LINE_ACT = {  # 크기 배율 · 메아리(초당 개수 · 크기 범위) · 선 굵기 배율
+    # 예제 영상처럼 '작게 시작해서 절정에 크게 터진다' — 기·승은 작게, 전은 화면을 덮을 만큼, 결은 다시 작게
+    '기': dict(scale=0.45, echo_rate=0.90, echo_size=(0.04, 0.12), thick=0.75),
+    '승': dict(scale=0.65, echo_rate=1.10, echo_size=(0.08, 0.22), thick=0.9),
+    '전': dict(scale=1.60, echo_rate=2.20, echo_size=(0.35, 1.20), thick=1.7),
+    '결': dict(scale=0.55, echo_rate=0.60, echo_size=(0.05, 0.15), thick=0.8),
+}
+
+
+def _densify(pts, step=0.03):
+    out = [pts[0]]
+    for a, b in zip(pts[:-1], pts[1:]):
+        n = max(1, int(np.hypot(*(b - a)) / step))
+        for s in np.linspace(0, 1, n + 1)[1:]:
+            out.append(a + (b - a) * s)
+    return np.array(out, np.float32)
+
+
+def extract_glyph(path, max_lines=3):
+    """오브제 PNG → 단위 상자([-0.5, 0.5]) 안의 획 목록 [(점들, 굵기 배율, 무리)]"""
+    im = cv2.imdecode(np.fromfile(str(path), np.uint8), cv2.IMREAD_UNCHANGED)
+    if im is None or im.ndim < 3 or im.shape[2] < 4:
+        return [], (200, 200, 200)
+    a = im[..., 3]
+    ys, xs = np.where(a > 40)
+    if len(xs) == 0:
+        return [], (200, 200, 200)
+    # 떨어진 작은 조각은 크기 계산에서 뺀다 (가장 큰 덩어리 기준)
+    mask = (a > 100).astype(np.uint8) * 255
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    cnts, _ = cv2.findContours(mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+    cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
+    if not cnts:
+        return [], (200, 200, 200)
+    big = [c for c in cnts if cv2.contourArea(c) > 0.04 * cv2.contourArea(cnts[0])]
+    x0, y0, bw, bh = cv2.boundingRect(np.vstack(big))
+    S = max(bw, bh)
+    cx, cy = x0 + bw / 2, y0 + bh / 2
+    norm = lambda p: np.stack([(p[:, 0] - cx) / S, (p[:, 1] - cy) / S], 1).astype(np.float32)
+    rgb = im[..., 2::-1][a > 100].mean(0)
+    strokes = []
+    for k, c in enumerate(big[:3]):
+        A = cv2.contourArea(c)
+        P = cv2.arcLength(c, True)
+        circ = 4 * np.pi * A / (P * P + 1e-6)
+        if circ > 0.78:  # 둥근 덩어리는 원으로
+            (ex, ey), r = cv2.minEnclosingCircle(c)
+            t = np.linspace(0, 2 * np.pi, 40)
+            pts = np.stack([ex + r * 0.95 * np.cos(t), ey + r * 0.95 * np.sin(t)], 1)
+        else:  # 그 밖은 꼭짓점 몇 개짜리 다각형으로
+            ap = cv2.approxPolyDP(c, 0.03 * P, True).reshape(-1, 2).astype(np.float32)
+            pts = np.vstack([ap, ap[:1]])
+        strokes.append((norm(pts), 1.0 if k == 0 else 0.8, 'body'))
+    g = cv2.cvtColor(im[..., :3], cv2.COLOR_BGR2GRAY)
+    g[a < 100] = 0
+    ed = cv2.Canny(g, 40, 120)
+    ed[cv2.erode(mask, np.ones((9, 9), np.uint8)) == 0] = 0
+    L = cv2.HoughLinesP(ed, 1, np.pi / 180, 40, minLineLength=int(0.18 * S), maxLineGap=int(0.04 * S))
+    if L is not None:  # 안쪽의 큰 선 몇 개
+        # OpenCV 버전에 따라 (N, 1, 4) 또는 (N, 4) 로 돌려준다 — 어느 쪽이든 (N, 4) 로 맞춘다
+        L = sorted(np.asarray(L).reshape(-1, 4), key=lambda l: -np.hypot(l[2] - l[0], l[3] - l[1]))
+        used = []
+        for l in L:
+            mid = ((l[0] + l[2]) / 2, (l[1] + l[3]) / 2)
+            if any(np.hypot(mid[0] - u[0], mid[1] - u[1]) < 0.15 * S for u in used):
+                continue
+            used.append(mid)
+            strokes.append((norm(np.array([[l[0], l[1]], [l[2], l[3]]], np.float32)), 0.7, 'inner'))
+            if len(used) >= max_lines:
+                break
+    return strokes, tuple(int(v) for v in rgb)
+
+
+def law_marks(beh):
+    """물리 법칙 → 덧그림 기호 (단위 상자 기준 좌표)"""
+    out = []
+    x = np.linspace(-0.45, 0.45, 40)
+    if beh.get('float') or beh.get('weightless'):
+        out.append(np.stack([x, 0.64 + 0.05 * np.sin(x * 4 * np.pi)], 1))  # 아래 물결
+    if beh.get('glide'):
+        for yy in (0.05, 0.22):
+            out.append(np.array([[-0.95, yy], [-0.62, yy]], np.float32))
+    if beh.get('rotate'):
+        t = np.linspace(0, 1.7 * np.pi, 50)
+        r = 0.56 + 0.10 * t / (1.7 * np.pi)
+        out.append(np.stack([r * np.cos(t - 2.2), r * np.sin(t - 2.2)], 1))  # 둘레 나선
+    if beh.get('ash'):
+        for k in range(7):
+            ang = k * 0.9 + 0.4
+            p = np.array([np.cos(ang), np.sin(ang)]) * (0.62 + 0.07 * (k % 3))
+            out.append(np.array([p, p + np.array([np.cos(ang + 0.6), np.sin(ang + 0.6)]) * 0.06], np.float32))
+    if beh.get('stretch'):
+        for xx in (-0.28, 0.22):
+            out.append(np.array([[xx, 0.35], [xx + 0.03, 0.62], [xx - 0.02, 0.92]], np.float32))
+    if beh.get('flutter'):
+        yy = np.linspace(-0.4, 0.4, 9)
+        out.append(np.stack([0.62 + 0.06 * (np.arange(9) % 2 * 2 - 1), yy], 1))  # 옆 지그재그
+    if beh.get('crack'):
+        t = np.linspace(0, 1, 9)
+        out.append(np.stack([-0.42 + 0.84 * t + 0.07 * (np.arange(9) % 2 * 2 - 1), -0.45 + 0.9 * t], 1))
+    return [np.asarray(m, np.float32) for m in out]
+
+
+def _wobble(pts, amp, seed, t):
+    i = np.arange(len(pts), dtype=np.float32)
+    off = np.stack([np.sin(i * 0.7 + seed + t * 2.1) + 0.5 * np.sin(i * 1.9 + seed * 2),
+                    np.cos(i * 0.6 + seed * 1.3 + t * 1.7) + 0.5 * np.cos(i * 2.3 + seed)], 1)
+    return pts + off * amp
+
+
+class LineScene:
+    def __init__(self, S, files, keep, seed):
+        self.S = S
+        self.L = LINE_ACT[S.act]
+        order = LINE_EMO_ORDER.get(S.emo_label, LINE_EMO_ORDER['중립'])
+        self.pal = [np.array(LINE_PAL[n], np.float32) / 255 for n in order]
+        rng = np.random.default_rng(seed)
+        self.glyphs = []
+        for j, oi in enumerate(keep):
+            strokes, rgb = extract_glyph(files[oi])
+            beh = {k: v[j] for k, v in S.beh_arr.items()}
+            marks = law_marks(beh)
+            items = []
+            r, g_, b = [c / 255 for c in rgb]
+            sat = max(r, g_, b) - min(r, g_, b)
+            main = self.pal[j % len(self.pal)]
+            if sat > 0.18:  # 색이 뚜렷한 오브제(밤색 서류철 · 냉동액 등)는 그 색을 살린다
+                import colorsys
+                hh, ll, ss = colorsys.rgb_to_hls(r, g_, b)
+                main = np.array(colorsys.hls_to_rgb(hh, 0.6, 0.85), np.float32)
+            for k, (pts, w, kind) in enumerate(strokes):
+                col = main if kind == 'body' and k == 0 else self.pal[(j + k + 2) % len(self.pal)]
+                items.append(dict(pts=_densify(pts), w=w, col=col, kind=kind))
+            for k, m in enumerate(marks):
+                items.append(dict(pts=_densify(m), w=0.75, col=self.pal[(j + k + 4) % len(self.pal)], kind='mark'))
+            if beh.get('precede'):  # 결과가 먼저 — 덧그림 기호부터 그린다
+                items = [it for it in items if it['kind'] == 'mark'] + [it for it in items if it['kind'] != 'mark']
+            self.glyphs.append(dict(items=items, beh=beh, size=float(max(S.sizes[j])) * self.L['scale']))
+        # 메아리 — 이 장면 오브제 조각이 작게 그려졌다 사라진다 (언제 · 어디서 · 무엇을 · 얼마나 크게)
+        dur = 1.0
+        n_echo = int(self.L['echo_rate'] * 75)
+        self.echo = []
+        for e in range(n_echo):
+            j = int(rng.integers(0, max(1, len(self.glyphs))))
+            if not self.glyphs or not self.glyphs[j]['items']:
+                continue
+            it = self.glyphs[j]['items'][int(rng.integers(0, len(self.glyphs[j]['items'])))]
+            t0 = rng.uniform(0.02, 0.92)
+            if S.act == '전':  # 절정으로 갈수록 크고 많아진다 — 반전 직전에 몰린다
+                t0 = 0.05 + 0.85 * rng.random() ** 0.6
+            self.echo.append(dict(it=it, t0=t0, life=rng.uniform(2.5, 5.0) / 75 * dur,
+                                  x=rng.uniform(0.08, 0.92), y=rng.uniform(0.12, 0.88),
+                                  size=rng.uniform(*self.L['echo_size']), ang=rng.uniform(-0.6, 0.6),
+                                  seed=float(rng.uniform(0, 100))))
+
+    def _xf(self, pts, j, F, dx, dy, sx, tilt, scale, stretch, gap, flut, t):
+        S = self.S
+        g = self.glyphs[j]
+        p = pts.copy()
+        p[:, 1] = np.where(p[:, 1] > 0, p[:, 1] * (1 + stretch[j]), p[:, 1])
+        p[:, 0] = p[:, 0] + flut[j] / max(g['size'], 1) * np.sin(p[:, 1] * 9 + 6 * t) * np.abs(p[:, 0]) * 2
+        p = p * g['size']
+        p[:, 0] *= sx[j] * scale[j]
+        p[:, 1] *= scale[j]
+        c, s = math.cos(tilt[j]), math.sin(tilt[j])
+        x = S.anchors[j, 0] + dx[j] + p[:, 0] * c - p[:, 1] * s
+        y = S.anchors[j, 1] + dy[j] + p[:, 0] * s + p[:, 1] * c
+        return np.stack([x, y], 1)
+
+    def render(self, frame, u, t, composite):
+        S = self.S
+        W, H = S.W, S.H
+        F, dx, dy, sx, tilt, scale, stretch, gap, flut = S.transforms(u, t)
+        flip, pull, cmix = S.rev_phase(u)
+        burst = (1 - min(1.0, pull)) if flip else 0.0
+        tq = math.floor(t * 8) / 8  # 손그림처럼 1초에 8번 떨린다
+        thick = max(2, int(H * 0.0075 * self.L['thick']))
+        layer = np.zeros((H, W, 3), np.float32)
+        mask = np.zeros((H, W), np.float32)
+        tint = S.rev_tint
+
+        def stroke(pts, col, w, frac, seed, amp, alpha=1.0, dash=False):
+            if frac <= 0 or len(pts) < 2:
+                return
+            n = max(2, int(math.ceil(len(pts) * min(1.0, frac))))
+            q = pts[:n]
+            if cmix > 0:
+                col = col * (1 - cmix) + tint * cmix
+            P = q.astype(np.int32).reshape(-1, 1, 2)
+            th = max(1, int(thick * w))
+            if dash:  # 바스러지는 중 — 끊어진 짧은 선
+                for a0 in range(0, n - 1, 4):
+                    seg = P[a0:a0 + 2]
+                    cv2.polylines(layer, [seg], False, (col * alpha).tolist(), th, cv2.LINE_AA)
+                    cv2.polylines(mask, [seg], False, alpha, th + 6, cv2.LINE_AA)
+                return
+            cv2.polylines(layer, [P], False, (col * alpha).tolist(), th, cv2.LINE_AA)
+            cv2.polylines(mask, [P], False, alpha, th + 6, cv2.LINE_AA)
+
+        for j, g in enumerate(self.glyphs):
+            items = g['items']
+            if not items:
+                continue
+            beh = g['beh']
+            n = len(items)
+            prog_in = float(smoothstep(S.enter[j], S.formed[j] - 0.06, u)) * n
+            out = float(smoothstep(S.dissolve[j], S.dissolve[j] + RELEASE_SPAN, u))
+            if out >= 1:
+                continue
+            amp = 0.0 if beh.get('still') else 0.006 * g['size']
+            fl_on = True
+            for k, it in enumerate(items):
+                frac = prog_in - k
+                if frac <= 0:
+                    break
+                # 지워짐: 위쪽 획부터 · 그 밖은 나중 획부터 차례로 지워진다
+                rank = (k / max(n - 1, 1))
+                if beh.get('vanish'):
+                    rank = 1 - float((it['pts'][:, 1].mean() + 0.5))
+                erase = np.clip(out * 1.6 - (1 - rank) * 0.6, 0, 1)
+                frac = min(frac, 1.0) * (1 - erase)
+                if beh.get('flicker'):  # 있다 없다 — 획마다 1.4초에 한 번씩 켜지고 꺼진다
+                    fl_on = ((k * 2654435761 + int(t / 1.4) * 40503 + j * 97) % 7) > 2
+                    if not fl_on:
+                        continue
+                col = it['col']
+                if prog_in >= n and out == 0 and burst == 0:
+                    # 다 그려진 뒤에도 살아 있게 — 획마다 7~10초에 한 번 지워졌다 다른 색으로 다시 그려진다
+                    period = 7.0 + (k * 1.3 + j * 0.7) % 3.0
+                    ph = (t + k * 2.3 + j * 1.7) % period
+                    cyc = int((t + k * 2.3 + j * 1.7) // period)
+                    if ph < 1.4:
+                        frac = min(frac, abs(1 - 2 * ph / 1.4))
+                    if ph >= 0.7 or cyc > 0:
+                        col = self.pal[(k + j + cyc) % len(self.pal)] if (cyc + (ph >= 0.7)) % 2 else it['col']
+                pts = self._xf(_wobble(it['pts'], amp / max(g['size'], 1), k * 3.7 + j, tq), j,
+                               F, dx, dy, sx, tilt, scale, stretch, gap, flut, t)
+                if burst > 0:  # 반전 — 획이 바깥으로 터졌다가 다시 모인다
+                    d = pts - S.anchors[j]
+                    pts = pts + d / (np.linalg.norm(d, axis=1, keepdims=True) + 1) * (H * 0.45 * burst)
+                stroke(pts, col, it['w'], frac, k, amp,
+                       dash=bool(beh.get('ash')) and erase > 0.05)
+        # 메아리
+        for e in self.echo:
+            a = (u - e['t0']) / e['life']
+            if a <= 0 or a >= 1:
+                continue
+            frac = min(1.0, a / 0.4)
+            alpha = 1.0 if a < 0.75 else (1 - a) / 0.25
+            it = e['it']
+            sz = e['size'] * min(H, W) * 0.5
+            p = _wobble(it['pts'], 0.01, e['seed'], tq) * sz
+            c, s = math.cos(e['ang']), math.sin(e['ang'])
+            P = np.stack([e['x'] * W + p[:, 0] * c - p[:, 1] * s, e['y'] * H + p[:, 0] * s + p[:, 1] * c], 1)
+            if burst > 0:
+                d = P - [W / 2, H / 2]
+                P = P + d / (np.linalg.norm(d, axis=1, keepdims=True) + 1) * (H * 0.5 * burst)
+            stroke(P, it['col'], 0.55 + 0.6 * e['size'], frac, 0, 0, alpha=alpha)
+        # 선 둘레의 어두운 받침 → 선 → 은은한 빛
+        q = (max(8, W // 4), max(8, H // 4))
+        halo = cv2.resize(cv2.GaussianBlur(cv2.resize(mask, q, interpolation=cv2.INTER_AREA), (0, 0), 7 * H / 1080 + 2), (W, H))
+        halo = np.clip(halo * 2.5, 0, 1)
+        frame = frame * (1 - 0.55 * halo[..., None])
+        cover = np.clip(cv2.GaussianBlur(mask, (0, 0), 0.8) * 1.2, 0, 1) if False else None
+        lum = np.clip(layer.max(2, keepdims=True), 0, 1)
+        frame = frame * (1 - lum) + layer
+        glow = cv2.resize(cv2.GaussianBlur(cv2.resize(layer, q, interpolation=cv2.INTER_AREA), (0, 0), 3 * H / 1080 + 1), (W, H))
+        frame = frame + glow * 0.35
+        frame = draw_seed_lights(frame, S.seed_lights(u, t), H, W)
+        return frame
+
+
 def label_overlay(sc_obj, W, H):
     font = find_font(max(12, int(H * 0.022)))
     small = find_font(max(10, int(H * 0.017)))
@@ -886,7 +1180,8 @@ def main():
     ap.add_argument('--bg', default='', help='배경 엔진 mp4 — 주면 통합 영상')
     ap.add_argument('--bg-json', default='', help='배경 엔진 video.json (장면 시작 시각)')
     ap.add_argument('--no-label', action='store_true', help='좌하단 서사 표지 끄기')
-    ap.add_argument('--style', choices=['analog', 'digital'], default='analog', help='analog: 빛 입자 · digital: 사각 블록')
+    ap.add_argument('--style', choices=['analog', 'digital', 'line'], default='analog',
+                    help='analog: 빛 입자 · digital: 사각 블록 · line: 손그림 선의 기하 도형')
     ap.add_argument('--block', type=int, default=12, help='digital 블록 크기(1080p 기준 픽셀)')
     ap.add_argument('--crf', type=int, default=18)
     ap.add_argument('--emerge', choices=['point', 'cloud'], default='point', help='point: 한 점에서 서서히 드러남 · cloud: 예전 방식')
@@ -955,6 +1250,11 @@ def main():
     for si in range(last + 1):
         sc = scenes[si]
         files = load_objects_index(args.objects, sc.get('scene', si + 1), sc.get('objects') or [])
+        if si not in order and args.style == 'line':
+            # 선화는 앞 장면 상태를 이어받지 않는다 — 난수 순서만 맞추려고 만들고 넘긴다
+            Scene(sc, si, n_all, files, W, H, prev_cloud, rng, args.style, cell, args.emerge, reversal, quiet=True,
+                  seed_glow=args.seed_glow, dissolve_shift=args.dissolve_shift)
+            continue
         if si not in order:
             # 앞 장면 빨리 감기 — 그리지 않고 입자 계산만 한다. 다음 장면이 앞 장면 잔해에서 태어나므로,
             # 장면을 나눠 렌더해도 한 번에 돌린 것과 같은 결과가 나오게 한다.
@@ -981,9 +1281,27 @@ def main():
                 print('    ·', e['law'], '→', e['reason'])
         marks.append({'scene': sc.get('scene'), 'act': S.act, 'start_frame': done, 'start_sec': round(done / args.fps, 2)})
         label = None if (args.no_label or composite) else label_overlay(S, W, H)
+        LS = None
+        if args.style == 'line':
+            keep = [i for i, fp in enumerate(files) if fp is not None]
+            LS = LineScene(S, files, keep, seed + si * 7919)
         for f in range(frames_per_scene):
             tau = f / args.fps
             u = f / frames_per_scene
+            if LS is not None:
+                frame = LS.render(bg.get(si, tau), u, tau, composite)
+                edge = min(1.0, tau / 1.0, (args.scene_sec - tau) / 1.0) if not composite else 1.0
+                if label is not None:
+                    la = label[..., 3:4] * edge
+                    frame = frame * (1 - la) + label[..., :3] * la
+                enc.stdin.write((np.clip(frame, 0, 1) * 255).astype(np.uint8).tobytes())
+                done += 1
+                if args.progress_file and done % 30 == 0:
+                    Path(args.progress_file).write_text(str(done))
+                if done % (args.fps * 5) == 0 or done == total:
+                    el = time.time() - t0
+                    print(f'\r  {done}/{total} 프레임 · {el:.0f}초 경과 · 남은 시간 약 {el / done * (total - done):.0f}초   ', end='', flush=True)
+                continue
             step_out = S.step(u, tau)
             if digital:
                 frame = compose_digital(S, bg.get(si, tau), step_out, contrast, cell, gap_mask)
