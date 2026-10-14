@@ -16,6 +16,10 @@ run_team3.py — 2팀 꿈 스토리보드 → 3팀(배경 · 오브제 · 사운
   4) 배경     --serve 면 배경 엔진(app.py)을 띄우고 브라우저를 연다 → START → [영상 mp4 · 프레임 고정]
   5) 넘기기   가장 최근 배경 결과(output/<run>/)를 찾아 오브제 · 사운드 · 통합에 넘길 명령을 출력한다
   6) 통합     --mux 영상 소리 → 영상은 다시 인코딩하지 않고 소리만 붙인다 (D · 최종 꿈 영상)
+  7) 4팀      --to-team4 → 배경판 4장 · scenes.json · dream_scenes.json · 오브제 PNG · objects.json 을
+              4팀 입력 자리 team4/input/(storyboard · objects)에 넣는다 (10-14 · 4팀 코드는 고치지 않음).
+              4팀 GridModel · DreamModel 은 대본의 오브제 이름과 오브제 파일이 짝이 맞아야 돌므로,
+              배경판 · 오브제가 지금 대본과 같은 판일 때만 넣는다(아니면 아무것도 바꾸지 않고 멈춘다).
 
 [사용법] (저장소 루트에서)
   python run_pipeline.py --emotion-csv team1/output/multi_test.csv    # 1·2팀
@@ -25,6 +29,8 @@ run_team3.py — 2팀 꿈 스토리보드 → 3팀(배경 · 오브제 · 사운
   python team3/run_team3.py --serve                                  # 사진까지 있으면 배경 엔진 실행
   python team3/run_team3.py --storyboard <다른 json>                  # 2팀 출력 대신 다른 판으로
   python team3/run_team3.py --mux 통합.mp4 dream_sound.wav            # 최종 영상(소리 붙이기)
+  python team3/run_team3.py --to-team4                               # 4팀 입력 자리 채우기
+  python team3/run_team3.py --to-team4 --check                       # 한 판인지 확인만 (쓰지 않음)
 
 각 담당의 코드는 고치지 않고 그대로 부른다. API 키는 이 파일에 쓰지 않는다(환경변수로만).
 """
@@ -36,6 +42,7 @@ import shutil
 import subprocess
 import sys
 import time
+import unicodedata
 import webbrowser
 from datetime import datetime
 from pathlib import Path
@@ -51,6 +58,8 @@ SLOT = BG / 'input' / 'storyboard'            # 3팀 공용 입력 자리
 ARCHIVE = BG / 'input' / 'storyboard_archive'
 BG_OUT = BG / 'output'
 DEFAULT_STORY = ROOT / 'team2' / 'output' / 'dream_scenes.json'
+OBJ_OUT = TEAM3 / 'object' / 'output_objects'  # 오브제 생성기(generate_objects_comfy.py) 기본 출력
+TEAM4_INPUT = ROOT / 'team4' / 'input'          # 4팀 GridModel/config.py · DreamModel/config.py 의 입력 자리
 
 N_SCENES = 4
 IMAGE_EXT = ('.png', '.jpg', '.jpeg')         # app.py IMAGE_EXT 와 같게
@@ -328,7 +337,7 @@ def handoff():
               % (story, from_object(bg[0]), from_object(bg[1])))
     print('\n  [C 사운드 · 1팀 담당] (교수님 10/8: 1팀 판) — 스토리보드·사진을 이 자리에서 바로 읽는다')
     print('    cd team3/sound && python generate_sound.py')
-    print('\n  [4팀] 배경판 PNG 4장 (배경 엔진 [장면 저장] 결과)')
+    print('\n  [4팀] 배경 엔진 [장면 저장] → 이 판 오브제가 나오면: python team3/run_team3.py --to-team4')
     print('\n  [D 통합] python team3/run_team3.py --mux <dream_integrated.mp4> <dream_sound.wav>')
 
 
@@ -356,9 +365,150 @@ def mux(video, audio, out=None):
     print('  저장: %s (%.0fMB) — 영상은 다시 인코딩하지 않음' % (out, out.stat().st_size / 1048576))
 
 
+# ──────────────────────────────────────────────────────────
+# 7) 4팀 — 입력 자리 채우기
+# ──────────────────────────────────────────────────────────
+def nfc(t):
+    return unicodedata.normalize('NFC', str(t)).strip()
+
+
+def latest_plates(story_t):
+    """가장 최근 [장면 저장] 결과(scene_01~04.png + scenes.json). 이번 스토리보드보다 오래된 것은 뺀다."""
+    if not BG_OUT.is_dir():
+        return None
+    runs = []
+    for d in BG_OUT.iterdir():
+        meta = d / 'scenes.json'
+        if d.is_dir() and meta.exists() and meta.stat().st_mtime > story_t:
+            runs.append((meta.stat().st_mtime, d))
+    return max(runs)[1] if runs else None
+
+
+def check_team4(story_path, plates, objects):
+    """4팀에 넘길 묶음이 한 판인지 확인한다. (문제 목록, 배경판 파일, 오브제 파일)을 돌려준다."""
+    problems = []
+    rows = load_storyboard(story_path)
+    labels = emotion_labels(rows)
+    plate_files, obj_files = [], []
+
+    # 배경판 — 4팀은 scenes.json 의 act · files.background 로 찾고, 감정이 대본과 다르면 DreamModel 이 멈춘다
+    if plates is None:
+        problems.append('이번 스토리보드로 찍은 배경판([장면 저장] 결과)이 없습니다 → --serve 로 엔진을 띄워 [장면 저장]')
+    else:
+        metas = json.loads((plates / 'scenes.json').read_text(encoding='utf-8-sig')).get('scenes', [])
+        if len(metas) != len(rows):
+            problems.append('배경판 %d장 · 대본 %d장면 — 수가 다릅니다 (%s)' % (len(metas), len(rows), rel(plates)))
+        for i, m in enumerate(metas, 1):
+            name = (m.get('files') or {}).get('background') or 'scene_%02d.png' % i
+            if not (plates / name).exists():
+                problems.append('배경판 파일이 없습니다: ' + rel(plates / name))
+            plate_files.append(plates / name)
+            if i <= len(labels) and m.get('emotion') != labels[i - 1]:
+                problems.append('장면 %d 감정이 다릅니다 — 배경판 %s · 대본 %s (다른 판의 배경판)'
+                                % (i, m.get('emotion'), labels[i - 1]))
+
+    # 오브제 — 대본 objects 와 objects.json name_ko 가 장면마다 같은 순서로 같아야 한다
+    manifest = Path(objects) / 'objects.json'
+    if not manifest.exists():
+        problems.append('오브제 대응표가 없습니다: ' + rel(manifest))
+    else:
+        by_scene = {int(sc['scene']): sc.get('objects', [])
+                    for sc in json.loads(manifest.read_text(encoding='utf-8-sig')).get('scenes', [])}
+        for i, row in enumerate(rows, 1):
+            want = [nfc(o) for o in (row.get('objects') or []) if isinstance(o, str)]
+            ents = sorted(by_scene.get(i, []), key=lambda e: e.get('index', 0))
+            have = [nfc(e.get('name_ko', '')) for e in ents]
+            if have != want:
+                problems.append('장면 %d 오브제가 대본과 다릅니다 (다른 판의 오브제)\n      대본  : %s\n      오브제: %s'
+                                % (i, ' · '.join(want) or '없음', ' · '.join(have) or '없음'))
+                continue
+            for e in ents:
+                f = Path(objects) / e.get('file', '')
+                if not f.is_file():
+                    problems.append('오브제 파일이 없습니다: ' + rel(f))
+                obj_files.append(f)
+    return problems, plate_files, obj_files
+
+
+def team4_readme(kind, plates, labels):
+    lines = ['# 3팀 %s (4팀 입력 · %s · `run_team3.py --to-team4` 가 채움)' % (kind, datetime.now().strftime('%Y-%m-%d %H:%M')),
+             '',
+             '- 장면 감정: ' + ' · '.join(labels),
+             '- 대본: `../storyboard/dream_scenes.json` (2팀 출력 → 3팀이 읽은 그대로)']
+    if kind == '배경판':
+        lines += ['- `scene_01~04.png`: 글자 없는 배경판 · 1920×1080 · 장면 한가운데 한 순간 (3팀 배경 결과 `%s`)' % plates.name,
+                  '- `scenes.json`: 장면별 정보 (act · 감정 · files.background)']
+    else:
+        lines += ['- `scene_0N/obj_<순번>_<이름>.png`: 투명 PNG · `<순번>` 은 그 장면 objects 배열 순서(1부터)',
+                  '- `objects.json`: 장면 · 순번 · 이름 · 파일 대응표']
+    lines += ['- 규격: 30fps · 5:00 · 장면당 75초 · 클라이맥스 반전 3:15 (전 장면 45초)', '']
+    return '\n'.join(lines)
+
+
+def to_team4(story_path, plates_dir=None, objects_dir=None, team4_input=None, check_only=False):
+    banner('7) 4팀 — 입력 자리 채우기')
+    story_path = Path(story_path)
+    if not story_path.exists():
+        sys.exit('[중단] 스토리보드가 없습니다: ' + rel(story_path))
+    dst = Path(team4_input) if team4_input else TEAM4_INPUT
+    plates = Path(plates_dir) if plates_dir else latest_plates(story_path.stat().st_mtime)
+    objects = Path(objects_dir) if objects_dir else OBJ_OUT
+    labels = emotion_labels(load_storyboard(story_path))
+    print('  대본  : %s (%s)' % (rel(story_path), ' · '.join(labels)))
+    print('  배경판: %s' % (rel(plates) if plates else '없음'))
+    print('  오브제: %s' % rel(objects))
+    print('  넣을 곳: %s' % rel(dst))
+
+    problems, plate_files, obj_files = check_team4(story_path, plates, objects)
+    if problems:
+        print('\n  [멈춤] 4팀 입력 자리는 그대로 둡니다 — 4팀 모델은 대본 · 배경판 · 오브제가 한 판이어야 돈다:')
+        for p in problems:
+            print('    - ' + p)
+        sys.exit(2)
+    print('  확인: 대본 · 배경판 %d장 · 오브제 %d장이 한 판' % (len(plate_files), len(obj_files)))
+    if check_only:
+        print('  (--check — 쓰지 않음)')
+        return
+    if not dst.is_dir():
+        sys.exit('[중단] 4팀 입력 자리가 없습니다: %s\n  team4 를 합친 저장소에서 실행하거나 --team4-dir 로 가리키세요.' % rel(dst))
+
+    sb, ob = dst / 'storyboard', dst / 'objects'
+    sb.mkdir(exist_ok=True)
+    ob.mkdir(exist_ok=True)
+    # 옛 판을 지운다 — 남으면 4팀이 obj_<순번>_ 파일을 여러 개 찾거나 옛 배경판을 읽는다. 소리 파일은 건드리지 않는다.
+    for p in list(sb.iterdir()):
+        if p.is_file() and (p.name in ('scenes.json', 'dream_scenes.json') or
+                            (p.name.startswith('scene_') and p.suffix.lower() in IMAGE_EXT)):
+            p.unlink()
+    for p in list(ob.iterdir()):
+        if p.is_dir() and p.name.startswith('scene_'):
+            for f in p.iterdir():
+                if f.is_file() and f.suffix.lower() in IMAGE_EXT:
+                    f.unlink()
+            if not any(p.iterdir()):
+                p.rmdir()
+        elif p.name == 'objects.json':
+            p.unlink()
+
+    for f in plate_files:
+        shutil.copyfile(f, sb / f.name)
+    shutil.copyfile(plates / 'scenes.json', sb / 'scenes.json')
+    shutil.copyfile(story_path, sb / 'dream_scenes.json')
+    for f in obj_files:
+        out = ob / f.relative_to(objects)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(f, out)
+    shutil.copyfile(objects / 'objects.json', ob / 'objects.json')
+    (sb / 'README.md').write_text(team4_readme('배경판', plates, labels), encoding='utf-8')
+    (ob / 'README.md').write_text(team4_readme('오브제', plates, labels), encoding='utf-8')
+    print('  저장: %s (배경판 %d · json 2) · %s (오브제 %d · objects.json)'
+          % (rel(sb), len(plate_files), rel(ob), len(obj_files)))
+    print('  → 4팀이 GridModel 또는 DreamModel 을 실행한다 (소리는 4팀이 input 아래에 둔다)')
+
+
 def main():
     ap = argparse.ArgumentParser(description='2팀 스토리보드 → 3팀 배경 · 오브제 · 사운드 · 통합 연결')
-    ap.add_argument('--storyboard', default=str(DEFAULT_STORY), help='기본: team2/output/dream_scenes.json')
+    ap.add_argument('--storyboard', help='기본: team2/output/dream_scenes.json (--to-team4 는 3팀 공용 입력 자리)')
     ap.add_argument('--images', help='scene_01~04 사진이 있는 폴더 (공용 자리로 복사)')
     ap.add_argument('--manual', action='store_true', help='OpenAI 키가 있어도 사진을 자동 생성하지 않음')
     ap.add_argument('--image-model', default='gpt-image-2', help='OpenAI 이미지 모델 (기본 gpt-image-2)')
@@ -366,12 +516,20 @@ def main():
     ap.add_argument('--serve', action='store_true', help='사진이 다 있으면 배경 엔진을 띄운다')
     ap.add_argument('--mux', nargs=2, metavar=('VIDEO', 'AUDIO'), help='최종 영상: 영상에 소리만 붙인다')
     ap.add_argument('--out', help='--mux 결과 파일 (기본: <영상>_sound.mp4)')
+    ap.add_argument('--to-team4', action='store_true', help='4팀 입력 자리(team4/input)에 배경판 · 오브제를 넣는다')
+    ap.add_argument('--check', action='store_true', help='--to-team4 와 함께: 한 판인지 확인만 하고 쓰지 않음')
+    ap.add_argument('--plates', help='--to-team4 배경판 폴더 (기본: 가장 최근 [장면 저장] 결과)')
+    ap.add_argument('--objects', help='--to-team4 오브제 폴더 (기본: team3/object/output_objects)')
+    ap.add_argument('--team4-dir', help='--to-team4 넣을 곳 (기본: team4/input)')
     a = ap.parse_args()
 
     if a.mux:
         mux(a.mux[0], a.mux[1], a.out)
         return
-    scenes = receive(a.storyboard)
+    if a.to_team4:                           # 받기를 거치지 않는다 — 공용 자리를 2팀 새 출력으로 바꾸지 않게
+        to_team4(a.storyboard or SLOT / 'dream_scenes.json', a.plates, a.objects, a.team4_dir, a.check)
+        return
+    scenes = receive(a.storyboard or DEFAULT_STORY)
     prompts()
     if a.images:
         import_images(a.images)

@@ -90,6 +90,19 @@ COMMON = ('필름 카메라로 찍은 듯한 아날로그 사진, 은은한 필�
           '옅은 안개와 공기의 흐름, 단순한 구도와 넓은 여백, 몽환적이지만 사실적인 장소 사진, 가로로 넓은 16:9 화면')
 AVOID_BASE = '사람, 동물, 글자, 로고, 테두리, 그림체·일러스트·3D 렌더링 느낌'
 EXPOSURE = '화면 전체가 하얗거나 새까맣게 균일하지 않고, 밝은 부분과 어두운 부분이 함께 있을 것'
+# 전·결 가독성(10-14 · LOG 70): A판 전·결 사진이 엔진을 지나면 거의 안 보였다(윤곽 일치 전 0.06 · 결 −0.01).
+# 결은 ACT_MOOD 가 '안개가 공간을 지워 가는' 사진을 부르고, 전은 빛 한 줄기만 남는 사진이 나온다.
+# '어두운 바탕 + 여러 곳의 밝은 윤곽'으로 손으로 다시 만들었을 때 0.08 로 올랐다 → 그 말을 여기에 넣는다.
+# (전은 엔진 연출 glow · 소용돌이가 지배해 사진만으로는 한계가 있다 — 엔진 값은 10/15 피드백 뒤에.)
+CONTOUR = {
+    '전': '어두운 바탕 위에 여러 곳의 밝은 윤곽이 또렷하고, 장소의 큰 선(벽 · 바닥 · 창)을 알아볼 수 있을 것',
+    '결': '안개 속에서도 장소의 큰 선(벽 · 바닥 · 창)과 밝은 윤곽 몇 곳은 알아볼 수 있을 것',
+}
+# 금지 목록에 넣지 않는 오브제 — 빛 · 그림자는 사진의 명암 자체라 빼라고 하면 사진이 평평해지고
+# (A판 '빛(실 같은 빛…)' 이 본문 빛 요구와 부딪힘), 소리는 사진에 찍히지 않는다.
+NEVER_AVOID = ('빛', '그림자', '소리', '울음', '목소리')
+# 장소의 뼈대 낱말 — 배경이 이걸 부르면('창가 방') 같은 뼈대의 오브제('유리창')를 빼라고 하지 않는다(10-14).
+FRAME = ('창', '벽', '바닥', '문', '천장', '지붕')
 
 
 def split_objects(backgrounds, objects):
@@ -98,14 +111,22 @@ def split_objects(backgrounds, objects):
        2팀 데이터는 배경과 오브제가 겹치기도 한다(4장면: 배경 '자작나무 껍질 더미' / 오브제 '자작나무 껍질').
        둘 다 적으면 '껍질 더미를 그리되 껍질은 빼라'가 되어 생성기가 헷갈린다. 배경이 우선이다 —
        배경은 우리 몫이고, 오브제는 나중에 시스템 II 가 그 위에 얹는다."""
-    toks = set()
-    for b in backgrounds:
-        for t in b.replace('(', ' ').replace(')', ' ').replace(',', ' ').split():
-            if len(t) >= 2:
-                toks.add(t)
+    def words(t):
+        for ch in '()/,·':
+            t = t.replace(ch, ' ')
+        return t.split()
+
+    toks = {t for b in backgrounds for t in words(b) if len(t) >= 2}
+    bg_text = ' '.join(backgrounds)
     keep, overlap = [], []
     for o in objects:
-        (overlap if any(t in o for t in toks) else keep).append(o)
+        if any(w in o for w in NEVER_AVOID):
+            continue
+        # 배경 낱말이 오브제에 있거나('자작나무 껍질 더미' ↔ '자작나무 껍질'), 오브제 낱말이 배경에 있으면
+        # ('철판/선체' ↔ '튀어오르는 선체' · '벽' ↔ '둥근 벽으로') 겹친 것으로 본다(10-14: '/' · 한 글자 낱말을 못 맞췄다)
+        hit = (any(t in o for t in toks) or any(w in bg_text for w in words(o))
+               or any(f in o and f in bg_text for f in FRAME))
+        (overlap if hit else keep).append(o)
     return keep, overlap
 
 
@@ -118,6 +139,8 @@ def build_prompt(sc, objects):
     lines += [w + '.' for w in emo_words(sc['emotion'])]
     lines.append(COMMON + '.')
     lines.append(EXPOSURE + '.')
+    if sc['stage'] in CONTOUR:
+        lines.append(CONTOUR[sc['stage']] + '.')
     avoid = AVOID_BASE + (', ' + ', '.join(objects) if objects else '')
     lines.append('들어가면 안 되는 것: ' + avoid + '.')
     return ' '.join(l for l in lines if l.strip('. '))
