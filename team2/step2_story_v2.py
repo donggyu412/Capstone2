@@ -49,6 +49,10 @@ CONTEXT_LEVEL = 0.5
 # 이전 장면에서 이미 쓴 재료가 다시 뽑힐 때 곱해지는 가중치
 REPEAT_PENALTY = 0.1
 
+# 기승전결 중 "전"(클라이맥스)에 해당하는 장면 번호. 1팀 블루프린트를
+# 쓰면 scene1=기이므로 scene3=전이 된다. 이 장면만 반전 drift를 쓴다.
+CLIMAX_SCENE = 3
+
 # 장면 벡터 계산 시 카테고리 가중치
 VECTOR_WEIGHTS = {"배경": 0.2, "오브제": 0.5, "감정": 0.3}
 
@@ -84,8 +88,23 @@ VECTOR_AXES = """4개 축의 의미 (Hourglass of Emotions 기반, 각 값 -1.0 
 # 프롬프트
 # ════════════════════════════════════════════════
 
+# 클라이맥스("전") 전용 지시. 벡터 반전으로 재료까지 바뀌면 가장 좋지만,
+# 영상 전체의 재료 풀이 한쪽 분위기로만 쏠려 있으면 반전된 벡터로도
+# 재료 자체는 못 바뀐다. 그럴 때를 대비한 마지막 수단 — 같은 재료라도
+# 다루는 방식과 공기를 글쓰기 단계에서 강제로 뒤집는다.
+CLIMAX_PROMPT = """[클라이맥스 지시 — 이 장면은 이야기의 절정이다]
+직전 장면과 분위기가 정반대로 느껴지게 써라. 재료 이름은 아래 그대로 쓰되,
+그것을 다루는 태도와 장면 전체의 공기를 뒤집는다.
+- 직전 장면이 위협적이고 차가웠다면, 이 장면은 편안하고 따뜻하게.
+- 직전 장면이 긴장되고 날카로웠다면, 이 장면은 느슨하고 안정되게.
+- 직전 장면이 무력하고 가라앉는 느낌이었다면, 이 장면은 힘이 들어오고 또렷해지는 느낌으로.
+조명, 소리의 성격, 움직임의 속도를 반대로 바꿔서 같은 재료로도 전혀 다른 공기를 만들어라.
+다만 2번(주인공 미고정)·3번(꿈의 어긋남)·4번(감정을 환경으로 전달) 규칙은 그대로 지킨다.
+
+"""
+
 SCENE_PROMPT = """
-{이전_장면_컨텍스트}{이전_장면_제약}아래 재료들을 사용해 꿈의 {장면번호}번째 장면을 한국어로 써라. 총 4개의 장면으로 이어지는 연작이다.
+{이전_장면_컨텍스트}{이전_장면_제약}{클라이맥스_지시}아래 재료들을 사용해 꿈의 {장면번호}번째 장면을 한국어로 써라. 총 4개의 장면으로 이어지는 연작이다.
 
 [재료]
 - 배경: {배경}
@@ -409,7 +428,7 @@ def extract_from_story(client, story: str, max_tries: int = 3) -> dict:
 모든 벡터 값은 -1.0~+1.0 사이의 소수로. 판단 근거가 불충분하면 벡터를 null로 출력하고 평가상태를 "미확정"으로 표기. 문자열 안에 쌍따옴표를 쓰지 않는다."""
     for attempt in range(1, max_tries + 1):
         message = client.messages.create(
-            model=MODEL_STORY, max_tokens=4096,
+            model=MODEL_STORY, max_tokens=6144,
             messages=[{"role": "user", "content": prompt}],
         )
         if message.stop_reason == "max_tokens":
@@ -424,7 +443,13 @@ def extract_from_story(client, story: str, max_tries: int = 3) -> dict:
             return json.loads(m.group())
         except json.JSONDecodeError as e:
             print(f"  [추출 재시도 {attempt}/{max_tries}] JSON 파싱 오류: {e}")
-    raise ValueError("extract_from_story: JSON 파싱 최대 재시도 초과")
+
+    # 재시도를 모두 썼다. 7~8분짜리 전체 실행을 한 장면 추출 실패로 날리는 대신,
+    # 이 장면만 중립 벡터로 비워두고 계속 진행한다 — main_emotion과 compute_scene_vector가
+    # 기대하는 키를 전부 채운 빈 구조를 돌려줘야 호출부가 안 깨진다.
+    print("  ※ 추출 재시도를 모두 사용했습니다. 이 장면은 중립 벡터로 비워두고 계속 진행합니다.")
+    return {"배경": [], "오브제": [], "감정": [], "물리법칙": [],
+            "main_emotion": {"label": "중립", "intensity": 0.5}}
 
 
 # ════════════════════════════════════════════════
@@ -450,8 +475,15 @@ def compute_scene_vector(elements: dict) -> list:
     return weighted_mean_vectors(all_vectors, all_weights)
 
 
-def dream_drift(current_vector: list) -> list:
-    """현재 벡터에서 랜덤 방향으로 drift → 다음 장면 목표 벡터"""
+def dream_drift(current_vector: list, reversal: bool = False) -> list:
+    """현재 벡터에서 다음 장면 목표 벡터를 정한다.
+
+    reversal=True (클라이맥스, "전" 장면)면 랜덤 방향 대신 네 축을 전부
+    부호 반전시킨 지점을 목표로 삼는다 — 쾌적↔불쾌, 각성↔무기력처럼
+    정반대 분위기를 노려, 배경·오브제·감정이 한꺼번에 반전 쪽으로 쏠리게 한다.
+    """
+    if reversal:
+        return clip_vector([-c for c in current_vector])
     direction = random_unit_vector(4)
     distance  = (1 - COHERENCE) * MAX_DRIFT
     target    = [c + d * distance for c, d in zip(current_vector, direction)]
@@ -492,6 +524,24 @@ def is_same_thing(a: str, b: str) -> bool:
 def has_banned(name: str) -> bool:
     """재료 이름 자체에 금지표현이 있으면 글에 쓸 수 없다"""
     return any(w in name for w in BANNED)
+
+
+def combine_elements(elements_list: list) -> dict:
+    """여러 장면의 추출 요소를 하나로 합친다 (먼저 나온 항목을 우선, 중복은 버림).
+
+    클라이맥스 장면에서 직전 장면 하나만 보면 후보가 전부 '방금 그 분위기'
+    재료뿐이라 반전 목표와 코사인 유사도를 비교해도 다 비슷하게 낮게 나온다.
+    지금까지 나온 모든 장면을 합쳐야 그중 반전 쪽에 그나마 가까운 게 섞여 들어올 여지가 생긴다.
+    """
+    combined = {"배경": [], "오브제": [], "감정": []}
+    for elements in elements_list:
+        for cat in combined:
+            existing = [i["항목"] for i in combined[cat]]
+            for item in elements.get(cat, []):
+                if not any(is_same_thing(item["항목"], e) for e in existing):
+                    combined[cat].append(item)
+                    existing.append(item["항목"])
+    return combined
 
 
 def merge_candidates(prev_elements: dict, bg_pool: list,
@@ -555,10 +605,20 @@ def sample_elements(elements: dict, target_vector: list,
             if name not in seen:
                 seen.add(name)
                 result.append(name)
-        if len(result) < n:
-            remaining = [i for i in candidates if i["항목"] not in seen]
-            extra = random.sample(remaining, min(n - len(result), len(remaining)))
-            result += [i["항목"] for i in extra]
+
+        # 복원 추출이라 중복이 나와 개수가 모자랄 수 있다. 부족분도 target_vector를
+        # 무시한 균등 무작위(random.sample)가 아니라, 같은 가중치로 비복원 추출해 채운다 —
+        # 안 그러면 코사인 점수가 가장 나쁜 재료도 1위와 똑같은 확률로 뽑힌다.
+        remaining_idx = [i for i, item in enumerate(candidates) if item["항목"] not in seen]
+        while len(result) < n and remaining_idx:
+            sub_weights = [weights[i] for i in remaining_idx]
+            pick = (random.choices(remaining_idx, weights=sub_weights, k=1)[0]
+                    if sum(sub_weights) > 1e-8 else random.choice(remaining_idx))
+            remaining_idx.remove(pick)
+            name = candidates[pick]["항목"]
+            if name not in seen:
+                seen.add(name)
+                result.append(name)
         return result
 
     bg  = sample_category(elements.get("배경",  []), n_bg,  used=used_backgrounds)
@@ -650,9 +710,12 @@ def generate_scene(client, scene_num: int,
     else:
         prev_constraint = ""
 
+    climax_note = CLIMAX_PROMPT if scene_num == CLIMAX_SCENE else ""
+
     base_prompt = SCENE_PROMPT.format(
         이전_장면_컨텍스트=context,
         이전_장면_제약=prev_constraint,
+        클라이맥스_지시=climax_note,
         장면번호=scene_num,
         배경=", ".join(backgrounds),
         오브제=", ".join(objects),
@@ -752,12 +815,28 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
         else:
             prev_elements_path = out / f"scene{scene_num-1}_elements.json"
             prev_elements = json.loads(prev_elements_path.read_text(encoding="utf-8"))
-            target_vector = dream_drift(current_vector)
+            is_climax = (scene_num == CLIMAX_SCENE)
+            target_vector = dream_drift(current_vector, reversal=is_climax)
 
             print(f"  현재 벡터: {[round(x, 2) for x in current_vector]}")
+            if is_climax:
+                print(f"  ※ 클라이맥스(전) — 반전 drift 적용")
             print(f"  목표 벡터: {[round(x, 2) for x in target_vector]}")
 
-            merged = merge_candidates(prev_elements, all_bg, all_obj, all_emo)
+            if is_climax:
+                # 직전 장면 하나가 아니라 지금까지 나온 모든 장면의 재료를 후보로 넓힌다.
+                all_prev_elements = [
+                    json.loads((out / f"scene{i}_elements.json").read_text(encoding="utf-8"))
+                    for i in range(1, scene_num)
+                ]
+                source_elements = combine_elements(all_prev_elements)
+                print(f"  [클라이맥스] 장면 1~{scene_num-1} 재료를 전부 후보로 넓힘 "
+                      f"(배경 {len(source_elements['배경'])} · 오브제 {len(source_elements['오브제'])} · "
+                      f"감정 {len(source_elements['감정'])})")
+            else:
+                source_elements = prev_elements
+
+            merged = merge_candidates(source_elements, all_bg, all_obj, all_emo)
 
             bg, obj, emo = sample_elements(
                 merged, target_vector,
