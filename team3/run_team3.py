@@ -18,7 +18,7 @@ run_team3.py — 2팀 꿈 스토리보드 → 3팀(배경 · 오브제 · 사운
   6) 통합     --mux 영상 소리 → 영상은 다시 인코딩하지 않고 소리만 붙인다 (D · 최종 꿈 영상)
   7) 4팀      --to-team4 → 배경판 4장 · scenes.json · dream_scenes.json · 오브제 PNG · objects.json 을
               4팀 입력 자리 team4/input/(storyboard · objects)에 넣는다 (10-14 · 4팀 코드는 고치지 않음).
-              4팀 GridModel · DreamModel 은 대본의 오브제 이름과 오브제 파일이 짝이 맞아야 돌므로,
+              4팀 DreamModel(주력 · 10-15 GridModel 삭제)은 대본의 오브제 이름과 오브제 파일이 짝이 맞아야 돌므로,
               배경판 · 오브제가 지금 대본과 같은 판일 때만 넣는다(아니면 아무것도 바꾸지 않고 멈춘다).
 
 [사용법] (저장소 루트에서)
@@ -59,7 +59,7 @@ ARCHIVE = BG / 'input' / 'storyboard_archive'
 BG_OUT = BG / 'output'
 DEFAULT_STORY = ROOT / 'team2' / 'output' / 'dream_scenes.json'
 OBJ_OUT = TEAM3 / 'object' / 'output_objects'  # 오브제 생성기(generate_objects_comfy.py) 기본 출력
-TEAM4_INPUT = ROOT / 'team4' / 'input'          # 4팀 GridModel/config.py · DreamModel/config.py 의 입력 자리
+TEAM4_INPUT = ROOT / 'team4' / 'input'          # 4팀 DreamModel/config.py input_root
 
 N_SCENES = 4
 IMAGE_EXT = ('.png', '.jpg', '.jpeg')         # app.py IMAGE_EXT 와 같게
@@ -503,7 +503,7 @@ def to_team4(story_path, plates_dir=None, objects_dir=None, team4_input=None, ch
     (ob / 'README.md').write_text(team4_readme('오브제', plates, labels), encoding='utf-8')
     print('  저장: %s (배경판 %d · json 2) · %s (오브제 %d · objects.json)'
           % (rel(sb), len(plate_files), rel(ob), len(obj_files)))
-    print('  → 4팀이 GridModel 또는 DreamModel 을 실행한다 (소리는 4팀이 input 아래에 둔다)')
+    print('  → 4팀이 DreamModel 을 실행한다 (소리는 4팀이 input 아래에 둔다)')
 
 
 def main():
