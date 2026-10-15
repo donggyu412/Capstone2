@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Local working notes; shared documentation lives in docs/.
+/archive/notes/

@@ -1,0 +1,60 @@
+{
+  "version": "1.1.0",
+  "mapping_basis": "Artistic direction for supplied labels, not psychological inference",
+  "emotion_profiles": {
+    "공포": {
+      "inertia": [0.976, 0.942],
+      "noise_gain": [0.8, 1.15],
+      "speed_limit": [0.0018, 0.0028],
+      "opacity_fluctuation": [0.015, 0.075],
+      "rotation_flutter": [0.1, 0.5],
+      "distance_variation": [0.02, 0.07]
+    }
+  },
+  "exploration": {
+    "target_activity": 0.32,
+    "initial_strength": 0.00010,
+    "min_strength": 0.000025,
+    "max_strength": 0.00022,
+    "learning_rate": 0.000006,
+    "audio_gain": 0.000001,
+    "smoothing": 0.12
+  },
+  "motion": {
+    "trace_influence": 0.0012,
+    "trace_sensing_radius": 0.10,
+    "guidance_influence": 0.00030,
+    "base_opacity": 0.94,
+    "reveal_step": 0.13,
+    "reveal_start": 0.13,
+    "reveal_duration_fraction": 0.14,
+    "interaction_start": 0.48,
+    "separation_distance": 0.22,
+    "relation_strength": 0.48,
+    "image_guidance_strength": 0.18
+  },
+  "trace": {"deposit_strength": 0.04, "radius": 1.25},
+  "render": {"trace_alpha_max": 26, "ghost_gains": [0.06, 0.10], "sprite_height": 0.44},
+  "composition_rules": [
+    {"name": "passage", "keywords": ["복도", "통로", "서가", "선반"], "flow": [0.18, -0.06]},
+    {"name": "room", "keywords": ["철판", "방"], "flow": [-0.08, 0.04]}
+  ],
+  "role_rules": [
+    {"role": "journal", "aliases": ["항해일지"], "cues": ["flutter"], "region": [0.23, 0.56, 0.45, 0.70], "scale": 1.12},
+    {"role": "pool", "aliases": ["웅덩이", "냉동액"], "cues": ["expansion"], "region": [0.32, 0.72, 0.70, 0.83], "scale": 1.04},
+    {"role": "droplet", "aliases": ["물방울"], "cues": ["falling"], "region": [0.28, 0.68, 0.20, 0.62], "scale": 0.70},
+    {"role": "record", "aliases": ["서류철"], "cues": ["falling", "floating", "flutter", "weight"], "region": [0.24, 0.58, 0.39, 0.66], "scale": 1.06},
+    {"role": "paper", "aliases": ["종이"], "cues": ["falling", "floating", "flutter", "weight"], "region": [0.42, 0.71, 0.35, 0.64], "scale": 0.89},
+    {"role": "figure", "aliases": ["그림자", "형상"], "cues": ["floating", "flutter"], "region": [0.58, 0.77, 0.28, 0.56], "scale": 1.00},
+    {"role": "floor", "aliases": ["타일", "금"], "cues": ["expansion"], "region": [0.23, 0.67, 0.69, 0.83], "scale": 1.12},
+    {"role": "hand", "aliases": ["손"], "cues": ["flutter"], "region": [0.62, 0.78, 0.38, 0.61], "scale": 1.03}
+  ],
+  "cue_rules": {
+    "falling": ["떨어", "아래로", "내려앉"],
+    "floating": ["떠", "뜬", "부유", "허공", "가벼워"],
+    "flutter": ["팔락", "흔들", "회전"],
+    "weight": ["무거", "무게"],
+    "expansion": ["벌어", "넓", "퍼진", "실금"],
+    "approach": ["향해", "가까이", "건드", "닿", "붙잡", "손끝을 올"]
+  }
+}
