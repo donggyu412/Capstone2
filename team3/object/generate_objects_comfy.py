@@ -26,6 +26,7 @@
 ComfyUI 는 미리 켜 두고(run_nvidia_gpu.bat), models/loras 에 dream_object_lora.safetensors 가 있어야 한다.
 """
 import argparse
+import re
 import json
 import os
 import time
@@ -56,6 +57,10 @@ OBJ_ENGLISH_MAP = {
 TRIGGER = "dream_object"  # LoRA 학습 때 캡션 맨 앞에 붙인 트리거 워드
 STYLE_PROMPT = "digital art style, abstract geometric shape, surreal, white background, standalone object"
 NEGATIVE = "worst quality, low quality, blurry, distorted"  # ComfyUI 화면에서 쓴 것과 같게
+# --abstract : 교수님 10/15 피드백 "더 추상적이고 기하학적으로" — 단순한 기본 도형 · 평평한 색 · 질감 없음
+ABSTRACT_PROMPT = ("minimalist abstract geometric form, simple primitive shapes, flat color, clean lines, "
+                   "no texture, white background, standalone object")
+ABSTRACT_NEGATIVE = NEGATIVE + ", realistic, photo, photorealistic, texture, detailed, hands, fingers, face, text"
 FALLBACK = "surreal object"
 TRANSLATIONS = "translations.json"
 
@@ -218,6 +223,11 @@ def remove_bg(img, model="birefnet-general", hole_min_diff=30.0):
 
 
 # ─────────────────────────────────────────────
+def safe_name(name):
+    """파일 이름 — 윈도에서 쓸 수 없는 글자(/ \\ : * ? " < > |)는 _ 로 (오브제 엔진과 같은 규칙)"""
+    return re.sub(r'[\\/:*?"<>|]', '_', name).replace(' ', '_')
+
+
 def main():
     global TRANSLATIONS
     ap = argparse.ArgumentParser(description="꿈 오브제 생성 (ComfyUI + LoRA)")
@@ -229,6 +239,10 @@ def main():
     ap.add_argument("--rembg-model", default="birefnet-general",
                     help="누끼 모델: birefnet-general(기본) · bria-rmbg · isnet-general-use · u2net")
     ap.add_argument("--translations", default=TRANSLATIONS, help="번역 기록 파일 (시험할 때는 다른 이름으로)")
+    ap.add_argument("--reseed", nargs="+", default=[], metavar="장면-번호",
+                    help="이 오브제만 다른 시드로 다시 생성해 덮어씀 (예: --reseed 2-3 4-1). 같은 장을 여러 번 바꾸려면 --reseed-round 를 올린다")
+    ap.add_argument("--reseed-round", type=int, default=1, help="--reseed 몇 번째 시도인지 (1, 2, 3 … 마다 다른 그림)")
+    ap.add_argument("--abstract", action="store_true", help="더 추상적·기하학적인 프롬프트로 생성 (교수님 10/15 피드백)")
     ap.add_argument("--dry-run", action="store_true", help="번역·프롬프트만 확인하고 생성하지 않음")
     args = ap.parse_args()
 
@@ -244,7 +258,8 @@ def main():
     raw_dir = args.out + "_raw"
     manifest = {"story": os.path.basename(args.story), "checkpoint": "dreamshaper_8.safetensors",
                 "lora": args.lora or None, "lora_strength": args.lora_strength if args.lora else None,
-                "style_prompt": STYLE_PROMPT, "negative": NEGATIVE,
+                "style_prompt": ABSTRACT_PROMPT if args.abstract else STYLE_PROMPT,
+                "negative": ABSTRACT_NEGATIVE if args.abstract else NEGATIVE,
                 "background_removal": f"rembg {args.rembg_model} + 배경색이 아닌 안쪽 구멍만 메움", "scenes": []}
 
     for scene_data in scenes:
@@ -256,9 +271,12 @@ def main():
         entries = []
         for idx, ko in enumerate(objects, 1):
             en, source = translate(ko, tr)
-            prompt = f"{TRIGGER}, {en}, {STYLE_PROMPT}"
+            prompt = f"{TRIGGER}, {en}, {ABSTRACT_PROMPT if args.abstract else STYLE_PROMPT}"
             seed = idx * 777 + n * 100
-            fname = f"obj_{idx}_{ko.replace(' ', '_')}.png"
+            reseed = f"{n}-{idx}" in args.reseed
+            if reseed:  # 다시 뽑기 — 시도마다 다른 시드 (기록에 남는다)
+                seed += 100003 * args.reseed_round
+            fname = f"obj_{idx}_{safe_name(ko)}.png"
             entries.append({"index": idx, "name_ko": ko, "name_en": en, "translation": source,
                             "prompt": prompt, "seed": seed, "file": f"scene_{n:02d}/{fname}"})
             tag = {"manual": "직접", "dict": "사전", "auto": "자동", "fallback": "실패"}.get(source, source)
@@ -267,13 +285,13 @@ def main():
                 continue
 
             save_path = os.path.join(folder, fname)
-            if os.path.exists(save_path):
+            if os.path.exists(save_path) and not reseed:
                 print("      패스 (이미 있음)")
                 continue
             os.makedirs(folder, exist_ok=True)
             os.makedirs(raw_folder, exist_ok=True)
             try:
-                wf = get_workflow(prompt, NEGATIVE, seed, args.lora, args.lora_strength)
+                wf = get_workflow(prompt, ABSTRACT_NEGATIVE if args.abstract else NEGATIVE, seed, args.lora, args.lora_strength)
                 pid = queue_prompt(args.server, wf)["prompt_id"]
                 hist = wait_result(args.server, pid)
                 info = hist["outputs"]["9"]["images"][0]

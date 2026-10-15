@@ -111,28 +111,70 @@ GROUPS = {
     '손': ['손', '손끝'],
 }
 LAW_RULES = [
-    ('float',      ['떠', '부유', '공중', '닿지 않']),
-    ('glide',      ['미끄러지듯']),
-    ('weightless', ['무게가 사라', '가벼워', '무게를 잃']),
-    ('heavy',      ['무거워']),
-    ('rotate',     ['회전']),
+    ('float',      ['떠', '부유', '공중', '닿지 않', '튕겨', '튀어 오', '위로 떨어', '위로 떠', '머무는 시간']),
+    ('glide',      ['미끄러지듯', '미끄러져', '옆으로', '따라가', '따라감']),
+    ('weightless', ['무게가 사라', '가벼워', '무게를 잃', '무게가 실리지 않', '무게가 점차 사라']),
+    ('heavy',      ['무거워', '무게만 늘', '무게가 늘', '가라앉']),
+    ('rotate',     ['회전', '돌며', '천천히 돈']),
     ('ash',        ['바스러', '재처럼', '부서']),
-    ('vanish',     ['사라짐', '사라지', '지워', '없어']),
-    ('stretch',    ['늘어', '길게', '비율']),
-    ('flutter',    ['팔락', '넘어가', '넘어감']),
-    ('crack',      ['균열', '금이', '벌어']),
-    ('precede',    ['먼저', '앞서', '역전', '닿기도 전', '닿기 전']),
-    ('flicker',    ['나타나고 사라', '있다가 없다가', '임의로 변']),
-    ('still',      ['변하지 않', '흔들리지 않', '잔물결 하나']),
-    ('recede',     ['멀어', '좁혀지지 않']),
+    ('vanish',     ['사라짐', '사라지', '지워', '없어', '흡수', '삼키', '소멸']),
+    ('stretch',    ['늘어', '길게', '비율', '길어지', '넓게 벌어', '팽창']),
+    ('flutter',    ['팔락', '넘어가', '넘어감', '떨리', '떨림', '수축', '휘어']),
+    ('crack',      ['균열', '금이', '벌어', '갈라']),
+    ('precede',    ['먼저', '앞서', '역전', '닿기도 전', '닿기 전', '늦게 따라', '한 박자 늦게']),
+    ('flicker',    ['나타나고 사라', '있다가 없다가', '임의로 변', '깜빡']),
+    ('still',      ['변하지 않', '흔들리지 않', '잔물결 하나', '고정되어', '그대로 매달려', '그대로 머', '움직이지 않']),
+    ('recede',     ['멀어', '좁혀지지 않', '작아지', '아득']),
 ]
 # 먼저 보고 지우는 표현 — 이 말 안의 낱말이 다른 동작으로 두 번 잡히지 않게
-PRIORITY = ['flicker', 'weightless', 'precede']
+PRIORITY = ['flicker', 'weightless', 'heavy', 'precede', 'stretch']
 BEHAVIOR_KO = {
     'float': '부유', 'glide': '미끄러짐', 'weightless': '무게 잃음', 'heavy': '무거워짐', 'rotate': '회전',
     'ash': '재처럼 바스러짐', 'vanish': '지워짐', 'stretch': '늘어남', 'flutter': '팔락임', 'crack': '갈라짐',
     'precede': '인과 역전(결과가 먼저)', 'flicker': '있다 없다 함', 'still': '미동 없음', 'recede': '멀어짐',
 }
+
+
+import re as _re
+_HANGUL = '가-힣'
+
+
+def _jong_n(ch):
+    """마지막 글자 받침이 ㄴ 인지 (꾸밈말 '낡은 · 긴 · 푸른' 거르기)"""
+    c = ord(ch) - 0xAC00
+    return 0 <= c < 11172 and c % 28 == 4
+
+
+def name_tokens(name):
+    """오브제 이름에서 법칙 문장과 맞춰 볼 낱말을 뽑는다
+    '/ ( ) ·' 로 나뉜 각 덩어리의 마지막 낱말(머리 명사)은 늘 넣고, 꾸밈말(받침 ㄴ)은 뺀다"""
+    toks = []
+    for chunk in _re.split(r'[/()·,\[\]]+', name):
+        words = [w for w in chunk.split() if w]
+        for i, w in enumerate(words):
+            if len(w) >= 3 and w[-1] in '의과와':
+                w = w[:-1]
+            if i == len(words) - 1 or not _jong_n(w[-1]):
+                toks.append(w)
+    return list(dict.fromkeys(t for t in toks if t))
+
+
+def _hit(tok, law):
+    if len(tok) >= 2:
+        return tok in law
+    # 한 글자(손 · 막 · 금 · 문 · 종)는 낱말 경계에서만 — '손바닥' 의 '손', '막다' 의 '막' 오인 방지
+    return _re.search(rf'(?<![{_HANGUL}]){tok}(?=$|[^{_HANGUL}]|[이가을를은는의에도만과와로])', law) is not None
+
+
+def _says(word, text):
+    """문장에 그 낱말이 '긍정으로' 있는지 — '멀어지지 않고' 처럼 바로 뒤에서 부정되면 아니다"""
+    i = text.find(word)
+    while i >= 0:
+        after = text[i + len(word):i + len(word) + 4]  # '멀어지지 않고' · '흩어지지 못해'
+        if '않' in word or not ('않' in after or '못' in after):
+            return True
+        i = text.find(word, i + 1)
+    return False
 
 
 def object_groups(name):
@@ -143,14 +185,16 @@ def analyze_scene(sc):
     """physics_laws 를 오브제별 동작 세기(0~1)로 옮긴다. 옮긴 근거를 log 로 남긴다."""
     objs = sc.get('objects') or []
     groups = [object_groups(o) for o in objs]
+    toks = [name_tokens(o) for o in objs]
     beh = [dict() for _ in objs]
     log = []
     for law in sc.get('physics_laws') or []:
-        hits = [i for i, gs in enumerate(groups) if any(any(w in law for w in GROUPS[g]) for g in gs)]
+        hits = [i for i, gs in enumerate(groups)
+                if any(any(w in law for w in GROUPS[g]) for g in gs) or any(_hit(t, law) for t in toks[i])]
         found, rest = [], law
         for b in PRIORITY + [r for r, _ in LAW_RULES if r not in PRIORITY]:
             words = dict(LAW_RULES)[b]
-            hit = [w for w in words if w in rest]
+            hit = [w for w in words if _says(w, rest)]
             if hit:
                 found.append(b)
                 if b in PRIORITY:  # '무게가 사라지고' 의 '사라' 가 지워짐으로 다시 잡히지 않게
@@ -208,12 +252,16 @@ def ffmpeg_exe():
         return 'ffmpeg'
 
 
+def safe_name(name):
+    return _re.sub(r'[\\/:*?"<>|]', '_', name).replace(' ', '_')
+
+
 def load_objects_index(obj_dir, scene_no, names):
     """output_objects/scene_NN/obj_i_이름.png — 없으면 경고하고 건너뛴다"""
     d = Path(obj_dir) / f'scene_{scene_no:02d}'
     files = []
     for i, n in enumerate(names, 1):
-        p = d / f"obj_{i}_{n.replace(' ', '_')}.png"
+        p = d / f"obj_{i}_{safe_name(n)}.png"
         if not p.exists():
             cand = sorted(d.glob(f'obj_{i}_*.png'))
             p = cand[0] if cand else None
