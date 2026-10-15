@@ -88,11 +88,22 @@ VECTOR_AXES = """4개 축의 의미 (Hourglass of Emotions 기반, 각 값 -1.0 
 # 프롬프트
 # ════════════════════════════════════════════════
 
-# 클라이맥스("전") 전용 지시. 벡터 반전으로 재료까지 바뀌면 가장 좋지만,
-# 영상 전체의 재료 풀이 한쪽 분위기로만 쏠려 있으면 반전된 벡터로도
-# 재료 자체는 못 바뀐다. 그럴 때를 대비한 마지막 수단 — 같은 재료라도
-# 다루는 방식과 공기를 글쓰기 단계에서 강제로 뒤집는다.
-CLIMAX_PROMPT = """[클라이맥스 지시 — 이 장면은 이야기의 절정이다]
+# 기승전결 역할별 지시. 전(클라이맥스)만 특별 취급하면 기·승·결은 전부 같은
+# 범용 규칙만 받아서, 벡터가 조금씩만 움직이는 만큼 재료도 거의 안 바뀐다.
+# 네 장면 각자에게 "지금 이야기에서 뭘 해야 하는가"를 다르게 지시한다.
+ROLE_PROMPTS = {
+    1: """[장면 역할 — 기(도입)]
+이야기의 첫 장면이다. 설명이나 배경지식 없이, 지금 눈앞에 보이는 것부터 바로 시작한다.
+아직 낯선 공간과 사물을 처음 마주하는 느낌으로 쓴다. 다음 장면이 더 깊이 들어갈 여지를 남긴다.
+
+""",
+    2: """[장면 역할 — 승(전개)]
+직전 장면(기)에서 있던 낯섦이 조금씩 커지고 이상해지는 지점이다.
+기 장면의 배경·오브제를 그대로 반복하지 말고, 새로운 공간과 사물로 이어가며 긴장을 쌓아올린다.
+같은 세계관 안에서 한 발 더 들어간 느낌으로 쓴다.
+
+""",
+    3: """[장면 역할 — 전(절정, 반전)]
 직전 장면과 분위기가 정반대로 느껴지게 써라. 재료 이름은 아래 그대로 쓰되,
 그것을 다루는 태도와 장면 전체의 공기를 뒤집는다.
 - 직전 장면이 위협적이고 차가웠다면, 이 장면은 편안하고 따뜻하게.
@@ -101,10 +112,17 @@ CLIMAX_PROMPT = """[클라이맥스 지시 — 이 장면은 이야기의 절정
 조명, 소리의 성격, 움직임의 속도를 반대로 바꿔서 같은 재료로도 전혀 다른 공기를 만들어라.
 다만 2번(주인공 미고정)·3번(꿈의 어긋남)·4번(감정을 환경으로 전달) 규칙은 그대로 지킨다.
 
-"""
+""",
+    4: """[장면 역할 — 결(마무리)]
+이야기의 마지막 장면이다. 앞선 세 장면(기·승·전)의 배경·오브제를 그대로 가져오지 않는다.
+전 장면에서 뒤집힌 분위기를 받아, 완전히 새로운 공간에서 끝맺는다.
+결론이나 교훈으로 닫지 않는다는 기존 규칙(7번)은 그대로 지키되, 그 작은 변화가 일어나는 무대 자체는 새것이어야 한다.
+
+""",
+}
 
 SCENE_PROMPT = """
-{이전_장면_컨텍스트}{이전_장면_제약}{클라이맥스_지시}아래 재료들을 사용해 꿈의 {장면번호}번째 장면을 한국어로 써라. 총 4개의 장면으로 이어지는 연작이다.
+{이전_장면_컨텍스트}{이전_장면_제약}{역할_지시}아래 재료들을 사용해 꿈의 {장면번호}번째 장면을 한국어로 써라. 총 4개의 장면으로 이어지는 연작이다.
 
 [재료]
 - 배경: {배경}
@@ -393,11 +411,6 @@ def extract_from_story(client, story: str, max_tries: int = 3) -> dict:
 - 이 글에서 현실과 어긋난 꿈의 논리를 짧게 서술 (예: "거리가 걸어도 좁혀지지 않음", "물체가 위로 떨어짐")
 - 없으면 빈 배열
 
-[main_emotion 정의]
-- 이 글 전체에서 가장 지배적인 감정 하나를 고른다.
-- label은 반드시 아래 7종 중 하나: 분노, 혐오, 공포, 기쁨, 슬픔, 놀람, 중립
-- intensity는 0.0~1.0 사이의 소수
-
 [출력 형식 — JSON만 출력, 주석 없이 순수 JSON]
 {{
   "배경": [{{
@@ -421,8 +434,7 @@ def extract_from_story(client, story: str, max_tries: int = 3) -> dict:
     "평가상태": "정상",
     "판단근거": "..."
   }}, ...],
-  "물리법칙": ["법칙1", ...],
-  "main_emotion": {{"label": "슬픔", "intensity": 0.8}}
+  "물리법칙": ["법칙1", ...]
 }}
 
 모든 벡터 값은 -1.0~+1.0 사이의 소수로. 판단 근거가 불충분하면 벡터를 null로 출력하고 평가상태를 "미확정"으로 표기. 문자열 안에 쌍따옴표를 쓰지 않는다."""
@@ -445,11 +457,11 @@ def extract_from_story(client, story: str, max_tries: int = 3) -> dict:
             print(f"  [추출 재시도 {attempt}/{max_tries}] JSON 파싱 오류: {e}")
 
     # 재시도를 모두 썼다. 7~8분짜리 전체 실행을 한 장면 추출 실패로 날리는 대신,
-    # 이 장면만 중립 벡터로 비워두고 계속 진행한다 — main_emotion과 compute_scene_vector가
-    # 기대하는 키를 전부 채운 빈 구조를 돌려줘야 호출부가 안 깨진다.
+    # 이 장면만 중립 벡터로 비워두고 계속 진행한다. main_emotion은 더 이상 여기서
+    # 안 채워도 된다 — compute_scene_vector가 빈 항목을 [0,0,0,0]으로 처리하고,
+    # classify_emotion([0,0,0,0])이 자동으로 "중립"을 반환한다.
     print("  ※ 추출 재시도를 모두 사용했습니다. 이 장면은 중립 벡터로 비워두고 계속 진행합니다.")
-    return {"배경": [], "오브제": [], "감정": [], "물리법칙": [],
-            "main_emotion": {"label": "중립", "intensity": 0.5}}
+    return {"배경": [], "오브제": [], "감정": [], "물리법칙": []}
 
 
 # ════════════════════════════════════════════════
@@ -473,6 +485,37 @@ def compute_scene_vector(elements: dict) -> list:
     if not all_vectors:
         return [0.0, 0.0, 0.0, 0.0]
     return weighted_mean_vectors(all_vectors, all_weights)
+
+
+# 1팀 7종 감정의 Hourglass 좌표 (Pleasantness, Attention, Sensitivity, Aptitude).
+# Cambria 논문이 이 7종(1팀 자체 분류)의 정확한 좌표를 못박진 않으므로, Hourglass의
+# 일반 원리로 추정한 휴리스틱이다. 숫자는 조정 가능.
+EMOTION_ARCHETYPES = {
+    "분노": (-0.6,  0.7,  0.5,  0.3),
+    "혐오": (-0.7,  0.3,  0.6, -0.3),
+    "공포": (-0.6,  0.6,  0.6, -0.6),
+    "기쁨": ( 0.7,  0.3, -0.2,  0.5),
+    "슬픔": (-0.5, -0.5, -0.2, -0.5),
+    "놀람": ( 0.0,  0.8,  0.5,  0.0),
+    "중립": ( 0.0,  0.0,  0.0,  0.0),
+}
+_MAX_VECTOR_NORM = _norm([1.0, 1.0, 1.0, 1.0])  # 강도 정규화 기준
+
+
+def classify_emotion(vector: list) -> dict:
+    """장면 벡터를 7종 감정 중 가장 가까운 것으로 분류한다.
+
+    Claude에게 또 묻지 않고 이미 계산된 벡터로 결정한다. "중립"의 좌표가
+    원점이라, 벡터가 거의 중립이면 자동으로 "중립"이 가장 가까운 점이 된다 —
+    글 내용이 아무리 기이해도 벡터가 평온하면 라벨도 평온해진다.
+    """
+    best_label, best_dist = "중립", float("inf")
+    for label, coord in EMOTION_ARCHETYPES.items():
+        dist = math.sqrt(sum((v - c) ** 2 for v, c in zip(vector, coord)))
+        if dist < best_dist:
+            best_label, best_dist = label, dist
+    intensity = min(1.0, _norm(vector) / _MAX_VECTOR_NORM)
+    return {"label": best_label, "intensity": round(intensity, 3)}
 
 
 def dream_drift(current_vector: list, reversal: bool = False) -> list:
@@ -568,9 +611,10 @@ def merge_candidates(prev_elements: dict, bg_pool: list,
 def sample_elements(elements: dict, target_vector: list,
                     n_bg: int = 1, n_obj: int = 2, n_emo: int = 2,
                     used_backgrounds: list = None,
-                    used_objects: list = None) -> tuple:
+                    used_objects: list = None,
+                    used_emotions: list = None) -> tuple:
     """코사인 유사도 기반 가중치 샘플링 → (배경, 오브제, 감정) 리스트"""
-    def sample_category(items, n, used=None):
+    def sample_category(items, n, used=None, force_new=False):
         candidates = [i for i in items if not has_banned(i["항목"])] or items
         if not candidates:
             return []
@@ -619,11 +663,24 @@ def sample_elements(elements: dict, target_vector: list,
             if name not in seen:
                 seen.add(name)
                 result.append(name)
+
+        # 교수님 피드백: 재료가 획기적으로 바뀌어야 한다. 패널티만으로는 재료 풀이
+        # 좁을 때 전부 재사용 재료로만 채워질 수 있다. 결과 전부가 이미 쓴 것이면
+        # 가중치가 가장 낮았던 하나를, 안 쓴 재료 중 가장 점수 높은 것으로 강제 교체한다.
+        if force_new and used and result:
+            is_new = lambda nm: not any(is_same_thing(nm, u) for u in used)
+            if not any(is_new(r) for r in result):
+                weight_by_name = {c["항목"]: w for c, w in zip(candidates, weights)}
+                new_candidates = [c for c in candidates if is_new(c["항목"])]
+                if new_candidates:
+                    best_new = max(new_candidates, key=lambda c: weight_by_name.get(c["항목"], 0.0))
+                    weakest = min(result, key=lambda r: weight_by_name.get(r, 0.0))
+                    result[result.index(weakest)] = best_new["항목"]
         return result
 
-    bg  = sample_category(elements.get("배경",  []), n_bg,  used=used_backgrounds)
-    obj = sample_category(elements.get("오브제", []), n_obj, used=used_objects)
-    emo = sample_category(elements.get("감정",  []), n_emo)
+    bg  = sample_category(elements.get("배경",  []), n_bg,  used=used_backgrounds, force_new=True)
+    obj = sample_category(elements.get("오브제", []), n_obj, used=used_objects,     force_new=True)
+    emo = sample_category(elements.get("감정",  []), n_emo, used=used_emotions,    force_new=True)
     return bg, obj, emo
 
 
@@ -640,6 +697,13 @@ def build_context(previous_stories: list) -> str:
         last_para = last.split("\n\n")[-1]
         return f"[직전 장면 마지막 문단]\n{last_para}\n\n"
     return f"[직전 장면]\n{last}\n\n"
+
+
+def extract_opening(story: str, n_sentences: int = 2) -> str:
+    """직전 장면의 시작 문장(들)을 뽑아낸다. 다음 장면이 같은 문형을 베끼지 않게
+    모델에게 구체적으로 보여주는 용도."""
+    sentences = re.split(r"(?<=[.!?…])\s+", story.strip())
+    return " ".join(sentences[:n_sentences]).strip()
 
 
 # ════════════════════════════════════════════════
@@ -699,23 +763,32 @@ def generate_scene(client, scene_num: int,
                    previous_backgrounds: list = None) -> str:
     context = build_context(previous_stories)
 
+    lines = []
     if used_physics or previous_backgrounds:
-        lines = ["[이전 장면에서 이미 사용한 것 — 이번 장면에서 반복 금지]"]
+        lines.append("[이전 장면에서 이미 사용한 것 — 이번 장면에서 반복 금지]")
         if used_physics:
             lines.append(f"- 초현실 물리 법칙: {', '.join(used_physics)}")
         if previous_backgrounds:
             lines.append(f"- 배경 공간: {', '.join(previous_backgrounds)}")
         lines.append("→ 위 법칙과 배경은 이번 장면에 쓰지 않는다. 새로운 공간과 새로운 꿈의 어긋남을 만들어라.")
-        prev_constraint = "\n".join(lines) + "\n\n"
-    else:
-        prev_constraint = ""
 
-    climax_note = CLIMAX_PROMPT if scene_num == CLIMAX_SCENE else ""
+    if previous_stories:
+        prev_opening = extract_opening(previous_stories[-1])
+        lines.append(f"[직전 장면의 시작 문장]\n{prev_opening}")
+        lines.append(
+            "→ 이번 장면의 첫 문장(들)은 위와 같은 문형을 그대로 재사용하지 않는다. "
+            "특히 [사물+동사 반복] → [의성어 두 번] → [간격·리듬 서술] 같은 틀을 그대로 베끼지 않는다. "
+            "문장 길이, 어순, 시작 방식(동작/소리/사물/대화/정지된 장면 등)을 직전 장면과 다르게 가져간다."
+        )
+
+    prev_constraint = ("\n".join(lines) + "\n\n") if lines else ""
+
+    role_note = ROLE_PROMPTS.get(scene_num, "")
 
     base_prompt = SCENE_PROMPT.format(
         이전_장면_컨텍스트=context,
         이전_장면_제약=prev_constraint,
-        클라이맥스_지시=climax_note,
+        역할_지시=role_note,
         장면번호=scene_num,
         배경=", ".join(backgrounds),
         오브제=", ".join(objects),
@@ -801,6 +874,7 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
     all_used_physics = []
     used_bg_names    = []   # 실제 글에 쓴 배경 — 프롬프트 금지 + 샘플링 패널티 공용
     used_obj_names   = []   # 실제 글에 쓴 오브제 — 샘플링 패널티용
+    used_emo_names   = []   # 실제 글에 쓴 감정 재료 — 샘플링 패널티용
 
     for scene_num in range(1, 5):
         print(f"\n{'═'*50}")
@@ -843,6 +917,7 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
                 n_bg=n_bg, n_obj=n_obj, n_emo=n_emo,
                 used_backgrounds=used_bg_names or None,
                 used_objects=used_obj_names or None,
+                used_emotions=used_emo_names or None,
             )
 
         print(f"  배경: {bg}")
@@ -890,9 +965,14 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
 
         used_bg_names.extend(bg)
         used_obj_names.extend(obj)
+        used_emo_names.extend(emo)
 
         current_vector = compute_scene_vector(elements)
+        main_emotion = classify_emotion(current_vector)
+        elements["main_emotion"] = main_emotion  # elements.json에도 남겨 투명하게 확인 가능
+        elements_path.write_text(json.dumps(elements, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"  장면{scene_num} 벡터: {[round(x, 2) for x in current_vector]}")
+        print(f"  장면{scene_num} 감정: {main_emotion['label']} ({main_emotion['intensity']})")
 
         previous_stories.append(story)
 
@@ -907,6 +987,7 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
     for i in range(1, 5):
         story_text = (out / f"scene{i}_story.txt").read_text(encoding="utf-8")
         elem       = json.loads((out / f"scene{i}_elements.json").read_text(encoding="utf-8"))
+        scene_vector = compute_scene_vector(elem)
         export.append({
             "scene": i,
             "story": story_text,
@@ -914,8 +995,8 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
             "objects":     [e["항목"] for e in elem.get("오브제", [])],
             "emotions":    [e["항목"] for e in elem.get("감정",  [])],
             "physics_laws": elem.get("물리법칙", []),
-            "main_emotion": elem.get("main_emotion", {"label": "중립", "intensity": 0.5}),
-            "vector":      [round(x, 3) for x in compute_scene_vector(elem)],
+            "main_emotion": classify_emotion(scene_vector),  # 벡터로 결정 — Claude에게 다시 안 물음
+            "vector":      [round(x, 3) for x in scene_vector],
         })
 
     export_path = out / "dream_scenes.json"
