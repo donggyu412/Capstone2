@@ -737,56 +737,62 @@ def apply(sc, P, mats, D, sr, rng, dry, add, note):
         order = order[k:] + order[:k]
         return [g for g in order if g in allowed] or order
 
-    # ① 이질적 침입
-    base = INTRUDE_BRIGHT if dark else INTRUDE_DARK
-    palette = rotation(base, 3, 'bright' if dark else 'dark', {g for g in base if g not in in_story})
-    n_in = 1 + int(d > 0.45) + int(d > 0.8)
-    lo, hi = 0.04 * D, 0.96 * D                                          # 장면 경계(겹쳐 섞는 구간)는 피한다
-    for k in range(n_in):
-        u0, s = slots[k % len(slots)]
-        g = palette[k % len(palette)]
-        dur = min(float(rng.uniform(2.5, 4.5)), 0.6 * D)
-        f, a = GESTURES[g](dur, sr, rng)
-        x = np.linspace(0, 1, len(f))
-        f = f * (1 + 0.035 * (0.5 - x))                                   # 다가오다 멀어지는 도플러
-        y = timbre(NATURAL_TIMBRE[g], f, a, sr, rng) * np.sin(np.pi * x) ** 0.8
-        y = synth.lowpass(y, 7000, sr, 1)
-        lr = (-0.9, 0.9) if rng.random() < 0.5 else (0.9, -0.9)
-        t0 = float(np.clip(u0 * D - dur / 2, min(lo, D - dur), max(0.0, hi - dur)))
-        add(dry, _pan_sweep(_norm(y, 0.55 * (0.6 + 0.6 * d)), *lr), int(t0 * sr))
-        note(t0, dur, '이질적 침입', '%s %s 지나감' % (josa(GESTURE_KO[g], '이', '가'), '왼쪽→오른쪽' if lr[0] < 0 else '오른쪽→왼쪽'),
-             '장면 감정(%s)과 반대되는 %s 소리 — 꿈의 부조화' % (emo['label'], '밝은' if dark else '어두운'),
-             (s, u0) if s else None)
+    from . import style as _style
+    fx = _style.get(sc)['fx']
+    gaps = []
+    if fx == 'apichatpong':                                              # 침입·치환 대신 침묵의 틈 · 깊은 쿵 · 소리 시퀀스
+        gaps = _apichatpong(sc, P, mats, D, sr, rng, dry, add, note, sudden, d)
+    else:
+        # ① 이질적 침입
+        base = INTRUDE_BRIGHT if dark else INTRUDE_DARK
+        palette = rotation(base, 3, 'bright' if dark else 'dark', {g for g in base if g not in in_story})
+        n_in = 1 + int(d > 0.45) + int(d > 0.8)
+        lo, hi = 0.04 * D, 0.96 * D                                          # 장면 경계(겹쳐 섞는 구간)는 피한다
+        for k in range(n_in):
+            u0, s = slots[k % len(slots)]
+            g = palette[k % len(palette)]
+            dur = min(float(rng.uniform(2.5, 4.5)), 0.6 * D)
+            f, a = GESTURES[g](dur, sr, rng)
+            x = np.linspace(0, 1, len(f))
+            f = f * (1 + 0.035 * (0.5 - x))                                   # 다가오다 멀어지는 도플러
+            y = timbre(NATURAL_TIMBRE[g], f, a, sr, rng) * np.sin(np.pi * x) ** 0.8
+            y = synth.lowpass(y, 7000, sr, 1)
+            lr = (-0.9, 0.9) if rng.random() < 0.5 else (0.9, -0.9)
+            t0 = float(np.clip(u0 * D - dur / 2, min(lo, D - dur), max(0.0, hi - dur)))
+            add(dry, _pan_sweep(_norm(y, 0.55 * (0.6 + 0.6 * d)), *lr), int(t0 * sr))
+            note(t0, dur, '이질적 침입', '%s %s 지나감' % (josa(GESTURE_KO[g], '이', '가'), '왼쪽→오른쪽' if lr[0] < 0 else '오른쪽→왼쪽'),
+                 '장면 감정(%s)과 반대되는 %s 소리 — 꿈의 부조화' % (emo['label'], '밝은' if dark else '어두운'),
+                 (s, u0) if s else None)
 
-    # ② 음색 치환 — 이야기에 없는 생물의 몸짓 × 장면 재질의 음색
-    mats_rank = scene_materials(sc)
-    n_sub = 1 + int(d > 0.6)
-    used = {palette[k % len(palette)] for k in range(n_in)}               # 침입에 쓴 생물은 치환에서 빼서 겹치지 않게
-    foreign = rotation(list(LIVING), 2, 'living', {g for g in LIVING if g not in in_story and g not in used})
-    for k in range(n_sub):
-        g = foreign[k % len(foreign)]
-        mat = mats_rank[k % len(mats_rank)]
-        obj = sc['objects'][k % len(sc['objects'])] if (mat == 'object' and sc.get('objects')) else None
-        obj_feat = obj.get('features') if obj else None
-        # 자리: 재질과 이어진 사건(금속·전기·종이…)·오브제의 문장 둘레, 없으면 남은 자리
-        if obj:
-            ev = {'sentences': obj.get('sentences') or [], 'positions': obj.get('positions') or []}
-        else:
-            ev = (sc.get('events') or {}).get(MAT_EVENT.get(mat, ''), {})
-        cand = [(uu, ss) for uu, ss in (ev.get('sentences') or [])] or [(uu, None) for uu in ev.get('positions') or []]
-        if cand:
-            u0, s = cand[(k * 2) % len(cand)]
-        else:
-            u0, s = slots[(n_in + k) % len(slots)]
-        dur = min(float(rng.uniform(3.0, 5.5)), 0.6 * D)
-        f, a = GESTURES[g](dur, sr, rng)
-        y = timbre(mat, f, a, sr, rng, obj_feat)
-        t0 = float(np.clip(u0 * D - dur / 3, min(lo, D - dur), max(0.0, hi - dur)))
-        add(dry, synth_pan(_norm(y, 0.42 * (0.6 + 0.6 * d)), float(rng.uniform(-0.6, 0.6))), int(t0 * sr))
-        tk = ('%s 실루엣' % obj['name']) if obj else TIMBRE_KO[mat]
-        note(t0, dur, '음색 치환', '%s 몸짓 × %s 음색' % (GESTURE_KO[g], tk),
-             '이야기에 없는 생물(%s)의 몸짓을 이 장면의 재질(%s)로 연주 — 재질로 우는 생물' % (GESTURE_KO[g], tk),
-             (s, u0) if s else None)
+        # ② 음색 치환 — 이야기에 없는 생물의 몸짓 × 장면 재질의 음색
+        mats_rank = scene_materials(sc)
+        n_sub = 1 + int(d > 0.6)
+        used = {palette[k % len(palette)] for k in range(n_in)}               # 침입에 쓴 생물은 치환에서 빼서 겹치지 않게
+        foreign = rotation(list(LIVING), 2, 'living', {g for g in LIVING if g not in in_story and g not in used})
+        for k in range(n_sub):
+            g = foreign[k % len(foreign)]
+            mat = mats_rank[k % len(mats_rank)]
+            obj = sc['objects'][k % len(sc['objects'])] if (mat == 'object' and sc.get('objects')) else None
+            obj_feat = obj.get('features') if obj else None
+            # 자리: 재질과 이어진 사건(금속·전기·종이…)·오브제의 문장 둘레, 없으면 남은 자리
+            if obj:
+                ev = {'sentences': obj.get('sentences') or [], 'positions': obj.get('positions') or []}
+            else:
+                ev = (sc.get('events') or {}).get(MAT_EVENT.get(mat, ''), {})
+            cand = [(uu, ss) for uu, ss in (ev.get('sentences') or [])] or [(uu, None) for uu in ev.get('positions') or []]
+            if cand:
+                u0, s = cand[(k * 2) % len(cand)]
+            else:
+                u0, s = slots[(n_in + k) % len(slots)]
+            dur = min(float(rng.uniform(3.0, 5.5)), 0.6 * D)
+            f, a = GESTURES[g](dur, sr, rng)
+            y = timbre(mat, f, a, sr, rng, obj_feat)
+            t0 = float(np.clip(u0 * D - dur / 3, min(lo, D - dur), max(0.0, hi - dur)))
+            add(dry, synth_pan(_norm(y, 0.42 * (0.6 + 0.6 * d)), float(rng.uniform(-0.6, 0.6))), int(t0 * sr))
+            tk = ('%s 실루엣' % obj['name']) if obj else TIMBRE_KO[mat]
+            note(t0, dur, '음색 치환', '%s 몸짓 × %s 음색' % (GESTURE_KO[g], tk),
+                 '이야기에 없는 생물(%s)의 몸짓을 이 장면의 재질(%s)로 연주 — 재질로 우는 생물' % (GESTURE_KO[g], tk),
+                 (s, u0) if s else None)
 
     # ③ 변신 — 가장 많이 나온 사건 소리 → 첫 오브제 소리
     evs = sorted((sc.get('events') or {}).items(), key=lambda kv: -len(kv[1].get('positions') or []))
@@ -829,7 +835,99 @@ def apply(sc, P, mats, D, sr, rng, dry, add, note):
                          '장면 앞(%.0f초)에서 들린 소리가 기억처럼 멀리서 되풀이됨' % (u1 * D),
                          (first, u1) if first else None)
 
+    return gaps
+
 
 def synth_pan(y, p):
     a = (p + 1) * math.pi / 4
     return np.stack([y * math.cos(a), y * math.sin(a)], axis=1)
+
+
+# ── 스타일: 아피찻퐁 (style.py) — 침묵의 틈 · 깊은 쿵 · 소리 시퀀스 ───────────────────────
+def bang(sr, rng, dur=2.6):
+    """깊은 쿵 — 아래로 꺼지는 낮은 울림 + 짧은 타격 + 문짝 같은 판의 공명 (모두 수식)."""
+    n = int(dur * sr)
+    t = np.arange(n) / sr
+    f = 30 + 45 * np.exp(-t / 0.07)
+    thud = np.sin(2 * np.pi * np.cumsum(f) / sr) * np.exp(-t / 0.7)
+    hit = synth.lowpass(rng.standard_normal(n) * np.exp(-t / 0.025), 1600, sr)
+    panel = sum(a * np.sin(2 * np.pi * fr * t + rng.uniform(0, 6)) * np.exp(-t / dc)
+                for fr, a, dc in ((rng.uniform(85, 98), 1.0, 0.5), (rng.uniform(140, 155), 0.6, 0.32),
+                                  (rng.uniform(225, 240), 0.4, 0.2), (rng.uniform(400, 420), 0.2, 0.12)))
+    return thud + 0.6 * hit + 0.5 * panel
+
+
+def sound_sequence(clip, W, sr, rng):
+    """소리 시퀀스 — 기계음 한 토막을 리듬처럼 되풀이하며, 되풀이할 때마다 조금 낮고 먹먹하게."""
+    n = int(W * sr)
+    out = np.zeros(n)
+    L = int(rng.uniform(0.5, 0.8) * sr)
+    pattern = [1.0, 0.5, 0.5, 1.0, 1.5]                             # 박 길이 (곱하기 토막 길이)
+    t, k = 0, 0
+    src0 = int(rng.integers(0, max(1, len(clip) - L - 1)))
+    while t < n - L:
+        seg = clip[src0:src0 + L]
+        seg = synth.pitch(seg, -0.35 * k)[:L]
+        cut = max(900.0, 6000.0 * (0.82 ** k))
+        seg = synth.lowpass(seg, cut, sr) * np.hanning(len(seg))
+        out[t:t + len(seg)] += seg
+        t += int(L * pattern[k % len(pattern)])
+        k += 1
+    return out * np.minimum(1, np.arange(n) / (0.5 * sr))
+
+
+def _apichatpong(sc, P, mats, D, sr, rng, dry, add, note, sudden, d):
+    """→ 침묵의 틈 목록 [(시작 초, 길이)] — 렌더가 잔향까지 포함해 그 구간을 비운다."""
+    from . import style as _style
+    lo, hi = 0.08 * D, 0.92 * D
+    name = _style.get(sc)['name']
+    taken = []
+    busy = list(P.get('busy') or [])                             # 라디오가 나오는 구간 — 비우거나 덮지 않는다
+
+    def free(t0, dur, gap=1.0):
+        return all(t0 + dur < b0 - gap or t0 > b0 + bd + gap for b0, bd in busy)
+    # ② 깊은 쿵 — 꿈 전체에 한 번 (generate_sound 가 정한 장면에서만)
+    if sc.get('bang'):
+        y = bang(sr, rng)
+        L = len(y) / sr
+        opts = [(u, s) for u, s in sudden] + [(P.get('arc_peak', 0.6), None), (0.45, None), (0.25, None), (0.75, None)]
+        u0, s = next(((u, s) for u, s in opts if free(float(np.clip(u * D, lo, hi - L)), L)), opts[0])
+        t0 = float(np.clip(u0 * D, lo, hi - L))
+        busy.append((t0, L))
+        add(dry, synth_pan(_norm(y, 0.9), 0.0), int(t0 * sr))
+        taken.append(t0)
+        note(t0, len(y) / sr, '깊은 쿵', '머릿속에서 울리는 듯한 깊은 쿵 (꿈 전체에 한 번)',
+             '%s — 〈메모리아〉의 굉음처럼 원인 없이, 꿈 전체에서 단 한 번' % name, (s, u0) if s else None)
+    # ① 침묵의 틈 — '갑자기 · 멈춘다 · 사라진다' 문장 자리 먼저 · 장면 15~70% 안에서 (뒤쪽 데자뷔·장면 경계와 겹치지 않게)
+    sty = _style.get(sc)
+    n_gap = sty.get('gaps_fixed') or (1 + int(d > 0.6))
+    cands = [(u, s) for u, s in sudden if 0.15 <= u <= 0.7] + [(u, None) for u in (0.4, 0.62, 0.25, 0.52)]
+    gaps = []
+    for _ in range(n_gap):
+        pick = next(((u, s) for u, s in cands
+                     if all(abs(u * D - x) > 8.0 for x in taken) and free(u * D, 4.0)), None)
+        if not pick:
+            break
+        u0, s = pick
+        dur = float(np.clip(rng.uniform(2.0, 4.0), 1.0, 0.06 * D + 0.5))
+        t0 = float(np.clip(u0 * D, lo, hi - dur))
+        gaps.append((t0, dur))
+        taken.append(t0)
+        note(t0, dur, '침묵의 틈', '모든 소리가 %.1f초 동안 완전히 멈췄다가 돌아옴' % dur,
+             '%s — 짧은 완전한 침묵 뒤 주변 소리가 돌아온다' % name, (s, u0) if s else None)
+    # ③ 소리 시퀀스 — 기계음(선풍기 · 형광등)이 리듬처럼 되풀이되며 변한다
+    clip, mname = _style.machine_source(sc, mats)
+    if clip is not None:
+        evs = sc.get('events') or {}
+        anchor = next((e for k, e in evs.items() if k in ('electric', 'machine', 'wind', 'fan')), None)
+        cand = [(u, s) for u, s in (anchor.get('sentences') or [])] if anchor else []
+        W = float(min(sty.get('seq_len', 16.0), 0.4 * D))
+        ok = lambda u: all(abs(u * D - x) > 8.0 for x in taken) and free(float(np.clip(u * D, lo, hi - W)), W, 0.0)
+        cand = [c for c in cand if ok(c[0])] or [(u, None) for u in (0.1, 0.78, 0.5) if ok(u)] or [(0.1, None)]
+        u0, s = cand[0]
+        y = sound_sequence(clip, W, sr, rng)
+        t0 = float(np.clip(u0 * D, lo, hi - W))
+        add(dry, synth_pan(_norm(y, 0.3), float(rng.uniform(-0.5, 0.5))), int(t0 * sr))
+        note(t0, W, '소리 시퀀스', '%s 소리가 리듬처럼 되풀이되며 조금씩 낮고 먹먹해짐' % mname,
+             '%s — 같은 소리를 반복·변형해 공감각을 만든다 (선풍기·에어컨 소리의 반복)' % name, (s, u0) if s else None)
+    return gaps

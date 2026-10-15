@@ -3,6 +3,7 @@
 
   (저장소 어디서든)
   python team3/sound/generate_sound.py                 ← 장면마다 75초 · 4장면이면 5분 · 3분 안에 끝나게
+  python team3/sound/generate_sound.py --style apichatpong  ← 같은 입력·출력, 아피찻퐁 위라세타꾼 사운드 스타일로
   python team3/sound/generate_sound.py --mux 꿈.mp4    ← output/ 의 소리를 영상에 붙인다 (몇 초)
 
 네 단계 (단계마다 파일 하나 — dreamsound/)
@@ -29,7 +30,7 @@ sys.path.insert(0, HERE)
 
 import numpy as np  # noqa: E402
 
-from dreamsound import composition, evolve, guide, paths, pieces, provenance, read, render, timing  # noqa: E402
+from dreamsound import composition, evolve, guide, paths, pieces, provenance, read, render, style, timing  # noqa: E402
 
 FINAL_SR = 48000          # 영상 표준 표본율 — 영상에 붙일 때 다시 표본화하지 않는다
 
@@ -45,6 +46,8 @@ def parse():
     g.add_argument('--backgrounds', help='배경 사진 폴더 (기본: 스토리보드와 같은 폴더의 scene_NN.png)')
     g.add_argument('--objects', help='오브제 폴더 (기본: team3/object — output_objects/ 또는 dataset/ 자동)')
     g = ap.add_argument_group('생성')
+    g.add_argument('--style', choices=sorted(style.STYLES), default='default',
+                   help='사운드 스타일 — default(기본) · apichatpong(아피찻퐁 위라세타꾼: 주변 소리 중심 · 먼 라디오 · 침묵의 틈). 입력·출력은 같다')
     g.add_argument('--seconds', type=float, default=timing.DEFAULT_SEC, help='장면 길이(초) — 기본 75 고정')
     g.add_argument('--vision', choices=['auto', 'on', 'off'], default='auto',
                    help='1단계 ③ 그림 인식 — auto(기본): torch·transformers 가 있으면 사용 · on: 꼭 사용 · off: 안 씀')
@@ -127,13 +130,20 @@ def main():
             '/'.join(l['name'] for l in s['laws']) or '없음', len(s['objects']),
             s['mood']['valence'], s['mood']['arousal']))
     music = composition.plan(scenes)           # 4단계 작곡이 쓸 꿈 전체의 조성·동기 (장면들이 공유)
+    sty = style.get(args.style)
+    for s in scenes:
+        s['style'] = args.style
+    if sty['fx'] == 'apichatpong' and scenes:  # 깊은 쿵은 꿈 전체에 한 번 — 전(정점) 장면, 없으면 각성이 가장 높은 장면
+        bang_s = next((s for s in scenes if s['stage'] == '전'), None) or max(scenes, key=lambda s: s['emotion']['arousal'])
+        bang_s['bang'] = True
+    log('  스타일: %s — %s' % (sty['name'], sty['summary']))
     stamp['1 읽기'] = time.time() - T0
 
     # ── 2 재료 · 3 진화 — 장면마다 별도 프로세스에서 동시에 ──────────────────────
     acts, acts_src = render.audio_acts()
     workers = args.workers or max(1, min(len(scenes), os.cpu_count() or 1))
     rounds = -(-len(scenes) // workers)
-    reserve = 30                                   # 4단계 렌더·해설 몫
+    reserve = 30 + (15 if sty['amb'] else 0)       # 4단계 렌더·해설 몫 (주변 소리 층을 짜는 스타일은 조금 더)
     limit = max(15.0, (budget - (time.time() - T0) - reserve - 3 * rounds) / rounds) if budget else None
     log('[2] 재료 · [3] 진화 — 장면 %d개를 %d개 프로세스로%s' % (
         len(scenes), workers, (' · 장면당 최대 %.0f초' % limit) if limit else ''))
@@ -154,7 +164,7 @@ def main():
         s['pieces'] = r['pieces']
         (c, q, g, f, det, rank), nov = evolve.choose(r['archive'], chosen)
         chosen.append(evolve.novelty_vec(f))
-        picks.append({'params': evolve.decode(g), 'genome': [round(float(x), 5) for x in g], 'quality': q,
+        picks.append({'params': style.clamp(evolve.decode(g), style.get(s)), 'genome': [round(float(x), 5) for x in g], 'quality': q,
                       'listen': det, 'features': f, 'cell': list(c), 'rank': rank, 'novelty': nov})
         log('  장면 %d: 평가 %d회 · 칸 %d/%d · 듣기 좋은 정도 %.2f (%s) · %.0f초' % (
             r['num'], r['evals'], r['cells'], evolve.BINS ** 2, q,
@@ -172,19 +182,23 @@ def main():
     durs = [float(args.seconds)] * len(scenes)
     log('[4] 렌더 — 배치 → 작곡(으뜸음 %s · 동기 %s) → 꿈의 변형 → 공간 · 장면당 %g초 × %d = %s' % (
         music['root'], music['motif'], args.seconds, len(durs), guide.mmss(sum(durs))))
-    parts, cue_scenes = [], []
+    parts, cue_scenes, amb_parts = [], [], []
     starts = np.cumsum([0] + durs[:-1])
-    for s, r, p, (st, L, pre, post), s0 in zip(scenes, results, picks, timing.plan(durs), starts):
+    axf = sty.get('amb_xfade') if sty['amb'] else None
+    amb_plan = timing.plan(durs, axf) if axf else [None] * len(durs)
+    for s, r, p, (st, L, pre, post), s0, ap in zip(scenes, results, picks, timing.plan(durs), starts, amb_plan):
         sc = r['view']
         mats = pieces.load_all(sc, run_dir, FINAL_SR)
         cues = []
-        parts.append(render.render(sc, p['params'], mats, L, FINAL_SR, args.seed, cues=cues))
+        parts.append(render.render(sc, p['params'], mats, L, FINAL_SR, args.seed, cues=cues,
+                                   amb_out=amb_parts if ap else None, amb_len=ap[1] if ap else None,
+                                   amb_off=(ap[2] - pre) if ap else 0.0))
         arcinfo = cues.pop() if cues and 'arc' in cues[-1] else {}
         loc = []
         for cu in cues:
             cu = dict(cu)
             cu['t'] = round(cu['t'] - pre, 3)
-            if cu['layer'] in ('bed', 'drone', 'space'):
+            if cu['layer'] in ('bed', 'drone', 'space', 'amb'):
                 cu['t'], cu['dur'] = 0.0, args.seconds
             if -0.5 <= cu['t'] <= args.seconds + 0.5:
                 if cu.get('sentence_u') is not None:   # 근거 문장 위치는 '겹침 포함 길이' 기준 → 장면 기준으로
@@ -201,7 +215,7 @@ def main():
                            'evals': r['evals'], 'quality': p['quality'], 'listen': p['listen'],
                            'vision': s.get('vision'),
                            'object_materials': {o['name']: o.get('material_rank') for o in s['objects']}})
-    full = timing.assemble(parts, durs, FINAL_SR)
+    full = timing.assemble(parts, durs, FINAL_SR, bus=(amb_parts, axf) if amb_parts else None)
     files = []
     for s, s0, D in zip(scenes, starts, durs):
         a, b = int(round(s0 * FINAL_SR)), int(round((s0 + D) * FINAL_SR))
@@ -225,10 +239,12 @@ def main():
     guide.write_csv(os.path.join(run_dir, 'cue_sheet.csv'), cue_scenes)
     elapsed = time.time() - T0
     guide.write_html(os.path.join(run_dir, 'sound_guide.html'), cue_scenes,
-                     {'storyboard': notes[0], 'elapsed': '%.0f' % elapsed, 'verdict': prov['verdict'], 'vision': vis})
+                     {'storyboard': notes[0], 'elapsed': '%.0f' % elapsed, 'verdict': prov['verdict'], 'vision': vis,
+                      'style': args.style})
     stamp['해설·출처'] = time.time() - t
     elapsed = time.time() - T0
     report = {'created': time.strftime('%Y-%m-%d %H:%M:%S'), 'run_dir': paths.rel(final_dir), 'notes': notes,
+              'style': {'key': args.style, 'name': sty['name'], 'summary': sty['summary']},
               'vision': vis, 'acts_prior': acts_src, 'workers': workers, 'music_plan': music,
               'seconds_per_scene': args.seconds, 'total_sec': round(len(full) / FINAL_SR, 4), 'sample_rate': FINAL_SR,
               'elapsed_sec': round(elapsed, 1), 'time_budget_sec': budget,

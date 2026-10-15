@@ -18,7 +18,7 @@ import re
 
 import numpy as np
 
-from . import paths, synth
+from . import paths, style, synth
 
 # ── 막(기승전결) 사전값 — 3팀 배경 엔진 index.html 의 AUDIO_ACTS 를 읽는다(배경 코드는 고치지 않음) ──
 DEFAULT_ACTS = {   # index.html AUDIO_ACTS 의 사본 (10-05 기준)
@@ -61,7 +61,7 @@ def stage_params(sc):
 
 
 # ── 도구 ────────────────────────────────────────────────────────────────
-_IR, _WIN = {}, {}
+_IR, _WIN, _AMB_CACHE = {}, {}, {}
 
 
 def _ir(t60, sr, seed, damp):
@@ -195,6 +195,7 @@ def arrange(sc, P, mats, D, sr, rng, note):
     st['bed'] += _pan(bed, 0.0)
     note(0, D, 'bed', 'bed', '방의 공기(룸톤) · 알갱이 %.0f개/초' % P['bed_density'],
          why=('배경: ' + ' / '.join(sc.get('backgrounds') or ['(배경 묘사 없음)']), None), src='배경 사진 수치 → 룸톤 합성')
+    sty = style.get(sc)                              # 주변 소리 층은 여기서 놓지 않는다 — 공간·곡선을 거치지 않게 preview/render 가 따로 더한다
 
     # 오브제 — 이름이 나오는 문장 자리에서 두드림·문지름, 그리고 정체 소리(그림 인식)
     objs = sc['objects']
@@ -223,6 +224,8 @@ def arrange(sc, P, mats, D, sr, rng, note):
                 note(max(0.0, t0), Lw, 'object', o['name'], '%s 문지름(지속음)' % o['name'], o.get('sentences'),
                      why=_why(o.get('sentences'), u0), src='오브제 실루엣 → 모달 합성')
         idt = o.get('identity')
+        if idt and idt['event'] == 'presence' and sty['mute_presence']:
+            idt = None                                 # 정령·그림자는 소리 없이 (스타일)
         iclips = mats['event'].get(idt['event'], []) if idt else []
         if iclips:                                     # 정체 소리 — 오브제 이름이 나오는 문장 자리에서만(최대 3번), 없으면 두 번
             k3 = min(3, len(times))                    # 두드림 수보다 많지 않게 — 짧은 미리듣기에서도 밀도가 같도록
@@ -240,6 +243,11 @@ def arrange(sc, P, mats, D, sr, rng, note):
     for k, e in sc['events'].items():
         clips = mats['event'].get(k, [])
         if not clips:
+            continue
+        if k == 'presence' and sty['mute_presence']:     # 정령·그림자가 나와도 소리를 바꾸지 않는다
+            for u0, stc in (e.get('sentences') or [])[:3]:
+                note(u0 * D, 2.0, 'style', '정령은 소리 없이', '존재감 소리 없음 — 주변 소리 그대로', why=(stc, u0),
+                     src='스타일 규칙', reason='%s — 이상한 존재가 아무렇지 않게 있다' % sty['name'])
             continue
         rate = EVENT_RATE[k] / 10 * P['evt_rate'] * (0.5 + 1.5 * e['weight'])
         cnt = count(rate, D, rng)
@@ -293,7 +301,7 @@ def arrange(sc, P, mats, D, sr, rng, note):
     for x in seen.values():
         k = x['event']
         clips = mats['event'].get(k, [])
-        if not clips or k in sc['events']:
+        if not clips or k in sc['events'] or (k == 'presence' and sty['mute_presence']):
             continue
         near = float(x.get('near', 0.5))
         cnt = count(EVENT_RATE.get(k, 1.0) / 10 * 0.45 * P['evt_rate'], D, rng)
@@ -344,6 +352,8 @@ def shape(y, sc, D, note):
     u = np.arange(n) / max(1, n)
     sp = sc['stage_p']
     A = arc(u, sc['stage'], sp['arc_peak'], sp['arc_depth'])
+    if style.get(sc)['flat_arc']:
+        A = style.flat_arc(A, u, sc['stage'])
     if 'sink' in sc['law_keys']:
         A = A * (1 - 0.3 * u)
     for u0, stc in sc.get('silence_sents') or []:
@@ -353,10 +363,29 @@ def shape(y, sc, D, note):
     return y * A[:, None], A
 
 
-def master(y, sc):
+def master_gain(y, sc):
     rms = np.sqrt(np.mean(y ** 2)) + 1e-9
-    y = y / rms * 0.08 * (0.71 if sc['stage'] == '결' else 1.0)     # 결만 −3dB (배경 엔진과 같은 방향)
+    return 0.08 * (0.71 if sc['stage'] == '결' else 1.0) / rms      # 결만 −3dB (배경 엔진과 같은 방향)
+
+
+def master(y, sc, g=None):
+    y = y * (master_gain(y, sc) if g is None else g)
     return (np.tanh(y / 0.9) * 0.9).astype(np.float32)
+
+
+def _amb_shape(amb, sc, D, off, gaps, sr):
+    """주변 소리 층에 평평한 곡선(결의 끝 낮춤)과 침묵의 틈을 같은 시각에 맞춰 적용 — off = 주변 소리 시작이 본 소리보다 앞선 초."""
+    n = len(amb)
+    t = np.arange(n) / sr - off                                     # 본 소리(렌더 구간) 기준 시각
+    u = np.clip(t / max(D, 1e-9), 0, 1)
+    A = style.flat_arc(np.full(n, 0.9), u, sc['stage']) / 0.9
+    for g0, gd in gaps or []:
+        A[(t >= g0) & (t < g0 + gd)] = 0.0
+        back = (t >= g0 + gd) & (t < g0 + gd + 0.9)
+        A[back] *= ((t[back] - g0 - gd) / 0.9) ** 2
+        pre = (t >= g0 - 0.08) & (t < g0)
+        A[pre] *= (g0 - t[pre]) / 0.08
+    return amb * A[:, None].astype(np.float32)
 
 
 def _noter(cues, D):
@@ -381,14 +410,23 @@ def preview(sc, P, mats, D, sr, seed=0):
         if layer in ('object', 'event', 'seen', 'word') and '문지름' not in name:
             placed[0] += 1
     st = arrange(sc, P, mats, D, sr, rng, note)
-    y, _ = shape(space(mix(st, P), sc, P, D, sr, note), sc, D, note)
+    y, A = shape(space(mix(st, P), sc, P, D, sr, note), sc, D, note)
+    if style.get(sc)['amb']:                         # 주변 소리 층 — 공간·막의 먹먹함을 거치지 않고 바닥 음량으로
+        key = (sc['num'], round(D, 3), sr, sc.get('style'))
+        if key not in _AMB_CACHE:                    # 유전자와 무관(음량만 곱함) → 장면마다 한 번만 짠다 (진화 속도)
+            _AMB_CACHE[key] = style.amb_layer(mats, D, sr, synth.rng_for(sc['num'], 'amb-preview'), sc)[0]
+        amb = _AMB_CACHE[key]
+        y = y + amb * P['bed_gain'] * A[:, None]
+        st['bed'] = st['bed'] + amb
     stems = {k: v.mean(axis=1) for k, v in st.items()}
     stems['_per_sec'] = placed[0] / D
     return y, stems
 
 
-def render(sc, P, mats, D, sr, seed=0, cues=None):
-    """최종 — ①배치 ②혼합 ③작곡 ④꿈의 변형 ⑤공간·곡선·마스터 → 스테레오 (int(D·sr), 2)."""
+def render(sc, P, mats, D, sr, seed=0, cues=None, amb_out=None, amb_len=None, amb_off=0.0):
+    """최종 — ①배치 ②혼합 ③작곡 ④꿈의 변형 ⑤공간·곡선·마스터 → 스테레오 (int(D·sr), 2).
+    스타일이 주변 소리 층을 쓰면: amb_out(리스트)을 주면 길이 amb_len 의 주변 소리를 따로 담아 돌려주고(장면 경계에서 길게 겹쳐 잇도록),
+    주지 않으면 본 소리에 섞는다. amb_off = 주변 소리 시작이 본 소리보다 앞선 초."""
     from . import composition, dreamfx
     rng = synth.rng_for(sc['num'], seed, 'render')
     note = _noter(cues, D)
@@ -396,34 +434,77 @@ def render(sc, P, mats, D, sr, seed=0, cues=None):
     dry = mix(st, P)
     sp = sc['stage_p']
     Q = dict(P, music=sp['music'], dream=sp['dream'], arc_peak=sp['arc_peak'])
-    composition.render(sc, Q, D, sr, rng, dry, _add,
-                       lambda t, dur, kind, name, reason, sent: note(t, dur, 'music', kind, name, why=sent, reason=reason,
-                                                                     src='작곡 (자체 합성)'))
-    dreamfx.apply(sc, Q, mats, D, sr, rng, dry, _add,
-                  lambda t, dur, kind, name, reason, sent: note(t, dur, 'dream', kind, name, why=sent, reason=reason,
-                                                                src='꿈의 변형 (자체 합성)'))
-    # 배경 지속음 — 작곡의 으뜸음에 맞춘 낮은 음 · 분위기가 어두울수록 불협(완전5도 → 단2도)
-    m = sc['music']
-    f = 440.0 * 2 ** ((m['root_midi'] + m['key_shift'] - 69) / 12)
-    while f > 85:
-        f /= 2
-    while f < 40:
-        f *= 2
-    dis = float(np.clip(0.5 - 0.5 * sc['mood']['valence'], 0, 1))
-    ratio = 1.5 + (1.0595 - 1.5) * dis
-    n = len(dry)
-    t = np.arange(n) / sr
-    dro = sum(a * np.sin(2 * np.pi * fr * t + ph) for fr, a, ph in
-              ((f, 1.0, 0), (f * 1.003, 0.7, 1.0), (f * ratio, 0.6, 2.0), (f * 2, 0.3, 0.5)))
-    dro = synth.lowpass(dro, 500, sr) * (0.7 + 0.3 * np.sin(2 * np.pi * 0.05 * t))
-    dry += _pan(dro.astype(np.float32) * 0.03 * (0.4 + 0.4 * (sc.get('bg') or {}).get('dark', 0.5)), 0.0)
-    note(0, D, 'drone', 'drone', '배경 지속음 %.0fHz · 음정비 %.3f' % (f, ratio),
-         why=('작곡 으뜸음에 맞춤 · 분위기 정서가 %+.2f → %s' % (sc['mood']['valence'], '불협(단2도 쪽)' if dis > 0.5 else '협화(완전5도 쪽)'),
-              None), src='수식 합성')
+    sty = style.get(sc)
+    if sty['music']:
+        composition.render(sc, Q, D, sr, rng, dry, _add,
+                           lambda t, dur, kind, name, reason, sent: note(t, dur, 'music', kind, name, why=sent, reason=reason,
+                                                                         src='작곡 (자체 합성)'))
+    if sty['radio']:                                 # 배경 음악 대신 장면 안의 음악 — 먼 라디오 (꿈 전체의 5음 동기)
+        r = style.radio(sc, D, sr, rng)
+        if r:
+            ys, t0, tot, why_r, reason = r
+            _add(dry, ys, int(t0 * sr))
+            Q['busy'] = [(t0, tot)]                     # 꿈의 변형이 라디오를 덮지 않게
+            note(t0, tot, 'music', '라디오', '먼 라디오 — 작은 스피커의 노래 (5음 동기)', why=why_r, reason=reason,
+                 src='작곡 (자체 합성)')
+    gaps = dreamfx.apply(sc, Q, mats, D, sr, rng, dry, _add,
+                         lambda t, dur, kind, name, reason, sent: note(t, dur, 'dream', kind, name, why=sent, reason=reason,
+                                                                       src='꿈의 변형 (자체 합성)')) or []
+    # 배경 지속음 — 작곡의 으뜸음에 맞춘 낮은 음 · 분위기가 어두울수록 불협(완전5도 → 단2도) · 스타일이 끄면 없음
+    m = sc['music'] if sty['drone'] else None
+    if m:
+        f = 440.0 * 2 ** ((m['root_midi'] + m['key_shift'] - 69) / 12)
+        while f > 85:
+            f /= 2
+        while f < 40:
+            f *= 2
+        dis = float(np.clip(0.5 - 0.5 * sc['mood']['valence'], 0, 1))
+        ratio = 1.5 + (1.0595 - 1.5) * dis
+        n = len(dry)
+        t = np.arange(n) / sr
+        dro = sum(a * np.sin(2 * np.pi * fr * t + ph) for fr, a, ph in
+                  ((f, 1.0, 0), (f * 1.003, 0.7, 1.0), (f * ratio, 0.6, 2.0), (f * 2, 0.3, 0.5)))
+        dro = synth.lowpass(dro, 500, sr) * (0.7 + 0.3 * np.sin(2 * np.pi * 0.05 * t))
+        dry += _pan(dro.astype(np.float32) * 0.03 * (0.4 + 0.4 * (sc.get('bg') or {}).get('dark', 0.5)), 0.0)
+        note(0, D, 'drone', 'drone', '배경 지속음 %.0fHz · 음정비 %.3f' % (f, ratio),
+             why=('작곡 으뜸음에 맞춤 · 분위기 정서가 %+.2f → %s' % (sc['mood']['valence'], '불협(단2도 쪽)' if dis > 0.5 else '협화(완전5도 쪽)'),
+                  None), src='수식 합성')
     y, A = shape(space(dry, sc, P, D, sr, note), sc, D, note)
+    if gaps:                                         # 침묵의 틈 — 잔향까지 모두 멈췄다가 천천히 돌아온다
+        env = np.ones(len(y), dtype=np.float32)
+        for g0, gd in gaps:
+            a, b = int(g0 * sr), int((g0 + gd) * sr)
+            fo, fi = int(0.08 * sr), int(0.9 * sr)
+            env[max(0, a - fo):a] *= np.linspace(1, 0, min(fo, a))[:a - max(0, a - fo)]
+            env[a:b] = 0.0
+            e = min(len(env), b + fi)
+            env[b:e] *= np.linspace(0, 1, fi)[:e - b] ** 2
+        y = y * env[:, None]
+        A = A * env
+    if sty['amb']:                                   # 주변 소리 층 — 공간·막의 먹먹함을 거치지 않는다
+        La = amb_len or D
+        off = amb_off if amb_len else 0.0
+        amb, made = style.amb_layer(mats, La, sr, synth.rng_for(sc['num'], seed, 'amb'), sc)
+        amb = _amb_shape(amb * P['bed_gain'], sc, D, off, gaps, sr)
+        for k, nm in made:
+            note(0, D, 'amb', style.AMB_KO.get(k, k), '%s (장면 내내%s)' % (nm, ' · 장면 경계에서 %.0f초 겹쳐 이어짐' % sty['amb_xfade'] if amb_len else ''),
+                 why=('%s — 주변 소리가 이야기를 이끈다 · 막의 먹먹함을 거치지 않음' % sty['name'], None),
+                 src='장면 재료를 다시 짬 (style.py)' if sty.get('amb_source') == 'derived' else '주변 소리 합성 (style.py)')
+        a0 = int(round(off * sr))
+        core = amb[a0:a0 + len(y)]
+        if len(core) < len(y):
+            core = np.pad(core, ((0, len(y) - len(core)), (0, 0)))
+        g = master_gain(y + core, sc)
+        if amb_out is not None and amb_len:
+            amb_out.append((amb * g).astype(np.float32))
+            out = master(y, sc, g)
+        else:
+            out = master(y + core, sc, g)
+    else:
+        out = master(y, sc)
     if cues is not None:
         cues.append({'arc': [round(float(x), 3) for x in A[::max(1, len(A) // 300)]], 'D': D})
-    return master(y, sc)
+    return out
 
 
 def scene_view(scene, acts):
@@ -432,6 +513,7 @@ def scene_view(scene, acts):
     sc = {
         'num': scene['num'], 'stage': scene['stage'], 'title': scene['title'], 'emotion': scene['emotion'],
         'mood': scene['mood'], 'music': scene.get('music'), 'acts': acts,
+        'style': scene.get('style', 'default'), 'bang': bool(scene.get('bang')),
         'events': {k: {'positions': e['positions'], 'weight': e['weight'], 'sentences': e.get('sentences')}
                    for k, e in scene['events'].items() if any(m['key'] == k for m in scene['pieces'])},
         'silence_sents': scene.get('silence_sents'),

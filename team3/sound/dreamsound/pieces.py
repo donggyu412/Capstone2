@@ -59,6 +59,18 @@ def build(s, run_dir, max_events=6, seed=0, log=print):
     for j in range(2):
         add('bed', 'room', synth.room_bed(bgf, seed=base + j, dur=20 if j else 12), 'bed_%d' % j, base + j,
             'synth.room_bed', '배경 사진 수치')
+    # 주변 소리 — 스타일이 쓰면 (아피찻퐁: 밤벌레 · 바람과 잎 · 웅웅거림 · 기계음)
+    from . import style as _style
+    if _style.get(s)['amb'] and _style.get(s).get('amb_source') == 'synth':      # derived 면 따로 만들지 않고 렌더가 기존 조각으로 짠다
+        sd = int(synth.rng_for(s['num'], 'amb', seed).integers(0, 1 << 30))
+        rng = np.random.default_rng(sd)
+        why = '스타일(%s) — 주변 소리 층' % _style.get(s)['name']
+        for j in range(2):
+            add('amb', 'insects', _style.amb_insects(SR, rng), 'amb_insects_%d' % j, sd, 'style.amb_insects', why)
+            add('amb', 'leaves', _style.amb_leaves(SR, rng), 'amb_leaves_%d' % j, sd, 'style.amb_leaves', why)
+        add('amb', 'rumble', _style.amb_rumble(SR, rng), 'amb_rumble', sd, 'style.amb_rumble', why)
+        mk = _style.machine_kind(s)
+        add('amb', mk, _style.amb_machine(SR, rng, mk), 'amb_%s' % mk, sd, 'style.amb_machine', why)
     # 오브제 — 실루엣(+재질)
     for i, o in enumerate(s['objects']):
         f = o['features']
@@ -90,16 +102,18 @@ def build(s, run_dir, max_events=6, seed=0, log=print):
         if k not in have and k in synth.EVENT_SYNTH:
             event_pieces(k, 2, 'seen', '배경 그림 속 %s' % x['word'])
             have.add(k)
-    log('  장면 %d [%s] 조각 %d개 (바닥 %d · 오브제 %d · 사건 %d)' % (
+    na = sum(m['role'] == 'amb' for m in out)
+    log('  장면 %d [%s] 조각 %d개 (바닥 %d · 오브제 %d · 사건 %d%s)' % (
         s['num'], s['stage'], len(out), sum(m['role'] == 'bed' for m in out),
-        sum(m['role'] in ('object', 'drone') for m in out), sum(m['role'] == 'event' for m in out)))
+        sum(m['role'] in ('object', 'drone') for m in out), sum(m['role'] == 'event' for m in out),
+        (' · 주변 소리 %d' % na) if na else ''))
 
 
 def load_all(s, run_dir, sr):
     """조각 파일 → {'bed': [..], 'object': {i: [..]}, 'drone': {i: y}, 'event': {k: [..]}} (sr 로 맞춰서)."""
     import math
     from scipy import signal
-    out = {'bed': [], 'object': {}, 'drone': {}, 'event': {}}
+    out = {'bed': [], 'object': {}, 'drone': {}, 'event': {}, 'amb': {}}
     for m in s['pieces']:
         msr, y = load(os.path.join(run_dir, m['file']))
         if msr != sr:

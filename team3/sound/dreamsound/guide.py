@@ -13,7 +13,8 @@ import os
 from .read import EVENT_NAME, WORD_NAME
 
 LAYER_KO = {'bed': '바닥(룸톤)', 'drone': '배경 지속음', 'space': '공간(잔향)', 'object': '오브제', 'event': '사건',
-            'dream': '꿈의 변형', 'music': '음악(화성·동기)', 'silence': '정적', 'seen': '그림 인식 소리', 'word': '낱말 소리'}
+            'dream': '꿈의 변형', 'music': '음악(화성·동기)', 'silence': '정적', 'seen': '그림 인식 소리', 'word': '낱말 소리',
+            'amb': '주변 소리', 'style': '스타일 규칙'}
 DREAM_KO = {   # 꿈의 변형 4가지 — dreamfx.py
     '이질적 침입': '장면 분위기와 맞지 않는 소리가 갑자기 지나간다 (공포 장면의 오르골·새소리·풍경 소리)',
     '음색 치환': '이야기에 없는 생물의 몸짓을 장면 재질의 음색으로 연주한다 (녹슨 철판으로 우는 새)',
@@ -65,7 +66,8 @@ def _lanes(cues):
         key = (c['layer'], c['key'])
         if key not in order:
             order.append(key)
-    rank = {'music': -1, 'bed': 0, 'drone': 1, 'space': 2, 'object': 3, 'event': 4, 'word': 4.2, 'seen': 4.5, 'dream': 5, 'silence': 6}
+    rank = {'music': -1, 'bed': 0, 'amb': 0.5, 'drone': 1, 'space': 2, 'object': 3, 'event': 4, 'word': 4.2, 'seen': 4.5,
+            'dream': 5, 'style': 5.5, 'silence': 6}
     return sorted(order, key=lambda k: (rank.get(k[0], 9), order.index(k)))
 
 
@@ -94,7 +96,9 @@ def _svg(sc):
             EVENT_NAME.get(key, key) if layer == 'event' else ('✎ ' + WORD_NAME.get(key, key) if layer == 'word' else
                                                               '👁 ' + EVENT_NAME.get(key, key) if layer == 'seen' else
                                                               '★ ' + str(key) if layer == 'dream' else
-                                                               ('♪ ' + str(key) if layer == 'music' else str(key))))
+                                                               ('♪ ' + str(key) if layer == 'music' else
+                                                                ('🌿 ' + str(key) if layer == 'amb' else
+                                                                 ('○ ' + str(key) if layer == 'style' else str(key))))))
         if layer == 'silence':
             continue
         o.append('<text x="%d" y="%d" class="lbl">%s</text>' % (L - 6, y + 14, html.escape(name[:14])))
@@ -105,7 +109,7 @@ def _svg(sc):
                 continue
             tip = '%s · %s%s%s%s' % (mmss(c['t']), c['sound'], (' — ' + c['sentence']) if c['sentence'] else '',
                                      (' [' + c['law'] + ']') if c['law'] else '', (' · ' + c['reason']) if c.get('reason') else '')
-            if c['dur'] > 3 or layer in ('bed', 'drone', 'space', 'music'):
+            if c['dur'] > 3 or layer in ('bed', 'drone', 'space', 'music', 'amb'):
                 o.append('<rect x="%.1f" y="%d" width="%.1f" height="12" rx="3" fill="%s" opacity=".45"><title>%s</title></rect>' % (
                     x(c['t']), y + 4, max(2, x(c['t'] + c['dur']) - x(c['t'])), col, html.escape(tip)))
             else:
@@ -129,7 +133,7 @@ def _story_table(sc):
     by_sent = {}
     loose = {}
     for c in sc['cues']:
-        if c['layer'] in ('bed', 'drone', 'space'):
+        if c['layer'] in ('bed', 'drone', 'space', 'amb'):
             continue
         if c['sentence'] and c.get('sentence_u') is not None:
             by_sent.setdefault(c['sentence'], []).append(c)
@@ -239,6 +243,8 @@ td.t{white-space:nowrap;color:var(--muted);width:64px} tr.dim td{color:var(--mut
 
 
 def write_html(path, scenes, meta):
+    from .style import STYLES
+    sty = STYLES.get(meta.get('style') or 'default', STYLES['default'])
     parts = ['<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
              '<title>꿈 사운드 해설</title><style>%s</style></head><body><main>' % CSS]
     parts.append('<h1>꿈 사운드 해설</h1><p class="muted">%s · 장면 %d개 × %g초 = %s · 생성 %s초 · 소리 전부 자체 합성</p>' % (
@@ -250,7 +256,12 @@ def write_html(path, scenes, meta):
                  '<li><b>재료</b> — 그 소리들을 1~5초 조각으로 새로 합성합니다(녹음·외부 음원 없음).</li>'
                  '<li><b>진화</b> — 조각의 배치·혼합을 여러 번 바꿔 들어 보고 가장 듣기 좋은 구성을 고릅니다'
                  '(잡음 적음 · 날카롭지 않음 · 탁하지 않음 · 떨림 없음 · 붐비지 않음 · 층 균형 · 사건이 들림 · 그림 부합).</li>'
-                 '<li><b>렌더</b> — 고른 구성으로 75초를 놓고, 배경 분위기에 맞춘 음악과 꿈의 변형을 얹습니다.</li></ol></div>')
+                 '<li><b>렌더</b> — %s</li></ol></div>' % sty.get('guide_render', '고른 구성으로 75초를 놓고, 배경 분위기에 맞춘 음악과 꿈의 변형을 얹습니다.'))
+    if sty.get('rules'):
+        parts.append('<div class="card"><b>사운드 스타일: %s</b><br><span class="muted">%s · 입력과 출력은 기본과 같고, '
+                     '재료·진화·렌더의 수치와 규칙만 바꿨습니다 (team3/sound/dreamsound/style.py · PAPERS.md §12)</span><ul>%s</ul></div>' % (
+                         html.escape(sty['name']), html.escape(sty['summary']),
+                         ''.join('<li><b>%s</b> — %s</li>' % (html.escape(a), html.escape(b)) for a, b in sty['rules'])))
     vis = meta.get('vision')
     parts.append('<p class="muted">그림 인식: %s</p>' % (
         ' · '.join('%s (%s)' % (html.escape(m['id']), html.escape(m['license'])) for m in vis['models'])
@@ -266,11 +277,13 @@ def write_html(path, scenes, meta):
                  '가슴 → 박동, 가죽끈 → 천 스침). 그 낱말이 나오는 문장 자리에서 납니다.</li>'
                  '<li><b>👁 그림 인식 소리</b> — 배경 그림에 보이는 소리 낼 물체(형광등·창문·시계…)는 그림 속 좌우 위치·거리대로, '
                  '오브제는 그것이 무엇인지(책 → 종이 넘김)에 맞는 소리가 그 오브제가 나오는 문장 자리에서 납니다.</li>'
-                 '<li><b>♪ 음악</b> — 배경 분위기(밝기·색온도·채도 + 이야기 감정)가 고른 선법의 화성 패드가 이야기 문장 경계에서 화음을 바꾸고, 꿈 전체를 관통하는 5음 동기가 '
-                 '첫 오브제가 나오는 자리에서 막마다 모습을 바꿔(원형 → 반복 → 뒤집기 → 늘이기) 울립니다. 효과음과 룸톤은 지금 화음에 맞춘 '
-                 '공명기를 지나 화음으로 울립니다.</li>'
-                 '<li><b>★ 꿈의 변형</b> — 효과음을 그대로 들려주지 않고 꿈처럼 비튼 자리입니다:<ul>%s</ul></li></ul></div>' % ''.join(
-                     '<li><b>%s</b> — %s</li>' % (html.escape(k), html.escape(v)) for k, v in DREAM_KO.items()))
+                 '<li>%s</li>'
+                 '<li><b>★ 꿈의 변형</b> — 효과음을 그대로 들려주지 않고 꿈처럼 비튼 자리입니다:<ul>%s</ul></li></ul></div>' % (
+                     sty.get('guide_music', '<b>♪ 음악</b> — 배경 분위기(밝기·색온도·채도 + 이야기 감정)가 고른 선법의 화성 패드가 이야기 문장 경계에서 화음을 바꾸고, '
+                             '꿈 전체를 관통하는 5음 동기가 첫 오브제가 나오는 자리에서 막마다 모습을 바꿔(원형 → 반복 → 뒤집기 → 늘이기) 울립니다. '
+                             '효과음과 룸톤은 지금 화음에 맞춘 공명기를 지나 화음으로 울립니다.'),
+                     ''.join('<li><b>%s</b> — %s</li>' % (html.escape(k), html.escape(v))
+                             for k, v in (sty.get('guide_dream') or list(DREAM_KO.items())))))
     for sc in scenes:
         th = _thumb(sc.get('bg_path'))
         n_ev = sum(1 for c in sc['cues'] if c['layer'] in ('event', 'object'))

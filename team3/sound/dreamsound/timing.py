@@ -57,10 +57,10 @@ def plan(durs, xfade=XFADE):
     return out
 
 
-def match_levels(parts, durs, sr):
+def match_levels(parts, durs, sr, xfade=XFADE):
     """경계 음량 맞추기 — 장면마다 따로 만든 기승전결 곡선이 경계에서 튀지 않게(예: 전의 끝 −38dB → 결의 시작 −18dB).
     경계 양쪽 3초의 음량을 재 그 기하평균으로 모으되, 장면 길이의 20% 에 걸쳐 천천히 기울인다 — 곡선의 모양은 남는다."""
-    pl = plan(durs)
+    pl = plan(durs, xfade)
     parts = [p.copy() for p in parts]
     for i in range(len(parts) - 1):
         (_, La, preA, postA), (_, Lb, preB, postB) = pl[i], pl[i + 1]
@@ -87,12 +87,27 @@ def match_levels(parts, durs, sr):
     return parts
 
 
-def assemble(parts, durs, sr):
-    """겹쳐 섞기 — 렌더한 장면들(parts, 각자 앞뒤 겹침 포함)을 한 줄로. 길이 = sum(durs)*sr 정확히."""
+def assemble(parts, durs, sr, xfade=XFADE, bus=None):
+    """겹쳐 섞기 — 렌더한 장면들(parts, 각자 앞뒤 겹침 포함)을 한 줄로. 길이 = sum(durs)*sr 정확히.
+    bus = (주변 소리 장면들, 겹침 초) — 스타일의 주변 소리 층을 본 소리보다 길게 겹쳐(예: 8초) 따로 이은 뒤 더한다."""
     total = int(round(sum(durs) * sr))
     out = np.zeros((total, 2), dtype=np.float32)
-    parts = match_levels(parts, durs, sr)
-    for (start, L, pre, post), y in zip(plan(durs), parts):
+    parts = match_levels(parts, durs, sr, xfade)
+    layers = [(plan(durs, xfade), parts)]
+    if bus:
+        layers.append((plan(durs, bus[1]), bus[0]))
+    for pl, ps in layers:
+        _lay(out, pl, ps, sr, total)
+    out = np.tanh(out / 0.95) * 0.95                               # 경계 맞추기로 커진 꼭대기를 부드럽게
+    # 처음·끝 20ms 만 살짝 — 클릭 방지
+    f = int(0.02 * sr)
+    out[:f] *= np.linspace(0, 1, f)[:, None]
+    out[-f:] *= np.linspace(1, 0, f)[:, None]
+    return out
+
+
+def _lay(out, pl, parts, sr, total):
+    for (start, L, pre, post), y in zip(pl, parts):
         y = y.copy()
         a, b = int(round(pre * 2 * sr)), int(round(post * 2 * sr))
         if a:
@@ -102,12 +117,6 @@ def assemble(parts, durs, sr):
         s = int(round(start * sr))
         s0, s1 = max(0, s), min(total, s + len(y))
         out[s0:s1] += y[s0 - s:s1 - s]
-    out = np.tanh(out / 0.95) * 0.95                               # 경계 맞추기로 커진 꼭대기를 부드럽게
-    # 처음·끝 20ms 만 살짝 — 클릭 방지
-    f = int(0.02 * sr)
-    out[:f] *= np.linspace(0, 1, f)[:, None]
-    out[-f:] *= np.linspace(1, 0, f)[:, None]
-    return out
 
 
 def write_wav(path, y, sr):
