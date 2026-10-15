@@ -95,8 +95,9 @@ def scan_windows(rows, window_size, step, duration, exclude_neutral, min_agree, 
 
 
 def select_non_overlapping(windows, min_gap):
-    """점수 내림차순으로, 서로 min_gap 이내로 겹치는 건 건너뛰며 최대한 뽑음"""
-    ranked = sorted(windows, key=lambda w: (w["agree_count"], w["agree_pct"]), reverse=True)
+    """공감률(%) 내림차순으로, 서로 min_gap 이내로 겹치는 건 건너뛰며 최대한 뽑음
+    (공감률이 같으면 공감 인원이 많은 쪽 우선)"""
+    ranked = sorted(windows, key=lambda w: (w["agree_pct"], w["agree_count"]), reverse=True)
     selected = []
     for w in ranked:
         overlaps = any(
@@ -108,34 +109,65 @@ def select_non_overlapping(windows, min_gap):
     return selected
 
 
+STRONG_PCT = 50.0   # 이 공감률 미만으로 뽑힌 피크는 '약한 피크'로 표시
+
+
 def find_peaks_targeting_count(rows, window_size, step, duration, exclude_neutral,
                                 min_gap, target_low, target_high,
-                                pct_start=95.0, pct_floor=50.0, pct_decay=5.0,
+                                pct_start=95.0, pct_decay=5.0,
                                 base_min_agree=2):
     """
-    B안: 결과 개수가 target_low~target_high(예: 4~6개) 안에 들어오도록
-    min_pct(공감 비율 기준)를 95%에서 시작해 점점 낮춰가며 재탐색.
-    같은 pct에서 target_high보다 많이 나오면, 그중 상위 target_high개만 취한다.
+    결과 개수가 target_low~target_high(예: 4~6개) 안에 들어오도록 기준을 단계적으로 완화.
+
+      1단계: 공감 비율 기준을 95%에서 5%씩 낮춤 (50% 아래로도 계속, 0%까지)
+      2단계: 그래도 부족하면 피크 사이 최소 간격(min_gap)을 절반 → 0초로 줄임
+      3단계: 그래도 부족하면 최소 공감 인원(min_agree)을 1명으로 낮춤
+
+    같은 조건에서 target_high보다 많이 나오면 상위 target_high개만 취한다.
+    반환: (선정된 피크, 마지막으로 쓴 공감 비율 기준, 완화 내역 리스트)
     """
-    pct = pct_start
-    tried = []
-
-    while pct >= pct_floor:
+    def attempt(pct, gap, agree):
         windows = scan_windows(rows, window_size, step, duration,
-                                exclude_neutral, base_min_agree, pct)
-        selected = select_non_overlapping(windows, min_gap)
-        tried.append((pct, selected))
+                               exclude_neutral, agree, pct)
+        return select_non_overlapping(windows, gap)
 
+    best = ([], pct_start, base_min_agree, min_gap)
+
+    def done(selected, pct, agree, gap):
+        notes = []
+        if pct < STRONG_PCT:
+            notes.append(f"공감 비율 기준을 {STRONG_PCT:g}% 미만({pct:g}%)까지 낮춤")
+        if gap < min_gap:
+            notes.append(f"피크 최소 간격 {min_gap:g}초 → {gap:g}초")
+        if agree < base_min_agree:
+            notes.append(f"최소 공감 인원 {base_min_agree}명 → {agree}명")
+        return selected[:target_high], pct, notes
+
+    # 1단계: 공감 비율 기준 낮추기
+    pct = pct_start
+    while pct >= 0:
+        selected = attempt(pct, min_gap, base_min_agree)
         if len(selected) >= target_low:
-            final_pct = pct
-            if len(selected) > target_high:
-                selected = selected[:target_high]
-            return selected, final_pct
+            return done(selected, pct, base_min_agree, min_gap)
+        if len(selected) > len(best[0]):
+            best = (selected, pct, base_min_agree, min_gap)
+        pct = round(pct - pct_decay, 6)
 
-        pct -= pct_decay
+    # 2단계: 최소 간격 줄이기 / 3단계: 최소 인원 낮추기 (공감 비율 기준은 0%)
+    for gap, agree in [(min_gap / 2, base_min_agree), (0.0, base_min_agree), (0.0, 1)]:
+        if gap >= min_gap and agree >= base_min_agree:
+            continue
+        selected = attempt(0.0, gap, agree)
+        if len(selected) >= target_low:
+            return done(selected, 0.0, agree, gap)
+        if len(selected) > len(best[0]):
+            best = (selected, 0.0, agree, gap)
 
-    pct_used, best = tried[-1] if tried else (pct_floor, [])
-    return best, pct_used
+    # 모든 완화 후에도 부족 (중립 제외 후 반응이 거의 없는 데이터 등)
+    selected, pct, agree, gap = best
+    if not selected:   # 아무것도 못 찾았으면 끝까지 완화한 상태로 보고
+        pct, agree, gap = 0.0, 1, 0.0
+    return done(selected, pct, agree, gap)
 
 
 def find_sentence_matches(peak, scenes):
@@ -153,11 +185,13 @@ def match_scenes(peak, scenes):
     return [sc for sc in scenes if peak["start"] < sc["end_sec"] and peak["end"] > sc["start_sec"]]
 
 
-def format_output(peaks, scenes, pct_used, target_low, target_high):
+def format_output(peaks, scenes, pct_used, target_low, target_high, relax_notes=None):
     lines = []
     lines.append("=" * 72)
     lines.append("공감 피크 구간 — 관객 다수가 강하게 반응한 시간대 우선 추출")
     lines.append(f"(공감 비율 기준: {pct_used}% 이상, 목표 {target_low}~{target_high}개 중 {len(peaks)}개 선정)")
+    if relax_notes:
+        lines.append("(기준 완화: " + " / ".join(relax_notes) + ")")
     lines.append("=" * 72)
     lines.append("")
 
@@ -178,6 +212,8 @@ def format_output(peaks, scenes, pct_used, target_low, target_high):
             f"{e} {c}명" for e, c in sorted(p["breakdown"].items(), key=lambda x: -x[1])
         )
         lines.append(f"전체 분포 : {breakdown_str}")
+        if p["agree_pct"] < STRONG_PCT:
+            lines.append(f"※ 약한 피크: 공감률 {STRONG_PCT:g}% 미만이지만 목표 개수를 채우기 위해 포함")
 
         lines.append("나레이션 (해당 구간과 겹치는 문장):")
         if sentence_matches:
@@ -205,17 +241,24 @@ def main(timetable_path, csv_path, output_path, window_size, step,
         max((r["timestamp_sec"] for r in rows), default=0)
     )
 
-    peaks, pct_used = find_peaks_targeting_count(
+    peaks, pct_used, relax_notes = find_peaks_targeting_count(
         rows, window_size, step, duration, exclude_neutral,
         min_gap, target_low, target_high,
         base_min_agree=min_agree,
     )
 
-    output_text = format_output(peaks, scenes, pct_used, target_low, target_high)
+    output_text = format_output(peaks, scenes, pct_used, target_low, target_high, relax_notes)
     with open(output_path, "w", encoding="utf-8-sig") as f:
         f.write(output_text)
 
     print(f"최종 공감 비율 기준: {pct_used}% / 선정된 피크: {len(peaks)}개")
+    if relax_notes:
+        print("기준 완화: " + " / ".join(relax_notes))
+    weak = sum(1 for p in peaks if p["agree_pct"] < STRONG_PCT)
+    if weak:
+        print(f"약한 피크(공감률 {STRONG_PCT:g}% 미만): {weak}개")
+    if len(peaks) < target_low:
+        print(f"[경고] 모든 기준을 완화해도 {len(peaks)}개뿐입니다 (중립 외 반응이 거의 없는 데이터일 수 있음)")
     print(f"완료. 저장됨: {output_path}")
 
 
