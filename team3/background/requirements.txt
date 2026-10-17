@@ -1,0 +1,10 @@
+# 작품 실행 (python app.py)
+flask
+flask-cors
+
+# [영상 mp4 · 프레임 고정] 버튼 — ffmpeg 실행 파일을 들고 온다 (없으면 opencv-python 으로 대신, 용량 약 7배)
+imageio-ffmpeg
+
+# DB 다시 만들기 (db/build_*.py) — 작품 실행에는 불필요
+pillow
+numpy

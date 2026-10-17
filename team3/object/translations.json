@@ -1,0 +1,33 @@
+{
+  "철판/선체": { "en": "iron plate/hull", "source": "auto", "provider": "mymemory" },
+  "새소리(울음)": { "en": "bird sounds (crying)", "source": "auto", "provider": "mymemory" },
+  "나무 틈새의 깃털": { "en": "wooden crevice feathers", "source": "auto", "provider": "mymemory" },
+  "소금 결정": { "en": "salt crystal", "source": "auto", "provider": "mymemory" },
+  "깃털": { "en": "feather", "source": "auto", "provider": "mymemory" },
+  "나무 널빤지 (갑판)": { "en": "wood plank (deck)", "source": "auto", "provider": "mymemory" },
+  "발소리": { "en": "footsteps", "source": "manual" },
+  "고양이": { "en": "cat", "source": "manual" },
+  "정비 드론": { "en": "maintenance drone", "source": "auto", "provider": "mymemory" },
+  "유리창": { "en": "window", "source": "auto", "provider": "mymemory" },
+  "종소리": { "en": "bells", "source": "auto", "provider": "mymemory" },
+  "흰 나방": { "en": "white moth", "source": "auto", "provider": "mymemory" },
+  "손바닥(손)": { "en": "abstract palm silhouette", "source": "manual" },
+  "유리 표면의 금과 푸른빛": { "en": "cracks and blue light on a glass surface", "source": "manual" },
+
+  "쇳덩이": { "en": "chunk of iron", "source": "auto", "provider": "mymemory" },
+  "손": { "en": "abstract hand silhouette", "source": "manual" },
+  "조종사의 목소리": { "en": "pilot's voice", "source": "auto", "provider": "mymemory" },
+  "물방울": { "en": "water drop", "source": "auto", "provider": "mymemory" },
+  "손(손가락/손바닥)": { "en": "abstract hand silhouette with fingers", "source": "manual" },
+  "손(손가락·손바닥)": { "en": "abstract hand silhouette with fingers", "source": "manual" },
+
+  "지붕의 구멍": { "en": "hole in roof", "source": "auto", "provider": "mymemory" },
+  "살색 막": { "en": "flesh-colored membrane", "source": "manual" },
+  "참새": { "en": "sparrow", "source": "auto", "provider": "mymemory" },
+  "막": { "en": "membrane", "source": "manual" },
+  "손끝": { "en": "abstract fingertip silhouette", "source": "manual" },
+  "먼지 알갱이": { "en": "dust grain", "source": "auto", "provider": "mymemory" },
+  "나무 상자": { "en": "crate", "source": "auto", "provider": "mymemory" },
+  "그림자": { "en": "shadow", "source": "manual" },
+  "얇은 막": { "en": "thin translucent membrane", "source": "manual" }
+}

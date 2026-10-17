@@ -1,0 +1,105 @@
+{
+  "source": "ComfyUI dreamshaper_8 + dream_object_lora (10 epoch), 512x512",
+  "background_removal": "rembg 4개 모델(u2net · isnet-general-use · birefnet-general · bria-rmbg) 결과를 비교해 장마다 손으로 고름",
+  "scenes": [
+    {
+      "scene": 1,
+      "objects": [
+        {
+          "index": 1,
+          "name_ko": "낡은 항해일지",
+          "file": "scene_01/obj_1_낡은_항해일지.png",
+          "mask": "수동 선택(4개 모델 비교)"
+        },
+        {
+          "index": 2,
+          "name_ko": "푸른빛 냉동액 웅덩이",
+          "file": "scene_01/obj_2_푸른빛_냉동액_웅덩이.png",
+          "mask": "수동 선택(4개 모델 비교)"
+        },
+        {
+          "index": 3,
+          "name_ko": "팔이 긴 부유하는 그림자",
+          "file": "scene_01/obj_3_팔이_긴_부유하는_그림자.png",
+          "mask": "수동 선택(4개 모델 비교)"
+        }
+      ]
+    },
+    {
+      "scene": 2,
+      "objects": [
+        {
+          "index": 1,
+          "name_ko": "떨어지는 물방울",
+          "file": "scene_02/obj_1_떨어지는_물방울.png",
+          "mask": "수동 선택(4개 모델 비교)"
+        },
+        {
+          "index": 2,
+          "name_ko": "낡은 서류철과 종이",
+          "file": "scene_02/obj_2_낡은_서류철과_종이.png",
+          "mask": "수동 선택(4개 모델 비교)"
+        },
+        {
+          "index": 3,
+          "name_ko": "팔이 길게 늘어진 그림자 형상",
+          "file": "scene_02/obj_3_팔이_길게_늘어진_그림자_형상.png",
+          "mask": "수동 선택(4개 모델 비교)"
+        }
+      ]
+    },
+    {
+      "scene": 3,
+      "objects": [
+        {
+          "index": 1,
+          "name_ko": "서류철",
+          "file": "scene_03/obj_1_서류철.png",
+          "mask": "수동 선택(4개 모델 비교)"
+        },
+        {
+          "index": 2,
+          "name_ko": "무게가 변하는 종이",
+          "file": "scene_03/obj_2_무게가_변하는_종이.png",
+          "mask": "수동 선택(4개 모델 비교)"
+        },
+        {
+          "index": 3,
+          "name_ko": "팔이 늘어진 형상",
+          "file": "scene_03/obj_3_팔이_늘어진_형상.png",
+          "mask": "수동 선택(4개 모델 비교)"
+        },
+        {
+          "index": 4,
+          "name_ko": "벌어지는 타일 금",
+          "file": "scene_03/obj_4_벌어지는_타일_금.png",
+          "mask": "수동 선택(4개 모델 비교)"
+        }
+      ]
+    },
+    {
+      "scene": 4,
+      "objects": [
+        {
+          "index": 1,
+          "name_ko": "밤색 서류철",
+          "file": "scene_04/obj_1_밤색_서류철.png",
+          "mask": "수동 선택(4개 모델 비교)",
+          "note": "프롬프트 수정 재생성(dark brown leather)"
+        },
+        {
+          "index": 2,
+          "name_ko": "금이 간 타일 바닥",
+          "file": "scene_04/obj_2_금이_간_타일_바닥.png",
+          "mask": "수동 선택(4개 모델 비교)"
+        },
+        {
+          "index": 3,
+          "name_ko": "창백하고 얇은 손",
+          "file": "scene_04/obj_3_창백하고_얇은_손.png",
+          "mask": "수동 선택(4개 모델 비교)"
+        }
+      ]
+    }
+  ]
+}

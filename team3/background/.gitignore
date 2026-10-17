@@ -1,0 +1,17 @@
+# 캐시
+__pycache__/
+*.pyc
+
+# 실행하면 생기는 결과물 (mp4 수십~수백 MB) — 필요한 것만 따로 공유
+output/
+ffmpeg.log
+
+# 저작권 — 아피찻퐁·참조 작가 원본 사진과 그 사진을 띄우는 갤러리는 로컬 전용
+# (엔진은 db/*.json 만 읽는다. 사진이 필요하면 db/build_*.py 가 다시 받아 온다)
+db/stills/
+db/db_gallery.html
+
+# 환경
+.env
+venv/
+.venv/

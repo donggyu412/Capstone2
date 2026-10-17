@@ -1,0 +1,8 @@
+# 꿈 사운드 생성기 — generate_sound.py 가 실제로 import 하는 것만 (CPU · 노트북에서도 돈다)
+#   numpy·scipy = 합성·진화·렌더 / pillow = 배경·오브제 그림 읽기 / imageio-ffmpeg = mp3·영상 붙이기
+numpy
+scipy
+pillow
+imageio-ffmpeg        # mp3·mp4 를 만드는 ffmpeg 실행 파일을 들고 온다
+
+# 1단계 ③ 그림 인식(선택이지만 권장)은 requirements-gpu.txt
