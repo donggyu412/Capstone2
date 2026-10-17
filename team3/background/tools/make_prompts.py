@@ -130,10 +130,56 @@ def split_objects(backgrounds, objects):
     return keep, overlap
 
 
-def build_prompt(sc, objects):
+# 배경 글(10-17 · 10/15 교수님 피드백 "배경에 대한 글 따로") — 장소 단어만으로는 사진이 이야기와 멀어진다.
+# 2팀 json 에 배경 글 칸이 생기면 그것을 먼저 쓰고, 없으면 2팀이 배경마다 글에서 뽑아 둔 근거 문장을 쓴다
+# (run_team3.py 받기 단계가 team2/output/scene{N}_elements.json 에서 뽑아 이 파일로 둔다 — .json 이 아니어야
+#  엔진·사운드가 스토리보드로 착각하지 않는다). 오브제가 섞인 문장은 뺀다 — 배경 사진에 오브제가 박히면 안 된다.
+BG_TEXT_FILE = 'background_text.txt'
+BG_TEXT_KEYS = ('background_story', 'background_text', 'bg_story')
+
+
+def load_bg_text(base_dir):
+    """background_text.txt → {장면 번호: [문장, ...]}. 없으면 빈 dict."""
+    path = os.path.join(base_dir, BG_TEXT_FILE)
+    out = {}
+    if not os.path.exists(path):
+        return out
+    with open(path, encoding='utf-8-sig') as f:
+        for line in f:
+            no, _, text = line.rstrip('\n').partition('\t')
+            if no.strip().isdigit() and text.strip():
+                out.setdefault(int(no), []).append(text.strip())
+    return out
+
+
+def _words(t):
+    for ch in '()/,·':
+        t = t.replace(ch, ' ')
+    return [w for w in t.split() if len(w) >= 2]
+
+
+def bg_sentences(row, file_lines, objects):
+    """(쓸 문장, 오브제가 섞여 뺀 문장 수). objects 는 장면의 오브제 전체(겹침 처리 전)."""
+    for k in BG_TEXT_KEYS:                       # 2팀이 배경 글 칸을 주면 그것이 먼저
+        v = row.get(k)
+        if isinstance(v, str) and v.strip():
+            sents = [s.strip() + '.' for s in v.replace('\n', ' ').split('.') if s.strip()]
+            break
+    else:
+        sents = list(file_lines or [])
+    toks = {w for o in objects for w in _words(o)} | {o for o in objects if len(o) >= 2}
+    keep = [s for s in sents if not any(t in s for t in toks)]
+    return keep, len(sents) - len(keep)
+
+
+def build_prompt(sc, objects, bg_text=None):
     bg = sc['backgrounds'] or [sc['title']]
     lines = [
         '다음 장소의 사진을 만들어 주세요: ' + ', '.join(bg) + '.',
+    ]
+    if bg_text:
+        lines.append('장소 묘사: ' + ' '.join(s.rstrip(' .,') + '.' for s in bg_text))
+    lines += [
         ACT_MOOD.get(sc['stage'], '') + '.',
     ]
     lines += [w + '.' for w in emo_words(sc['emotion'])]
@@ -155,10 +201,12 @@ def main():
     out = ['배경 이미지 프롬프트 — %s (%d장면)' % (os.path.relpath(path, ROOT).replace('\\', '/'), len(rows)),
            '각 문장을 이미지 생성기에 붙여넣고, 결과를 input/storyboard/ 에 옆에 적힌 이름으로 저장하세요.',
            '(가로 16:9, 1280px 이상 권장 · png 가 아니어도 이름만 scene_01.png 면 읽힙니다)', '']
+    bg_file = load_bg_text(base_dir)
     for i, row in enumerate(rows):
         sc = app.to_scene(i, len(rows), row, base_dir)
-        objects = [o for o in (row.get('objects') or []) if isinstance(o, str)]
-        objects, overlap = split_objects(sc['backgrounds'] or [], objects)
+        all_objects = [o for o in (row.get('objects') or []) if isinstance(o, str)]
+        bg_text, dropped = bg_sentences(row, bg_file.get(row.get('_num', i + 1)), all_objects)
+        objects, overlap = split_objects(sc['backgrounds'] or [], all_objects)
         name = 'scene_%02d.png' % sc['act']
         have = os.path.exists(os.path.join(base_dir, name))
         out += ['=' * 70,
@@ -167,8 +215,9 @@ def main():
                                  ' ← "%s"' % sc['emotion_src'] if sc['emotion_src'] else ''),
                 *(['   색·밝기·단순함: ' + ' / '.join(emo_words(sc['emotion']))] if emo_words(sc['emotion']) else []),
                 *(['   ※ 배경과 겹쳐 제외 목록에서 뺀 오브제: ' + ', '.join(overlap)] if overlap else []),
+                '   배경 글: %d문장%s' % (len(bg_text), ' (오브제가 섞여 뺀 문장 %d)' % dropped if dropped else ''),
                 '-' * 70,
-                build_prompt(sc, objects), '']
+                build_prompt(sc, objects, bg_text), '']
 
     text = '\n'.join(out)
     print(text)

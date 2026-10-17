@@ -138,6 +138,7 @@ def receive(src):
     dst = SLOT / 'dream_scenes.json'
     if dst.exists() and sha(dst) == sha(src):
         print('  지금 자리와 같은 판 → 그대로 둠 (사진·프롬프트 유지)')
+        save_bg_text(src)
         return scenes
     olds = [p for p in SLOT.iterdir() if p.is_file()]
     if olds:
@@ -155,7 +156,35 @@ def receive(src):
     # 다른 .json 을 이 자리에 두지 않는다 — 엔진·사운드가 '가장 최근 json'을 스토리보드로 읽는다.
     shutil.copyfile(src, dst)
     print('  저장: ' + rel(dst))
+    save_bg_text(src)
     return scenes
+
+
+def save_bg_text(src):
+    """2팀이 배경마다 뽑아 둔 근거 문장(team2/output/scene{N}_elements.json '배경')을
+       SLOT/background_text.txt 로 둔다 — make_prompts.py 가 '장소 묘사'로 쓴다(오브제 섞인 문장은 거기서 뺀다).
+       .json 이 아니게 둔다: 엔진·사운드가 '가장 최근 json'을 스토리보드로 읽는다. 파일이 없으면 아무것도 안 한다."""
+    src = Path(src)
+    lines = []
+    for f in sorted(src.parent.glob('scene*_elements.json')):
+        no = ''.join(ch for ch in f.stem if ch.isdigit())
+        try:
+            items = json.loads(f.read_text(encoding='utf-8')).get('배경') or []
+        except (OSError, ValueError):
+            continue
+        for e in items:
+            t = (e.get('근거문장') or '').strip() if isinstance(e, dict) else ''
+            if no and t:
+                lines.append('%s\t%s' % (int(no), ' '.join(t.split())))
+    if not lines:
+        return
+    # 근거 문장 파일이 스토리보드보다 오래됐으면 다른 판의 것일 수 있다 → 쓰지 않는다
+    if min(f.stat().st_mtime for f in src.parent.glob('scene*_elements.json')) < src.stat().st_mtime - 3600:
+        print('  ※ scene*_elements.json 이 스토리보드보다 1시간 넘게 오래됨 → 배경 글 안 씀')
+        return
+    out = SLOT / 'background_text.txt'
+    out.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    print('  배경 글(근거 문장 %d줄) → %s' % (len(lines), rel(out)))
 
 
 # ──────────────────────────────────────────────────────────
@@ -221,11 +250,13 @@ def scene_prompts(folder):
         import make_prompts as mp
         rows = mp.app.read_scene_list(str(Path(folder) / 'dream_scenes.json')) or []
         out = {}
+        bg_file = mp.load_bg_text(str(folder))
         for i, row in enumerate(rows):
             sc = mp.app.to_scene(i, len(rows), row, str(folder))
-            objects = [o for o in (row.get('objects') or []) if isinstance(o, str)]
-            objects, _ = mp.split_objects(sc['backgrounds'] or [], objects)
-            out[sc['act']] = mp.build_prompt(sc, objects)
+            all_objects = [o for o in (row.get('objects') or []) if isinstance(o, str)]
+            bg_text, _ = mp.bg_sentences(row, bg_file.get(row.get('_num', i + 1)), all_objects)
+            objects, _ = mp.split_objects(sc['backgrounds'] or [], all_objects)
+            out[sc['act']] = mp.build_prompt(sc, objects, bg_text)
         return out
     finally:
         os.chdir(cwd)
