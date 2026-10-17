@@ -177,6 +177,14 @@ output/                  실행하면 자동 생성 — 장면별 배경판·표
 > ※ **2026-09-25 폴더 개명:** `260917_dummy/` → `dummy/`. 아래 09-25 이전 기록에 나오는
 >   `260917_dummy/` 는 현재의 `dummy/` 와 같은 폴더다. 당시 기록이므로 이름을 고치지 않고 둔다.
 
+## [2026-10-17 · 78] 1팀 사운드 자동 실행 확인(이 노트북 · 아피찻퐁)
+- **Project:** 캡스톤2 · 3팀 사운드 연결 (코드 변경 없음)
+- **사용자:** 1팀 사운드는 프로그램 안에서 돌도록 자동화된 상태 → 확인 요청. 원격 새 push 없음 — 자동화는 `4e6ec95`(10-16 진성) 판 그대로: `generate_sound.py` 가 공용 자리(`input/storyboard/` 가장 최근 json + scene_NN.png) · `team3/object/output_objects/` 를 스스로 읽음.
+- **시험:** `generate_sound.py --style apichatpong --scenes <storyboards_1017_test 판> --out <스크래치>`(기존 `sound/output/` 안 덮음) → **exit 0 · 182초**(읽기 8 · 재료·진화 116 · 렌더 57) · `dream_sound.wav` 48k 스테레오 **300.00초** · 장면 듣기 좋은 정도 0.87 · 0.90 · 0.81 · 0.81 · 외부 음원 0. 이어서 `run_team3.py --mux <10-17 짧은 배경 mp4> <wav>` → 61MB · 다시 인코딩 없음 OK.
+- **주의 ①** 그림 인식(siglip · depth · florence) 건너뜀 — 이 PC 에 `transformers` 없음(torch 는 있음) → 장소 · 그림 속 소리원 '-'. 품질은 1팀 PC 판보다 낮을 수 있음(설치는 안 함 · 8GB 에서 모델 3개는 무거움). **주의 ②** 오브제를 기본 자리 `output_objects/` 에서 읽어 **다른 판 오브제(항해일지 · 서류철 · 타일 금)** 로 소리를 만듦 → 오브제가 새 판으로 나온 뒤 돌리거나 `--objects` 로 지정.
+- **문서:** `RUN_ORDER_1022.md` 5단계 = 진행 PC 가능 · 약 3분 · 주의 문구. 사람 손 단계는 오브제(4)만.
+- **Next:** 오브제 새 판 → 사운드 → `--mux` → `--to-team4 --video`. (선택) `run_team3.py` 에 사운드 단계를 붙일지 사용자 결정.
+
 ## [2026-10-17 · 77] C 시험 — 1→3팀 이 노트북에서 한 바퀴 · 실행 순서 한 장(`team3/RUN_ORDER_1022.md`)
 - **Project:** 캡스톤2 · 3팀 통합 (10/22 시연 준비)
 - **A2 결과 보관:** `team3/background/input/storyboards_1017_test/1_혐오공포놀람놀람/`(2팀 이야기 글 · elements · `dream_scenes.json` · 배경 글 · 프롬프트 · `images_log.txt` · 사진 4장 — 사진도 깃에 포함 · 7.2MB · 1014 판들은 이 PC `.git/info/exclude` 로만 빠져 있음).
