@@ -27,10 +27,12 @@ run_team3.py — 2팀 꿈 스토리보드 → 3팀(배경 · 오브제 · 사운
   python team3/run_team3.py --images <사진 폴더>                      # 다른 곳에서 만든 사진 4장 가져오기
   python team3/run_team3.py --manual                                 # 키가 있어도 자동 생성 안 함
   python team3/run_team3.py --serve                                  # 사진까지 있으면 배경 엔진 실행
+  python team3/run_team3.py --record                                 # START 없이 5분 배경 + 배경판 자동 기록(10-17 · 40~50분)
   python team3/run_team3.py --storyboard <다른 json>                  # 2팀 출력 대신 다른 판으로
   python team3/run_team3.py --mux 통합.mp4 dream_sound.wav            # 최종 영상(소리 붙이기)
   python team3/run_team3.py --to-team4                               # 4팀 입력 자리 채우기
   python team3/run_team3.py --to-team4 --check                       # 한 판인지 확인만 (쓰지 않음)
+  python team3/run_team3.py --to-team4 --video 통합_sound.mp4          # 5분 통합 영상도 team4/input/video/ 에(10-17)
 
 각 담당의 코드는 고치지 않고 그대로 부른다. API 키는 이 파일에 쓰지 않는다(환경변수로만).
 """
@@ -304,6 +306,61 @@ def serve():
         p.terminate()
 
 
+def find_chrome():
+    for p in (os.environ.get('PROGRAMFILES', r'C:\Program Files') + r'\Google\Chrome\Application\chrome.exe',
+              os.environ.get('PROGRAMFILES(X86)', r'C:\Program Files (x86)') + r'\Google\Chrome\Application\chrome.exe',
+              os.environ.get('LOCALAPPDATA', '') + r'\Google\Chrome\Application\chrome.exe'):
+        if p and Path(p).exists():
+            return p
+    return shutil.which('chrome') or shutil.which('google-chrome')
+
+
+def record(sec=None):
+    """사람이 START 를 누르던 5분 기록을 헤드리스로 한다 (10-17). 시험 서버(5055) + 헤드리스 크롬(9333) →
+       tools/record.mjs 가 [영상 mp4 · 프레임 고정] 한 바퀴 + [장면 저장](4팀 배경판)을 같이 찍고 끈다.
+       사용자 서버(5000)는 건드리지 않는다. 8GB PC 에서는 약 40~50분 · 다른 프로그램을 닫고 단독으로."""
+    import tempfile
+    import urllib.request
+    banner('4) 배경 엔진 — 헤드리스 기록 (%s)' % ('장면당 %g초 · 시험' % sec if sec else '5분'))
+    chrome, node = find_chrome(), shutil.which('node')
+    if not chrome or not node:
+        sys.exit('[중단] %s 가 없습니다 → --serve 로 브라우저에서 직접 기록하세요.' % ('크롬' if not chrome else 'node'))
+    url = 'http://127.0.0.1:5055/?size=1920x1080' + ('&sec=%g' % sec if sec else '')
+    env = dict(os.environ, PYTHONUTF8='1', PYTHONIOENCODING='utf-8')
+    srv = subprocess.Popen([sys.executable, '-B', '-c', 'import app; app.app.run(port=5055, debug=False)'],
+                           cwd=str(BG), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    profile = tempfile.mkdtemp(prefix='team3_rec_')
+    chr_ = None
+    try:
+        for _ in range(60):                  # 서버가 뜰 때까지 (db 를 읽느라 몇 초 걸린다)
+            try:
+                urllib.request.urlopen('http://127.0.0.1:5055/', timeout=2)
+                break
+            except Exception:
+                if srv.poll() is not None:
+                    sys.exit('[중단] 배경 엔진 서버가 꺼졌습니다 (5055 포트를 다른 프로그램이 쓰는지 확인)')
+                time.sleep(1)
+        chr_ = subprocess.Popen([chrome, '--headless=new', '--remote-debugging-port=9333', '--user-data-dir=' + profile,
+                                 '--mute-audio', '--window-size=1280,720', 'about:blank'],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(5)
+        print('  %s · 진행은 1분마다 표시 (멈추려면 Ctrl+C)' % url, flush=True)
+        rc = subprocess.run([node, str(BG / 'tools' / 'record.mjs'), '9333', url]).returncode
+    except KeyboardInterrupt:
+        rc = 1
+        print('\n  중단')
+    finally:
+        for p in (chr_, srv):                # 크롬은 자식 프로세스가 많아 트리째 끈다
+            if p and p.poll() is None:
+                subprocess.run(['taskkill', '/T', '/F', '/PID', str(p.pid)],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        shutil.rmtree(profile, ignore_errors=True)
+    bg = latest_background()
+    if rc != 0 or bg is None:
+        sys.exit('[중단] 기록이 끝나지 않았습니다 → 메모리가 부족하면 다른 프로그램을 닫거나 --serve 로 직접 기록하세요.')
+    print('  저장: %s' % rel(bg[0]))
+
+
 # ──────────────────────────────────────────────────────────
 # 5) 넘기기
 # ──────────────────────────────────────────────────────────
@@ -326,7 +383,7 @@ def handoff():
     story = from_object(SLOT / 'dream_scenes.json')
     bg = latest_background()
     if bg is None:
-        print('  이번 스토리보드로 찍은 배경 영상이 아직 없습니다 → --serve 로 배경 엔진을 돌려 기록하세요.')
+        print('  이번 스토리보드로 찍은 배경 영상이 아직 없습니다 → --record(자동) 또는 --serve(브라우저)로 기록하세요.')
     else:
         print('  배경: %s · %s' % (rel(bg[0]), rel(bg[1])))
     print('\n  [B 오브제 · 오브제 담당 PC] (교수님 10/8: 아날로그)')
@@ -336,9 +393,10 @@ def handoff():
         print('    python object_engine.py --story %s --style analog --bg %s --bg-json %s --out dream_integrated.mp4'
               % (story, from_object(bg[0]), from_object(bg[1])))
     print('\n  [C 사운드 · 1팀 담당] (교수님 10/8: 1팀 판) — 스토리보드·사진을 이 자리에서 바로 읽는다')
-    print('    cd team3/sound && python generate_sound.py')
+    print('    cd team3/sound && python generate_sound.py --style apichatpong   (10-16 1팀 아피찻퐁 스타일 · 기본은 --style default)')
     print('\n  [4팀] 배경 엔진 [장면 저장] → 이 판 오브제가 나오면: python team3/run_team3.py --to-team4')
     print('\n  [D 통합] python team3/run_team3.py --mux <dream_integrated.mp4> <dream_sound.wav>')
+    print('\n  [4팀 · 통합 영상까지] python team3/run_team3.py --to-team4 --video <dream_integrated_sound.mp4>')
 
 
 # ──────────────────────────────────────────────────────────
@@ -445,7 +503,40 @@ def team4_readme(kind, plates, labels):
     return '\n'.join(lines)
 
 
-def to_team4(story_path, plates_dir=None, objects_dir=None, team4_input=None, check_only=False):
+def video_info(path):
+    """(길이 초, 소리 있음) — ffmpeg -i 의 안내 글에서 읽는다 (ffprobe 는 imageio-ffmpeg 에 없다)."""
+    import re
+    try:
+        import imageio_ffmpeg
+        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        ffmpeg = shutil.which('ffmpeg')
+    if not ffmpeg:
+        return None, None
+    err = subprocess.run([ffmpeg, '-hide_banner', '-i', str(path)], capture_output=True,
+                         text=True, encoding='utf-8', errors='replace').stderr
+    m = re.search(r'Duration: (\d+):(\d+):([\d.]+)', err)
+    sec = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3)) if m else None
+    return sec, 'Audio:' in err
+
+
+def check_video(video):
+    """4팀에 넘길 5분 통합 영상(배경 · 오브제 · 사운드) 확인 — 문제 목록."""
+    video = Path(video)
+    if not video.is_file():
+        return ['통합 영상이 없습니다: ' + str(video)]
+    sec, audio = video_info(video)
+    problems = []
+    if sec is None:
+        problems.append('통합 영상 길이를 읽지 못했습니다 (ffmpeg 확인): ' + video.name)
+    elif abs(sec - 300) > 2:
+        problems.append('통합 영상이 5:00 이 아닙니다 (%d:%04.1f) — %s' % (sec // 60, sec % 60, video.name))
+    if audio is False:
+        problems.append('통합 영상에 소리가 없습니다 → 먼저 --mux 로 사운드를 붙이세요: ' + video.name)
+    return problems
+
+
+def to_team4(story_path, plates_dir=None, objects_dir=None, team4_input=None, check_only=False, video=None):
     banner('7) 4팀 — 입력 자리 채우기')
     story_path = Path(story_path)
     if not story_path.exists():
@@ -457,15 +548,19 @@ def to_team4(story_path, plates_dir=None, objects_dir=None, team4_input=None, ch
     print('  대본  : %s (%s)' % (rel(story_path), ' · '.join(labels)))
     print('  배경판: %s' % (rel(plates) if plates else '없음'))
     print('  오브제: %s' % rel(objects))
+    print('  통합 영상: %s' % (video or '없음 (--video 로 5분 통합 영상도 넘길 수 있다)'))
     print('  넣을 곳: %s' % rel(dst))
 
     problems, plate_files, obj_files = check_team4(story_path, plates, objects)
+    if video:
+        problems += check_video(video)
     if problems:
         print('\n  [멈춤] 4팀 입력 자리는 그대로 둡니다 — 4팀 모델은 대본 · 배경판 · 오브제가 한 판이어야 돈다:')
         for p in problems:
             print('    - ' + p)
         sys.exit(2)
-    print('  확인: 대본 · 배경판 %d장 · 오브제 %d장이 한 판' % (len(plate_files), len(obj_files)))
+    print('  확인: 대본 · 배경판 %d장 · 오브제 %d장이 한 판%s'
+          % (len(plate_files), len(obj_files), ' · 통합 영상 5:00 · 소리 있음' if video else ''))
     if check_only:
         print('  (--check — 쓰지 않음)')
         return
@@ -503,6 +598,17 @@ def to_team4(story_path, plates_dir=None, objects_dir=None, team4_input=None, ch
     (ob / 'README.md').write_text(team4_readme('오브제', plates, labels), encoding='utf-8')
     print('  저장: %s (배경판 %d · json 2) · %s (오브제 %d · objects.json)'
           % (rel(sb), len(plate_files), rel(ob), len(obj_files)))
+    if video:                                # 4팀 결과물과 나란히 보여 줄 3팀 최종 꿈 영상 (10-17 사용자 요청)
+        vd = dst / 'video'
+        vd.mkdir(exist_ok=True)
+        shutil.copyfile(video, vd / 'dream_final.mp4')
+        (vd / 'README.md').write_text(
+            '# 3팀 통합 영상 (4팀 입력 · %s · `run_team3.py --to-team4 --video` 가 채움)\n\n'
+            '- 장면 감정: %s\n'
+            '- `dream_final.mp4`: 배경 · 오브제 · 사운드를 합친 5:00 최종 꿈 영상 (원본 `%s`)\n'
+            '- 대본 · 배경판 · 오브제와 같은 판\n'
+            % (datetime.now().strftime('%Y-%m-%d %H:%M'), ' · '.join(labels), Path(video).name), encoding='utf-8')
+        print('  저장: %s (통합 영상 %.0fMB)' % (rel(vd / 'dream_final.mp4'), (vd / 'dream_final.mp4').stat().st_size / 1048576))
     print('  → 4팀이 DreamModel 을 실행한다 (소리는 4팀이 input 아래에 둔다)')
 
 
@@ -514,6 +620,9 @@ def main():
     ap.add_argument('--image-model', default='gpt-image-2', help='OpenAI 이미지 모델 (기본 gpt-image-2)')
     ap.add_argument('--image-quality', default='medium', choices=['low', 'medium', 'high'])
     ap.add_argument('--serve', action='store_true', help='사진이 다 있으면 배경 엔진을 띄운다')
+    ap.add_argument('--record', action='store_true',
+                    help='사진이 다 있으면 5분 배경 영상 + 배경판을 헤드리스로 기록 (START 안 눌러도 됨 · 40~50분)')
+    ap.add_argument('--record-sec', type=float, help='--record 시험용: 장면당 초 (기본 75 = 5분)')
     ap.add_argument('--mux', nargs=2, metavar=('VIDEO', 'AUDIO'), help='최종 영상: 영상에 소리만 붙인다')
     ap.add_argument('--out', help='--mux 결과 파일 (기본: <영상>_sound.mp4)')
     ap.add_argument('--to-team4', action='store_true', help='4팀 입력 자리(team4/input)에 배경판 · 오브제를 넣는다')
@@ -521,13 +630,14 @@ def main():
     ap.add_argument('--plates', help='--to-team4 배경판 폴더 (기본: 가장 최근 [장면 저장] 결과)')
     ap.add_argument('--objects', help='--to-team4 오브제 폴더 (기본: team3/object/output_objects)')
     ap.add_argument('--team4-dir', help='--to-team4 넣을 곳 (기본: team4/input)')
+    ap.add_argument('--video', help='--to-team4 와 함께: 5분 통합 영상(배경 · 오브제 · 사운드)도 team4/input/video/ 에 넣는다')
     a = ap.parse_args()
 
     if a.mux:
         mux(a.mux[0], a.mux[1], a.out)
         return
     if a.to_team4:                           # 받기를 거치지 않는다 — 공용 자리를 2팀 새 출력으로 바꾸지 않게
-        to_team4(a.storyboard or SLOT / 'dream_scenes.json', a.plates, a.objects, a.team4_dir, a.check)
+        to_team4(a.storyboard or SLOT / 'dream_scenes.json', a.plates, a.objects, a.team4_dir, a.check, a.video)
         return
     scenes = receive(a.storyboard or DEFAULT_STORY)
     prompts()
@@ -536,7 +646,9 @@ def main():
     backend = 'manual' if a.manual or openai_key() is None else 'openai'
     if not images(len(scenes), backend, a.image_model, a.image_quality):
         sys.exit(2)
-    if a.serve:
+    if a.record:
+        record(a.record_sec)
+    elif a.serve:
         serve()
     handoff()
 
