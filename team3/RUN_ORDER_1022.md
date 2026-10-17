@@ -18,6 +18,6 @@
 **시연 때 말할 것:** 1 → 3 과 6 → 7 은 명령 한 줄씩. GPU 가 필요한 4 · 5 만 담당 PC 에서 돈다. "완전 자동"이라고는 하지 않는다.
 
 ## 10-17 테스트 판 (미리 만든 결과물)
-- 스토리보드: `team3/background/input/storyboards_1017_test/1_혐오공포놀람놀람/` — 감정 혐오 · 공포 · 놀람 · 놀람 · 2팀 이야기 글 4개 · 배경 글 · 프롬프트 · 사진 4장(사진은 깃 제외 · 이 PC 에만).
+- 스토리보드: `team3/background/input/storyboards_1017_test/1_혐오공포놀람놀람/` — 감정 혐오 · 공포 · 놀람 · 놀람 · 2팀 이야기 글 4개 · 배경 글 · 프롬프트 · 사진 4장(깃에 포함 · 7.2MB — 팀원이 pull 하면 바로 씀).
 - 짧은 배경 기록(장면당 5초 · 20초): `team3/background/output/20261017-210356_storyboard_mp4/` · 배경판 3장(`..._storyboard/` — 짧은 시험이라 마지막 장면을 못 찍음 · 5분 기록 3번은 모두 4장).
 - 다른 판으로 바꿔 돌리기: `python team3/run_team3.py --storyboard <판>/dream_scenes.json` (그 자리의 옛 판은 `input/storyboard_archive/` 로 자동 보관).

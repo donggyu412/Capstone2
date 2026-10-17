@@ -179,7 +179,7 @@ output/                  실행하면 자동 생성 — 장면별 배경판·표
 
 ## [2026-10-17 · 77] C 시험 — 1→3팀 이 노트북에서 한 바퀴 · 실행 순서 한 장(`team3/RUN_ORDER_1022.md`)
 - **Project:** 캡스톤2 · 3팀 통합 (10/22 시연 준비)
-- **A2 결과 보관:** `team3/background/input/storyboards_1017_test/1_혐오공포놀람놀람/`(2팀 이야기 글 · elements · `dream_scenes.json` · 배경 글 · 프롬프트 · `images_log.txt` · 사진 4장 — 사진은 깃 제외).
+- **A2 결과 보관:** `team3/background/input/storyboards_1017_test/1_혐오공포놀람놀람/`(2팀 이야기 글 · elements · `dream_scenes.json` · 배경 글 · 프롬프트 · `images_log.txt` · 사진 4장 — 사진도 깃에 포함 · 7.2MB · 1014 판들은 이 PC `.git/info/exclude` 로만 빠져 있음).
 - **시험(임시 worktree `wt_c` · `db/stills` · `team3/.env` 복사 · 끝나고 삭제 — 작업 폴더의 공용 입력 자리(1팀 3판)는 안 건드림):** ① `run_team3.py --storyboard <테스트 판>` → 받기 · 배경 글 8줄 · 프롬프트 · **OpenAI 사진 4장 115초**(장당 25~29초 · 1536×864). 육안(Claude): 감정 색 맞음(혐오 황록 · 공포 남보라 · 놀람 분홍) · 결 장면에 배경 글 '균열에서 새어 나오는 빛' 반영 · **장면 3 에 캡슐 같은 물체** — 2팀 배경 이름이 '복도 끝 캡슐이 놓인 공간'이라 겹침 규칙상 금지 목록에서 빠짐(A3 때문 아님). ② `--record --record-sec 5` → 20초 · 60.5MB · 1.3분 · JS 오류 0 · **배경판 3/4** — 5분 기록 3번(10-14~15)은 모두 4장이라 짧은 시험 탓(장면 한가운데 + 전환 끝 조건)으로 판단. ③ `--to-team4 --check` → 배경판 수 · 4장면 오브제 다른 판 모두 잡고 멈춤(안전장치 OK).
 - **보관:** 짧은 기록 `output/20261017-210356_storyboard(_mp4)/`(깃 제외). worktree 삭제는 경로가 길어 `git worktree remove` 실패 → `rm -rf` + `git worktree prune`. 5055 · 9333 남은 프로세스 없음.
 - **문서:** `team3/RUN_ORDER_1022.md` — 1 → 4팀 8단계 · 명령 · 실측 시간 · 사람 손(오브제 · 사운드).
