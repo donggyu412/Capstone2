@@ -177,6 +177,11 @@ output/                  실행하면 자동 생성 — 장면별 배경판·표
 > ※ **2026-09-25 폴더 개명:** `260917_dummy/` → `dummy/`. 아래 09-25 이전 기록에 나오는
 >   `260917_dummy/` 는 현재의 `dummy/` 와 같은 폴더다. 당시 기록이므로 이름을 고치지 않고 둔다.
 
+## [2026-10-17 · 81] team3 → main 머지(빨리 감기)
+- **확인 후 실행(사용자 "단언할 수 있으면 진행"):** `origin/main` 이 `origin/team3` 의 조상 → 빨리 감기 · 바뀐 23파일 모두 `team3/` 안(1 · 2 · 4팀 0 — 한글 경로 따옴표 때문에 처음 17로 잘못 셌다가 `core.quotepath=false` 로 0 확인) · 공용 입력 자리 `input/storyboard/` 변화 없음 · 엔진(`app.py`) · 사운드(`paths.py`)는 `input/storyboard/` 만 읽어 테스트 판 폴더가 끼지 않음.
+- **실행:** `git push origin origin/team3:refs/heads/main` → `dc213a0..fef6e68`. 새 main checkout(임시 worktree)에서 `py_compile`(run_pipeline · run_team3 · app · make_prompts · generate_sound) · `--help` 진입 OK → 삭제.
+- **Next:** BRIEF §0 표 2번부터(5분 기록 · 오브제 새 판 · 4팀 통합 · 10/22).
+
 ## [2026-10-17 · 80] 세션 마감 점검 — 자동화 범위 · main 상태 · 피드백 부합 · 다음 할 일
 - **자동화 범위:** 1 → 2팀(`run_pipeline.py` · 저장된 감정 CSV) → 3팀 받기 · 배경 글 · 프롬프트 · 사진(OpenAI) · 사운드(`--sound`) · 배경 기록(`--record`) · 소리 붙이기(`--mux`) · 4팀 넘기기(`--to-team4`)가 명령으로 이어짐. **사람 손 = 오브제(GPU)만.** 미시험: 실제 카메라 입력(10/22) · 5분 기록(이번엔 짧은 판) · 4팀 셀룰러 쪽 실행.
 - **깃:** 10-17 작업은 모두 `origin/team3` — main(`dc213a0`)보다 10커밋 앞 · 충돌 0 · team3 밖 변화 0 → 머지는 사용자 확인 뒤(다음 세션 1번).
