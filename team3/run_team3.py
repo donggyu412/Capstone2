@@ -14,6 +14,8 @@ run_team3.py — 2팀 꿈 스토리보드 → 3팀(배경 · 오브제 · 사운
               키가 없거나 --manual 이면 웹 생성기(ChatGPT)로 사람이 만든다 — 필요한 이름을 알려 주고 멈춘다.
               이미 있는 사진은 덮어쓰지 않는다(손으로 고른 사진을 지키려고).
   4) 배경     --serve 면 배경 엔진(app.py)을 띄우고 브라우저를 연다 → START → [영상 mp4 · 프레임 고정]
+  4-2) 사운드 --sound → team3/sound/generate_sound.py --style apichatpong(기본) → team3/sound/output/dream_sound.wav
+              오브제는 대본과 같은 판일 때만 쓴다(아니면 오브제 층 없이) · 10-17
   5) 넘기기   가장 최근 배경 결과(output/<run>/)를 찾아 오브제 · 사운드 · 통합에 넘길 명령을 출력한다
   6) 통합     --mux 영상 소리 → 영상은 다시 인코딩하지 않고 소리만 붙인다 (D · 최종 꿈 영상)
   7) 4팀      --to-team4 → 배경판 4장 · scenes.json · dream_scenes.json · 오브제 PNG · objects.json 을
@@ -27,6 +29,8 @@ run_team3.py — 2팀 꿈 스토리보드 → 3팀(배경 · 오브제 · 사운
   python team3/run_team3.py --images <사진 폴더>                      # 다른 곳에서 만든 사진 4장 가져오기
   python team3/run_team3.py --manual                                 # 키가 있어도 자동 생성 안 함
   python team3/run_team3.py --serve                                  # 사진까지 있으면 배경 엔진 실행
+  python team3/run_team3.py --sound                                  # 사진 뒤 1팀 사운드(아피찻퐁 · 약 3분) — --record 와 같이 써도 됨
+  python team3/run_team3.py --sound-only                             # 지금 공용 자리 판으로 사운드만 다시(오브제 새 판이 나온 뒤)
   python team3/run_team3.py --record                                 # START 없이 5분 배경 + 배경판 자동 기록(10-17 · 40~50분)
   python team3/run_team3.py --storyboard <다른 json>                  # 2팀 출력 대신 다른 판으로
   python team3/run_team3.py --mux 통합.mp4 dream_sound.wav            # 최종 영상(소리 붙이기)
@@ -43,6 +47,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import unicodedata
 import webbrowser
@@ -423,11 +428,58 @@ def handoff():
     if bg:
         print('    python object_engine.py --story %s --style analog --bg %s --bg-json %s --out dream_integrated.mp4'
               % (story, from_object(bg[0]), from_object(bg[1])))
-    print('\n  [C 사운드 · 1팀 담당] (교수님 10/8: 1팀 판) — 스토리보드·사진을 이 자리에서 바로 읽는다')
-    print('    cd team3/sound && python generate_sound.py --style apichatpong   (10-16 1팀 아피찻퐁 스타일 · 기본은 --style default)')
+    wav = SOUND / 'output' / 'dream_sound.wav'
+    story_t = (SLOT / 'dream_scenes.json').stat().st_mtime
+    print('\n  [C 사운드 · 1팀 생성기 · 아피찻퐁] (교수님 10/8 · 10/15) — 이 PC 에서 약 3분')
+    if wav.exists() and wav.stat().st_mtime > story_t:
+        print('    이번 판 사운드 있음: %s' % rel(wav))
+    print('    python team3/run_team3.py --sound-only   (오브제가 이 판으로 나온 뒤에 돌리면 오브제 소리까지)')
     print('\n  [4팀] 배경 엔진 [장면 저장] → 이 판 오브제가 나오면: python team3/run_team3.py --to-team4')
     print('\n  [D 통합] python team3/run_team3.py --mux <dream_integrated.mp4> <dream_sound.wav>')
     print('\n  [4팀 · 통합 영상까지] python team3/run_team3.py --to-team4 --video <dream_integrated_sound.mp4>')
+
+
+# ──────────────────────────────────────────────────────────
+# 4-2) 사운드 — 1팀 사운드 생성기(team3/sound · 10-16 아피찻퐁)를 공용 자리 판으로 돌린다 (10-17)
+# ──────────────────────────────────────────────────────────
+SOUND = TEAM3 / 'sound'
+
+
+def sound(style='apichatpong', objects=None):
+    """공용 자리의 스토리보드 · 사진(+ 같은 판 오브제)으로 5분 사운드 → team3/sound/output/dream_sound.wav.
+       오브제가 다른 판이면 그 오브제로 소리를 만들지 않는다(10-17 시험: 옛 판 오브제 소리가 섞였다) —
+       오브제 층 없이 배경 · 글로만 만들고, 새 판 오브제가 나오면 --sound-only 로 다시 만든다.
+       생성기는 끝까지 성공했을 때만 output/ 을 갈아 끼운다(중간에 멈춰도 이전 결과는 남는다)."""
+    banner('4-2) 사운드 — 1팀 생성기 · 스타일 %s' % style)
+    story = SLOT / 'dream_scenes.json'
+    rows = load_storyboard(story)
+    obj_dir = Path(objects) if objects else OBJ_OUT
+    problems, _ = check_objects(rows, obj_dir)
+    tmp = None
+    if problems or obj_dir.name != 'output_objects':
+        tmp = Path(tempfile.mkdtemp(prefix='team3_noobj_'))    # 빈 폴더 = 생성기가 '오브제 층 없이' 진행
+        base = tmp
+        why = problems[0].split('\n')[0] if problems else '오브제 폴더 이름이 output_objects 가 아님'
+        print('  ※ 오브제 없이 만든다 — %s' % why)
+        print('    (이 판 오브제가 %s 에 나오면: python team3/run_team3.py --sound-only)' % rel(OBJ_OUT))
+    else:
+        base = obj_dir.parent                                    # 생성기는 <base>/output_objects/ 를 읽는다
+        print('  오브제: %s (대본과 같은 판)' % rel(obj_dir))
+    cmd = [sys.executable, str(SOUND / 'generate_sound.py'), '--style', style,
+           '--scenes', str(story), '--objects', str(base)]
+    env = dict(os.environ, PYTHONUTF8='1', PYTHONIOENCODING='utf-8')
+    t0 = time.time()
+    sys.stdout.flush()                                           # 안내가 생성기 출력보다 먼저 보이게
+    try:
+        r = subprocess.run(cmd, cwd=str(ROOT), env=env)
+    finally:
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
+    if r.returncode != 0:
+        sys.exit('[중단] 사운드 생성 오류 (종료 코드 %d) — 이전 결과(team3/sound/output/)는 그대로' % r.returncode)
+    wav = SOUND / 'output' / 'dream_sound.wav'
+    print('  사운드: %s · %.0f초 걸림' % (rel(wav), time.time() - t0))
+    return wav
 
 
 # ──────────────────────────────────────────────────────────
@@ -496,27 +548,33 @@ def check_team4(story_path, plates, objects):
                 problems.append('장면 %d 감정이 다릅니다 — 배경판 %s · 대본 %s (다른 판의 배경판)'
                                 % (i, m.get('emotion'), labels[i - 1]))
 
-    # 오브제 — 대본 objects 와 objects.json name_ko 가 장면마다 같은 순서로 같아야 한다
+    obj_problems, obj_files = check_objects(rows, objects)
+    return problems + obj_problems, plate_files, obj_files
+
+
+def check_objects(rows, objects):
+    """오브제가 대본과 한 판인지 — 대본 objects 와 objects.json name_ko 가 장면마다 같은 순서로 같아야 한다.
+       (문제 목록, 오브제 파일). 4팀 넘기기와 사운드가 같이 쓴다."""
+    problems, obj_files = [], []
     manifest = Path(objects) / 'objects.json'
     if not manifest.exists():
-        problems.append('오브제 대응표가 없습니다: ' + rel(manifest))
-    else:
-        by_scene = {int(sc['scene']): sc.get('objects', [])
-                    for sc in json.loads(manifest.read_text(encoding='utf-8-sig')).get('scenes', [])}
-        for i, row in enumerate(rows, 1):
-            want = [nfc(o) for o in (row.get('objects') or []) if isinstance(o, str)]
-            ents = sorted(by_scene.get(i, []), key=lambda e: e.get('index', 0))
-            have = [nfc(e.get('name_ko', '')) for e in ents]
-            if have != want:
-                problems.append('장면 %d 오브제가 대본과 다릅니다 (다른 판의 오브제)\n      대본  : %s\n      오브제: %s'
-                                % (i, ' · '.join(want) or '없음', ' · '.join(have) or '없음'))
-                continue
-            for e in ents:
-                f = Path(objects) / e.get('file', '')
-                if not f.is_file():
-                    problems.append('오브제 파일이 없습니다: ' + rel(f))
-                obj_files.append(f)
-    return problems, plate_files, obj_files
+        return ['오브제 대응표가 없습니다: ' + rel(manifest)], []
+    by_scene = {int(sc['scene']): sc.get('objects', [])
+                for sc in json.loads(manifest.read_text(encoding='utf-8-sig')).get('scenes', [])}
+    for i, row in enumerate(rows, 1):
+        want = [nfc(o) for o in (row.get('objects') or []) if isinstance(o, str)]
+        ents = sorted(by_scene.get(i, []), key=lambda e: e.get('index', 0))
+        have = [nfc(e.get('name_ko', '')) for e in ents]
+        if have != want:
+            problems.append('장면 %d 오브제가 대본과 다릅니다 (다른 판의 오브제)\n      대본  : %s\n      오브제: %s'
+                            % (i, ' · '.join(want) or '없음', ' · '.join(have) or '없음'))
+            continue
+        for e in ents:
+            f = Path(objects) / e.get('file', '')
+            if not f.is_file():
+                problems.append('오브제 파일이 없습니다: ' + rel(f))
+            obj_files.append(f)
+    return problems, obj_files
 
 
 def team4_readme(kind, plates, labels):
@@ -654,18 +712,27 @@ def main():
     ap.add_argument('--record', action='store_true',
                     help='사진이 다 있으면 5분 배경 영상 + 배경판을 헤드리스로 기록 (START 안 눌러도 됨 · 40~50분)')
     ap.add_argument('--record-sec', type=float, help='--record 시험용: 장면당 초 (기본 75 = 5분)')
+    ap.add_argument('--sound', action='store_true',
+                    help='사진까지 끝나면 1팀 사운드 생성기로 5분 사운드를 만든다 (이 PC 약 3분 · 오브제는 같은 판일 때만)')
+    ap.add_argument('--sound-only', action='store_true',
+                    help='받기 · 사진을 거치지 않고 지금 공용 자리 판으로 사운드만 다시 만든다')
+    ap.add_argument('--sound-style', default='apichatpong',
+                    help='사운드 스타일 (기본 apichatpong — 교수님 10/15 · 그 밖에 default · apichatpong_deep · apichatpong_synth)')
     ap.add_argument('--mux', nargs=2, metavar=('VIDEO', 'AUDIO'), help='최종 영상: 영상에 소리만 붙인다')
     ap.add_argument('--out', help='--mux 결과 파일 (기본: <영상>_sound.mp4)')
     ap.add_argument('--to-team4', action='store_true', help='4팀 입력 자리(team4/input)에 배경판 · 오브제를 넣는다')
     ap.add_argument('--check', action='store_true', help='--to-team4 와 함께: 한 판인지 확인만 하고 쓰지 않음')
     ap.add_argument('--plates', help='--to-team4 배경판 폴더 (기본: 가장 최근 [장면 저장] 결과)')
-    ap.add_argument('--objects', help='--to-team4 오브제 폴더 (기본: team3/object/output_objects)')
+    ap.add_argument('--objects', help='--to-team4 · --sound 오브제 폴더 (기본: team3/object/output_objects)')
     ap.add_argument('--team4-dir', help='--to-team4 넣을 곳 (기본: team4/input)')
     ap.add_argument('--video', help='--to-team4 와 함께: 5분 통합 영상(배경 · 오브제 · 사운드)도 team4/input/video/ 에 넣는다')
     a = ap.parse_args()
 
     if a.mux:
         mux(a.mux[0], a.mux[1], a.out)
+        return
+    if a.sound_only:                         # 받기를 거치지 않는다 — 공용 자리 판 그대로
+        sound(a.sound_style, a.objects)
         return
     if a.to_team4:                           # 받기를 거치지 않는다 — 공용 자리를 2팀 새 출력으로 바꾸지 않게
         to_team4(a.storyboard or SLOT / 'dream_scenes.json', a.plates, a.objects, a.team4_dir, a.check, a.video)
@@ -677,6 +744,8 @@ def main():
     backend = 'manual' if a.manual or openai_key() is None else 'openai'
     if not images(len(scenes), backend, a.image_model, a.image_quality):
         sys.exit(2)
+    if a.sound:
+        sound(a.sound_style, a.objects)
     if a.record:
         record(a.record_sec)
     elif a.serve:

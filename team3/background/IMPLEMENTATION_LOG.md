@@ -177,6 +177,13 @@ output/                  실행하면 자동 생성 — 장면별 배경판·표
 > ※ **2026-09-25 폴더 개명:** `260917_dummy/` → `dummy/`. 아래 09-25 이전 기록에 나오는
 >   `260917_dummy/` 는 현재의 `dummy/` 와 같은 폴더다. 당시 기록이므로 이름을 고치지 않고 둔다.
 
+## [2026-10-17 · 79] 사운드를 `run_team3.py` 한 단계로 통합(`--sound` · `--sound-only`)
+- **Project:** 캡스톤2 · 3팀 통합 (사용자: "프로그램 통합에 맞으면 진행")
+- **Changes (`team3/run_team3.py`):** ① `--sound`: 사진 단계 뒤(→ `--record` 앞) 1팀 `generate_sound.py --style <--sound-style · 기본 apichatpong> --scenes <공용 자리 json> --objects <base>` 실행 → `team3/sound/output/dream_sound.wav`. ② `--sound-only`: 받기 · 사진 없이 공용 자리 판으로 사운드만 다시. ③ 오브제 판 검사 `check_objects()` 를 `check_team4` 에서 떼어 같이 씀 — **대본과 같은 판이면** `output_objects` 의 부모를 넘겨 오브제 소리 포함, **다르면 빈 임시 폴더를 넘겨 오브제 층 없이**(LOG 78 의 옛 판 오브제 소리 섞임 방지) + 안내. ④ 넘기기 안내에 '이번 판 사운드 있음' · `--sound-only`. 생성기 코드는 안 고침.
+- **시험(임시 worktree · 테스트 판 · `--images <판> --manual --sound`):** exit 0 · 177초 · wav 48k 2ch **300.00초** · 다른 판 오브제 감지 → 오브제 없이. `--sound-only` 경로 OK(잘못된 스타일로 빠르게 실패 확인). 가짜 같은 판 오브제(16개) → `check_objects` 문제 0 · 생성기 `find_objects` 가 장면별 6 · 4 · 4 · 2개 찾음. `--to-team4 --check` 회귀 OK(다른 판 4장면 잡음). 안내가 생성기 출력보다 늦게 찍히던 것 → `stdout.flush()`.
+- **문서:** `RUN_ORDER_1022.md` 5단계 = `--sound`(사람 손 없음) · 시연 문구 `--sound --record` 한 줄.
+- **Next:** 오브제 새 판 → `--sound-only` → `--mux` → `--to-team4 --video`. 10/22 전 5분 기록 1회.
+
 ## [2026-10-17 · 78] 1팀 사운드 자동 실행 확인(이 노트북 · 아피찻퐁)
 - **Project:** 캡스톤2 · 3팀 사운드 연결 (코드 변경 없음)
 - **사용자:** 1팀 사운드는 프로그램 안에서 돌도록 자동화된 상태 → 확인 요청. 원격 새 push 없음 — 자동화는 `4e6ec95`(10-16 진성) 판 그대로: `generate_sound.py` 가 공용 자리(`input/storyboard/` 가장 최근 json + scene_NN.png) · `team3/object/output_objects/` 를 스스로 읽음.
