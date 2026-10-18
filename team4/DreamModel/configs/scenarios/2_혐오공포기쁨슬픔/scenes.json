@@ -1,0 +1,157 @@
+{
+ "run": "20261014-225808_storyboard",
+ "scenes": [
+  {
+   "stage": "기",
+   "title": "파도 끝 바다",
+   "emotion": "혐오",
+   "emotion_src": "2팀 대표 감정(main_emotion)",
+   "intensity": 0.75,
+   "backgrounds": [
+    "파도 끝 바다",
+    "물의 고음과 수면"
+   ],
+   "reference_artists": "아피찻퐁 50% · 디갈라카스 50%",
+   "artist_weights": {
+    "digalakis": 0.5
+   },
+   "artist_basis": {
+    "digalakis": [
+     "수면",
+     "바다"
+    ]
+   },
+   "dream_laws": [],
+   "dream_laws_total": 3,
+   "moisture": [],
+   "source_image": "/media/scene_01.png",
+   "width": 1920,
+   "height": 1080,
+   "captured_scene_frame": 2250,
+   "captured_at": "2026-10-14T14:01:11.545Z",
+   "engine": {
+    "GLOW_SIZE": 0.7,
+    "BASE_ALPHA": 0.01,
+    "AP_COMP": 0.8,
+    "NP2": 14000
+   },
+   "act": 1,
+   "files": {
+    "background": "scene_01.png",
+    "with_title": "scene_01_title.png"
+   }
+  },
+  {
+   "stage": "승",
+   "title": "복도",
+   "emotion": "공포",
+   "emotion_src": "2팀 대표 감정(main_emotion)",
+   "intensity": 0.85,
+   "backgrounds": [
+    "복도",
+    "습한 공기와 곰팡이 냄새"
+   ],
+   "reference_artists": "아피찻퐁 100%",
+   "artist_weights": {},
+   "artist_basis": {},
+   "dream_laws": [],
+   "dream_laws_total": 3,
+   "moisture": [],
+   "source_image": "/media/scene_02.png",
+   "width": 1920,
+   "height": 1080,
+   "captured_scene_frame": 2250,
+   "captured_at": "2026-10-14T14:06:57.273Z",
+   "engine": {
+    "GLOW_SIZE": 0.7,
+    "BASE_ALPHA": 0.01,
+    "AP_COMP": 0.8,
+    "NP2": 14000
+   },
+   "act": 2,
+   "files": {
+    "background": "scene_02.png",
+    "with_title": "scene_02_title.png"
+   }
+  },
+  {
+   "stage": "전",
+   "title": "수면(물 위)",
+   "emotion": "기쁨",
+   "emotion_src": "2팀 대표 감정(main_emotion)",
+   "intensity": 0.4,
+   "backgrounds": [
+    "수면(물 위)",
+    "빛이 번지는 천장 같은 공간"
+   ],
+   "reference_artists": "아피찻퐁 67% · 디갈라카스 33%",
+   "artist_weights": {
+    "digalakis": 0.333
+   },
+   "artist_basis": {
+    "digalakis": [
+     "수면"
+    ]
+   },
+   "dream_laws": [],
+   "dream_laws_total": 3,
+   "moisture": [],
+   "source_image": "/media/scene_03.png",
+   "width": 1920,
+   "height": 1080,
+   "captured_scene_frame": 2250,
+   "captured_at": "2026-10-14T14:11:50.643Z",
+   "engine": {
+    "GLOW_SIZE": 0.7,
+    "BASE_ALPHA": 0.01,
+    "AP_COMP": 0.8,
+    "NP2": 14000
+   },
+   "act": 3,
+   "files": {
+    "background": "scene_03.png",
+    "with_title": "scene_03_title.png"
+   }
+  },
+  {
+   "stage": "결",
+   "title": "천장과 빛",
+   "emotion": "슬픔",
+   "emotion_src": "2팀 대표 감정(main_emotion)",
+   "intensity": 0.55,
+   "backgrounds": [
+    "천장과 빛",
+    "넓어지는 빛의 공간"
+   ],
+   "reference_artists": "아피찻퐁 100%",
+   "artist_weights": {},
+   "artist_basis": {},
+   "dream_laws": [],
+   "dream_laws_total": 3,
+   "moisture": [],
+   "source_image": "/media/scene_04.png",
+   "width": 1920,
+   "height": 1080,
+   "captured_scene_frame": 2250,
+   "captured_at": "2026-10-14T14:15:58.070Z",
+   "engine": {
+    "GLOW_SIZE": 0.7,
+    "BASE_ALPHA": 0.01,
+    "AP_COMP": 0.8,
+    "NP2": 14000
+   },
+   "act": 4,
+   "files": {
+    "background": "scene_04.png",
+    "with_title": "scene_04_title.png"
+   }
+  }
+ ],
+ "input_mode": "storyboard",
+ "input_file": "input/storyboard/dream_scenes.json",
+ "layers": {
+  "background": "서사 표지 없는 배경 — 오브제 합성용",
+  "with_title": "화면 그대로 (막 · 제목 · 감정 표지)"
+ },
+ "note": "장면 한가운데(sceneFrame 2250)의 대표 프레임. 실시간 캔버스이므로 같은 입력이어도 매번 조금씩 다르다(창발)."
+}

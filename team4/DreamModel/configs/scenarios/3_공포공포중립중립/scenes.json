@@ -1,0 +1,165 @@
+{
+ "run": "20261015-002645_storyboard",
+ "scenes": [
+  {
+   "stage": "기",
+   "title": "벽 없는 회색 공간",
+   "emotion": "공포",
+   "emotion_src": "2팀 대표 감정(main_emotion)",
+   "intensity": 0.75,
+   "backgrounds": [
+    "벽 없는 회색 공간",
+    "차갑고 축축한 바닥",
+    "정지된 공기"
+   ],
+   "reference_artists": "아피찻퐁 100%",
+   "artist_weights": {},
+   "artist_basis": {},
+   "dream_laws": [],
+   "dream_laws_total": 4,
+   "moisture": [
+    {
+     "kind": "rain",
+     "name": "비",
+     "src": "바닥의 빗물 자국이 하나둘 지워진다."
+    }
+   ],
+   "source_image": "/media/scene_01.png",
+   "width": 1920,
+   "height": 1080,
+   "captured_scene_frame": 2250,
+   "captured_at": "2026-10-14T15:29:32.491Z",
+   "engine": {
+    "GLOW_SIZE": 0.7,
+    "BASE_ALPHA": 0.01,
+    "AP_COMP": 0.8,
+    "NP2": 14000
+   },
+   "act": 1,
+   "files": {
+    "background": "scene_01.png",
+    "with_title": "scene_01_title.png"
+   }
+  },
+  {
+   "stage": "승",
+   "title": "회색 바닥",
+   "emotion": "공포",
+   "emotion_src": "2팀 대표 감정(main_emotion)",
+   "intensity": 0.7,
+   "backgrounds": [
+    "회색 바닥",
+    "무거운 공기",
+    "지붕의 구멍(흰 점)"
+   ],
+   "reference_artists": "아피찻퐁 100%",
+   "artist_weights": {},
+   "artist_basis": {},
+   "dream_laws": [],
+   "dream_laws_total": 3,
+   "moisture": [],
+   "source_image": "/media/scene_02.png",
+   "width": 1920,
+   "height": 1080,
+   "captured_scene_frame": 2250,
+   "captured_at": "2026-10-14T15:34:47.203Z",
+   "engine": {
+    "GLOW_SIZE": 0.7,
+    "BASE_ALPHA": 0.01,
+    "AP_COMP": 0.8,
+    "NP2": 14000
+   },
+   "act": 2,
+   "files": {
+    "background": "scene_02.png",
+    "with_title": "scene_02_title.png"
+   }
+  },
+  {
+   "stage": "전",
+   "title": "지붕의 흰 점",
+   "emotion": "중립",
+   "emotion_src": "2팀 대표 감정(main_emotion)",
+   "intensity": 0.35,
+   "backgrounds": [
+    "지붕의 흰 점",
+    "공기",
+    "먼지와 햇살"
+   ],
+   "reference_artists": "아피찻퐁 83% · 폰타나 17%",
+   "artist_weights": {
+    "fontana": 0.167
+   },
+   "artist_basis": {
+    "fontana": [
+     "햇살"
+    ]
+   },
+   "dream_laws": [],
+   "dream_laws_total": 3,
+   "moisture": [],
+   "source_image": "/media/scene_03.png",
+   "width": 1920,
+   "height": 1080,
+   "captured_scene_frame": 2250,
+   "captured_at": "2026-10-14T15:40:40.433Z",
+   "engine": {
+    "GLOW_SIZE": 0.7,
+    "BASE_ALPHA": 0.01,
+    "AP_COMP": 0.8,
+    "NP2": 14000
+   },
+   "act": 3,
+   "files": {
+    "background": "scene_03.png",
+    "with_title": "scene_03_title.png"
+   }
+  },
+  {
+   "stage": "결",
+   "title": "폐창고",
+   "emotion": "중립",
+   "emotion_src": "2팀 대표 감정(main_emotion)",
+   "intensity": 0.35,
+   "backgrounds": [
+    "폐창고",
+    "빛줄기"
+   ],
+   "reference_artists": "아피찻퐁 97% · 디갈라카스 3%",
+   "artist_weights": {
+    "digalakis": 0.033
+   },
+   "artist_basis": {
+    "digalakis": [
+     "정적"
+    ]
+   },
+   "dream_laws": [],
+   "dream_laws_total": 3,
+   "moisture": [],
+   "source_image": "/media/scene_04.png",
+   "width": 1920,
+   "height": 1080,
+   "captured_scene_frame": 2250,
+   "captured_at": "2026-10-14T15:46:05.901Z",
+   "engine": {
+    "GLOW_SIZE": 0.7,
+    "BASE_ALPHA": 0.01,
+    "AP_COMP": 0.8,
+    "NP2": 14000
+   },
+   "act": 4,
+   "files": {
+    "background": "scene_04.png",
+    "with_title": "scene_04_title.png"
+   }
+  }
+ ],
+ "input_mode": "storyboard",
+ "input_file": "input/storyboard/dream_scenes.json",
+ "layers": {
+  "background": "서사 표지 없는 배경 — 오브제 합성용",
+  "with_title": "화면 그대로 (막 · 제목 · 감정 표지)"
+ },
+ "note": "장면 한가운데(sceneFrame 2250)의 대표 프레임. 실시간 캔버스이므로 같은 입력이어도 매번 조금씩 다르다(창발)."
+}

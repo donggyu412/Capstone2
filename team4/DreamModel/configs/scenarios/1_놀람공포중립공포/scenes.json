@@ -1,0 +1,188 @@
+{
+ "run": "20261014-233259_storyboard",
+ "scenes": [
+  {
+   "stage": "기",
+   "title": "튀어오르는 선체와 갑판 아래 바다",
+   "emotion": "놀람",
+   "emotion_src": "2팀 대표 감정(main_emotion)",
+   "intensity": 0.6,
+   "backgrounds": [
+    "튀어오르는 선체와 갑판 아래 바다",
+    "햇빛 비치는 갑판과 소금기"
+   ],
+   "reference_artists": "아피찻퐁 60% · 디갈라카스 23% · 폰타나 17%",
+   "artist_weights": {
+    "digalakis": 0.233,
+    "fontana": 0.167
+   },
+   "artist_basis": {
+    "digalakis": [
+     "바다"
+    ],
+    "fontana": [
+     "햇빛"
+    ]
+   },
+   "dream_laws": [],
+   "dream_laws_total": 3,
+   "moisture": [],
+   "source_image": "/media/scene_01.png",
+   "width": 1920,
+   "height": 1080,
+   "captured_scene_frame": 2250,
+   "captured_at": "2026-10-14T14:36:01.300Z",
+   "engine": {
+    "GLOW_SIZE": 0.7,
+    "BASE_ALPHA": 0.01,
+    "AP_COMP": 0.8,
+    "NP2": 14000
+   },
+   "act": 1,
+   "files": {
+    "background": "scene_01.png",
+    "with_title": "scene_01_title.png"
+   }
+  },
+  {
+   "stage": "승",
+   "title": "갑판 아래 좁은 틈새 공간",
+   "emotion": "공포",
+   "emotion_src": "2팀 대표 감정(main_emotion)",
+   "intensity": 0.6,
+   "backgrounds": [
+    "갑판 아래 좁은 틈새 공간",
+    "틈새로 보이는 바다"
+   ],
+   "reference_artists": "아피찻퐁 67% · 디갈라카스 33%",
+   "artist_weights": {
+    "digalakis": 0.333
+   },
+   "artist_basis": {
+    "digalakis": [
+     "바다"
+    ]
+   },
+   "dream_laws": [],
+   "dream_laws_total": 5,
+   "moisture": [],
+   "source_image": "/media/scene_02.png",
+   "width": 1920,
+   "height": 1080,
+   "captured_scene_frame": 2250,
+   "captured_at": "2026-10-14T14:41:11.517Z",
+   "engine": {
+    "GLOW_SIZE": 0.7,
+    "BASE_ALPHA": 0.01,
+    "AP_COMP": 0.8,
+    "NP2": 14000
+   },
+   "act": 2,
+   "files": {
+    "background": "scene_02.png",
+    "with_title": "scene_02_title.png"
+   }
+  },
+  {
+   "stage": "전",
+   "title": "창가 방 안",
+   "emotion": "중립",
+   "emotion_src": "2팀 대표 감정(main_emotion)",
+   "intensity": 0.4,
+   "backgrounds": [
+    "창가 방 안",
+    "나무 바닥",
+    "창밖 푸른 공간"
+   ],
+   "reference_artists": "아피찻퐁 80% · 디갈라카스 3% · 폰타나 17%",
+   "artist_weights": {
+    "digalakis": 0.033,
+    "fontana": 0.167
+   },
+   "artist_basis": {
+    "digalakis": [
+     "고요"
+    ],
+    "fontana": [
+     "푸른"
+    ]
+   },
+   "dream_laws": [],
+   "dream_laws_total": 2,
+   "moisture": [
+    {
+     "kind": "steam",
+     "name": "김",
+     "src": "유리 안쪽 김이 천천히 걷힌다."
+    }
+   ],
+   "source_image": "/media/scene_03.png",
+   "width": 1920,
+   "height": 1080,
+   "captured_scene_frame": 2250,
+   "captured_at": "2026-10-14T14:50:01.778Z",
+   "engine": {
+    "GLOW_SIZE": 0.7,
+    "BASE_ALPHA": 0.01,
+    "AP_COMP": 0.8,
+    "NP2": 14000
+   },
+   "act": 3,
+   "files": {
+    "background": "scene_03.png",
+    "with_title": "scene_03_title.png"
+   }
+  },
+  {
+   "stage": "결",
+   "title": "긴 복도",
+   "emotion": "공포",
+   "emotion_src": "2팀 대표 감정(main_emotion)",
+   "intensity": 0.55,
+   "backgrounds": [
+    "긴 복도",
+    "유리창",
+    "창밖 푸른 공간"
+   ],
+   "reference_artists": "아피찻퐁 80% · 폰타나 17% · 마에다 3%",
+   "artist_weights": {
+    "fontana": 0.167,
+    "maeda": 0.033
+   },
+   "artist_basis": {
+    "fontana": [
+     "푸른"
+    ],
+    "maeda": [
+     "안개"
+    ]
+   },
+   "dream_laws": [],
+   "dream_laws_total": 3,
+   "moisture": [],
+   "source_image": "/media/scene_04.png",
+   "width": 1920,
+   "height": 1080,
+   "captured_scene_frame": 2250,
+   "captured_at": "2026-10-14T15:00:08.604Z",
+   "engine": {
+    "GLOW_SIZE": 0.7,
+    "BASE_ALPHA": 0.01,
+    "AP_COMP": 0.8,
+    "NP2": 14000
+   },
+   "act": 4,
+   "files": {
+    "background": "scene_04.png",
+    "with_title": "scene_04_title.png"
+   }
+  }
+ ],
+ "input_mode": "storyboard",
+ "input_file": "input/storyboard/dream_scenes.json",
+ "layers": {
+  "background": "서사 표지 없는 배경 — 오브제 합성용",
+  "with_title": "화면 그대로 (막 · 제목 · 감정 표지)"
+ },
+ "note": "장면 한가운데(sceneFrame 2250)의 대표 프레임. 실시간 캔버스이므로 같은 입력이어도 매번 조금씩 다르다(창발)."
+}
