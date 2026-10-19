@@ -4,7 +4,7 @@
 
 입력
   1) emotion_peaks.txt      (step4 결과: 어느 장면에서 관객이 어떤 감정으로 얼마나 공감했는가)
-  2) sound_timetable.txt    (「아르카디아」 30장면: 장면 설명 / 나레이션 / 사운드 특성)
+  2) sound_timetable.txt    (시나리오 장면들: 장면 설명 / 나레이션 / 사운드 특성. 작품 제목은 맨 위 「」에서 읽음)
   3) keyword_bank.json      (장면별 키워드 뱅크. 없는 장면만 LLM으로 뽑아서 채워 넣음)
 
 출력
@@ -172,7 +172,7 @@ def save_bank(path, bank, meta):
     Path(path).write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
-EXTRACT_PROMPT = """아래는 SF 단편 「아르카디아 : 얼음 속의 방송」의 한 장면 정보다. 이 장면에서 꿈 장면을 만들 재료가 될 키워드를 뽑아라.
+EXTRACT_PROMPT = """아래는 {work}의 한 장면 정보다. 이 장면에서 꿈 장면을 만들 재료가 될 키워드를 뽑아라.
 
 [장면 번호] {scene}
 [장면 설명] {description}
@@ -204,8 +204,26 @@ EXTRACT_PROMPT = """아래는 SF 단편 「아르카디아 : 얼음 속의 방�
 }}"""
 
 
-def build_prompt(scene):
+def read_title(timetable_path):
+    """타임테이블 맨 위 머리말의 「작품 제목」을 읽는다. 없으면 None"""
+    try:
+        head = Path(timetable_path).read_text(encoding="utf-8-sig").splitlines()[:15]
+    except OSError:
+        return None
+    for line in head:
+        m = re.search(r"「([^」]+)」", line)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+def work_label(title):
+    return f"단편 「{title}」" if title else "한 단편"
+
+
+def build_prompt(scene, work="한 단편"):
     return EXTRACT_PROMPT.format(
+        work=work,
         scene=scene["scene"],
         description=" ".join(scene["description"].split()),
         narration=" ".join(s["text"] for s in scene["sentences"]),
@@ -263,7 +281,7 @@ def extract_json(text):
     return json.loads(m.group())
 
 
-def build_bank(scenes, bank_path, backend, model, rebuild, ollama_url, retries=3):
+def build_bank(scenes, bank_path, backend, model, rebuild, ollama_url, retries=3, title=None):
     bank, meta = ({}, {}) if rebuild else load_bank(bank_path)
     todo = [s for s in scenes if s["scene"] not in bank]
 
@@ -272,10 +290,10 @@ def build_bank(scenes, bank_path, backend, model, rebuild, ollama_url, retries=3
         return bank, meta
 
     print(f"[뱅크] {len(todo)}장면을 {backend}({model})로 추출합니다.")
-    meta = {"방식": f"LLM ({backend})", "모델": model}
+    meta = {"방식": f"LLM ({backend})", "모델": model, "작품": title or ""}
 
     for i, sc in enumerate(todo, 1):
-        prompt = build_prompt(sc)
+        prompt = build_prompt(sc, work_label(title))
         entry = None
         for attempt in range(1, retries + 1):
             try:
@@ -441,7 +459,18 @@ def main(args):
         sys.exit("emotion_peaks.txt에서 피크를 하나도 읽지 못했습니다. 파일 형식을 확인하세요.")
 
     model = args.model or DEFAULT_MODELS[args.llm]
-    bank, bank_meta = build_bank(scenes, args.bank, args.llm, model, args.rebuild, args.ollama_url)
+    title = read_title(args.timetable)
+    print(f"[작품] {title or '(제목 없음)'}")
+    bank, bank_meta = build_bank(scenes, args.bank, args.llm, model, args.rebuild, args.ollama_url, title=title)
+
+    # 다른 작품의 뱅크를 잘못 쓰는 것 방지 (장면 번호가 S01~S30으로 같아서 조용히 섞일 수 있음)
+    bank_title = bank_meta.get("작품")
+    if title and bank and (
+        (bank_title and bank_title != title) or (not bank_title and "아르카디아" not in title)
+    ):
+        print(f"[경고] 키워드 뱅크가 다른 작품용일 수 있습니다: {args.bank}"
+              f" (뱅크 작품: {bank_title or '아르카디아(기본)'} / 타임테이블 작품: {title})\n"
+              f"       시나리오마다 --bank 로 다른 파일을 지정하세요. 없는 파일을 지정하면 새로 만듭니다.")
 
     scene_ids = {s["scene"] for s in scenes}
     for p in peaks:

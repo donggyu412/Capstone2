@@ -126,6 +126,8 @@ def main():
     # step4 옵션
     pk = ap.add_argument_group("step4 피크 탐지")
     pk.add_argument("--timetable", default=str(TEAM1 / "timetable" / "sound_timetable.txt"))
+    pk.add_argument("--bank", default=str(TEAM1_OUT / "keyword_bank.json"),
+                    help="키워드 뱅크 (시나리오마다 따로. 파일이 없으면 step5가 Claude로 새로 만듦)")
     pk.add_argument("--window-size", type=float, default=2.0,
                     help="피크 창 크기(초). 기본 2초")
     pk.add_argument("--step", type=float, default=1.0,
@@ -237,7 +239,7 @@ def main():
     run([sys.executable, STEP5,
          "--peaks", peaks_txt,
          "--timetable", Path(args.timetable).resolve(),
-         "--bank", TEAM1_OUT / "keyword_bank.json",
+         "--bank", Path(args.bank).resolve(),
          "--output", keyword_pool], TEAM1_SRC, "step5")
     require_file(keyword_pool, "step5 결과 키워드 풀")
 
