@@ -1,6 +1,0 @@
-# Keep model output placeholders; generated results stay local.
-!*/output/
-*/output/*
-!*/output/.gitkeep
-__pycache__/
-*.pyc

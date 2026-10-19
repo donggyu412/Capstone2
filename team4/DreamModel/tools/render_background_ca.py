@@ -105,17 +105,17 @@ def run_render(
         shots = []
 
         if not preview:
-            silent_mp4 = out_dir / f"{film}번_꿈재현_배경_v3_무음.mp4"
             final_mp4 = out_dir / f"{film}번_꿈재현_배경_v3_사운드.mp4"
             cmd = [
                 m.FFMPEG, "-y", "-v", "error",
                 "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{m.W}x{m.H}", "-r", str(m.FPS),
-                "-i", "-", "-an",
+                "-i", "-", "-i", str(sound_path),
+                "-map", "0:v:0", "-map", "1:a:0",
                 "-c:v", "libx264", "-threads", "6", "-preset", "fast",
                 "-b:v", "17200k", "-minrate", "17200k", "-maxrate", "17200k", "-bufsize", "34400k",
                 "-x264-params", "nal-hrd=cbr:force-cfr=1",
-                "-pix_fmt", "yuv420p",
-                str(silent_mp4),
+                "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+                "-t", "300", "-movflags", "+faststart", str(final_mp4),
             ]
             enc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
 
@@ -153,15 +153,6 @@ def run_render(
         code = enc.wait()
         assert code == 0, f"FFmpeg encode failed with code {code}"
 
-        subprocess.run([
-            m.FFMPEG, "-y", "-v", "error",
-            "-i", str(silent_mp4), "-i", str(sound_path),
-            "-map", "0:v:0", "-map", "1:a:0",
-            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-            "-t", "300", "-movflags", "+faststart",
-            str(final_mp4),
-        ], check=True)
-
         check = subprocess.run([m.FFMPEG, "-v", "error", "-threads", "4", "-i", str(final_mp4), "-f", "null", "-"], capture_output=True)
         assert check.returncode == 0 and not check.stderr, check.stderr.decode(errors="replace")
         sz = final_mp4.stat().st_size
@@ -171,7 +162,6 @@ def run_render(
             scenario=scenario_dir.name,
             sound_source=str(sound_path.name),
             file=str(final_mp4),
-            silent_file=str(silent_mp4),
             width=m.W,
             height=m.H,
             fps=m.FPS,

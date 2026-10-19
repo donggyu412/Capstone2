@@ -1,4 +1,0 @@
-numpy>=1.26,<3
-Pillow>=10,<13
-imageio-ffmpeg==0.6.0
-opencv-python-headless>=4.10,<6
