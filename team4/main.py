@@ -1,6 +1,7 @@
 """Run DreamModel and GridModel, then composite their layers."""
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,7 @@ GRID_SCRIPT = TEAM4_DIR / "Grid_Model" / "GridModel" / "pythonimagemodel.py"
 MODEL_PYTHON = TEAM4_DIR / "DreamModel" / ".venv" / "Scripts" / "python.exe"
 PYTHON_EXE = MODEL_PYTHON if MODEL_PYTHON.exists() else Path(sys.executable)
 FILM = 1
+SUPPORTED_EMOTIONS = {"기쁨", "슬픔", "분노", "공포", "놀람", "혐오", "중립"}
 
 
 def find_music() -> Path:
@@ -78,15 +80,37 @@ def check_model_environment() -> None:
 
 
 def make_dreammodel_storyboard(video_path: Path, target_dir: Path) -> None:
-    """Sample four representative frames for DreamModel's existing plate input."""
+    """Sample four video frames and pair them with the supplied scene metadata."""
     import cv2
 
-    template_dir = TEAM4_DIR / "DreamModel" / "configs" / "scenarios" / "1_놀람공포중립공포"
     for metadata_name in ("scenes.json", "dream_scenes.json"):
-        metadata = template_dir / metadata_name
+        metadata = BACKGROUND_DIR / metadata_name
         if not metadata.is_file():
-            raise FileNotFoundError(f"DreamModel 장면 설정 파일이 없습니다: {metadata}")
+            raise FileNotFoundError(
+                f"배경 영상과 함께 장면 설정 파일을 넣어 주세요: {metadata}\n"
+                "scenes.json에는 4개 장면의 emotion을 기쁨/슬픔/분노/공포/놀람/혐오/중립 중 하나로 지정해야 합니다."
+            )
         shutil.copy2(metadata, target_dir / metadata_name)
+
+    scenes_path = target_dir / "scenes.json"
+    try:
+        scenes_data = json.loads(scenes_path.read_text(encoding="utf-8-sig"))
+        scenes = scenes_data["scenes"]
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ValueError(f"scenes.json 형식이 올바르지 않습니다: {scenes_path}") from exc
+    if not isinstance(scenes, list) or len(scenes) != 4:
+        raise ValueError("scenes.json에는 배경 영상의 네 장면에 대응하는 scenes 항목 4개가 필요합니다.")
+    invalid_emotions = sorted({
+        str(scene.get("emotion", "<누락>")) if isinstance(scene, dict) else "<장면 형식 오류>"
+        for scene in scenes
+        if not isinstance(scene, dict) or scene.get("emotion") not in SUPPORTED_EMOTIONS
+    })
+    if invalid_emotions:
+        accepted = ", ".join(sorted(SUPPORTED_EMOTIONS))
+        raise ValueError(
+            f"scenes.json의 감정 라벨이 올바르지 않습니다: {', '.join(invalid_emotions)}\n"
+            f"사용 가능한 감정: {accepted}"
+        )
 
     capture = cv2.VideoCapture(str(video_path))
     if not capture.isOpened():
