@@ -5,3 +5,4 @@ output/
 team2/output/
 *.pyc
 testVideo/
+.venv/
