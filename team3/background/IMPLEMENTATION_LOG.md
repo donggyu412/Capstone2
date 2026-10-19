@@ -177,6 +177,13 @@ output/                  실행하면 자동 생성 — 장면별 배경판·표
 > ※ **2026-09-25 폴더 개명:** `260917_dummy/` → `dummy/`. 아래 09-25 이전 기록에 나오는
 >   `260917_dummy/` 는 현재의 `dummy/` 와 같은 폴더다. 당시 기록이므로 이름을 고치지 않고 둔다.
 
+## [2026-10-19 · 82] 오브제 엔진 새 판(선화 · 그리는 과정) 검토 → main 머지 · run_team3 문구
+- **받은 것:** `origin/team3` `9f846a0`(오브제 담당) — `object_engine.py` 기본 = 선화 · 어린아이 로봇이 그리는 과정(펜 · 멈칫 · 틀림 · 지움 · 다시 그림 · 덧그림) · `--alpha-out`(검은 바탕 오브제 + `_matte.mp4`) · `--bg-audio` · 새 파일 `render_team4.py`(4팀 배경 위 합성 + 투명도판 1~3판 일괄).
+- **시험(이 노트북):** 미리보기(장면 6초 · 절반) OK 63초 · 5분 · 1/4 해상도 · `--alpha-out` OK 13분 — 모든 오브제가 장면 시작 후 ≤43초에 다 그려짐(풀리기 ≈59초 전) · 주황 바탕 합성으로 투명도 정확 확인(렌더는 프레임마다 난수 없음 → 두 번 그려 투명도 구하는 방식 정확) · 원 해상도 10초 = 260초(→ 출력은 팀원 PC).
+- **머지 전 점검:** `merge-tree` 충돌 0 · main 쪽 새 변화 = 1팀 PR #5(step5 작품 제목 · `--bank` · step6 공통 감정 사전 — 출력 형식 그대로). 임시 worktree(main+team3)에서 1팀 step4 → 5(기존 뱅크 · API 없이) → 6 완료 · 2팀 · 3팀 `py_compile` · `--help` OK · `--to-team4 --check` 가 다른 판 오브제 4장면 모두 잡고 멈춤.
+- **주의(원래 동작):** `load_objects_index` 는 이름이 안 맞으면 같은 번호의 옛 PNG 를 그대로 씀 → 새 대본이면 PNG 를 꼭 새로 만들 것(`run_team3.py` 넘기기 안내에 추가). PNG 생성은 ComfyUI + GPU + LoRA → 담당 PC 만.
+- **고침:** `run_team3.py` 넘기기 — `--style analog` 삭제(엔진 기본 선화) · 옛 PNG 경고 · `--alpha-out` 명령 · `RUN_ORDER_1022.md` 4단계 문구.
+
 ## [2026-10-17 · 81] team3 → main 머지(빨리 감기)
 - **확인 후 실행(사용자 "단언할 수 있으면 진행"):** `origin/main` 이 `origin/team3` 의 조상 → 빨리 감기 · 바뀐 23파일 모두 `team3/` 안(1 · 2 · 4팀 0 — 한글 경로 따옴표 때문에 처음 17로 잘못 셌다가 `core.quotepath=false` 로 0 확인) · 공용 입력 자리 `input/storyboard/` 변화 없음 · 엔진(`app.py`) · 사운드(`paths.py`)는 `input/storyboard/` 만 읽어 테스트 판 폴더가 끼지 않음.
 - **실행:** `git push origin origin/team3:refs/heads/main` → `dc213a0..fef6e68`. 새 main checkout(임시 worktree)에서 `py_compile`(run_pipeline · run_team3 · app · make_prompts · generate_sound) · `--help` 진입 OK → 삭제.
