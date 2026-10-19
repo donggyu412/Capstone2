@@ -1,22 +1,23 @@
 """Run DreamModel and GridModel, then composite their layers."""
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
 TEAM4_DIR = Path(__file__).resolve().parent
-REPO_ROOT = TEAM4_DIR.parent
 OUTPUT_DIR = TEAM4_DIR / "output"
 SOUND_DIR = TEAM4_DIR / "input" / "sound"
+BACKGROUND_DIR = TEAM4_DIR / "input" / "background"
 GRID_SCRIPT = TEAM4_DIR / "Grid_Model" / "GridModel" / "pythonimagemodel.py"
 MODEL_PYTHON = TEAM4_DIR / "DreamModel" / ".venv" / "Scripts" / "python.exe"
 PYTHON_EXE = MODEL_PYTHON if MODEL_PYTHON.exists() else Path(sys.executable)
-# render_background_ca.py requires a film ID; the integrated run uses the one
-# selected Team4 background setup (film 1) without exposing scenario selection.
 FILM = 1
+SUPPORTED_EMOTIONS = {"기쁨", "슬픔", "분노", "공포", "놀람", "혐오", "중립"}
 
 
 def find_music() -> Path:
@@ -28,6 +29,20 @@ def find_music() -> Path:
     if len(tracks) > 1:
         print(f"[main] 여러 음악 중 첫 파일 사용: {tracks[0].name}")
     return tracks[0]
+
+
+def find_background_video() -> Path:
+    supported = {".mp4", ".mov", ".mkv", ".avi", ".webm"}
+    videos = sorted(p for p in BACKGROUND_DIR.iterdir()
+                    if p.is_file() and p.suffix.lower() in supported)
+    if not videos:
+        raise FileNotFoundError(f"input/background에 배경 영상이 없습니다: {BACKGROUND_DIR}")
+    if len(videos) > 1:
+        names = ", ".join(p.name for p in videos)
+        raise RuntimeError(
+            f"input/background에는 배경 영상 하나만 두어야 합니다. 현재 파일: {names}"
+        )
+    return videos[0]
 
 
 def find_ffmpeg() -> str:
@@ -64,32 +79,92 @@ def check_model_environment() -> None:
         )
 
 
+def make_dreammodel_storyboard(video_path: Path, target_dir: Path) -> None:
+    """Sample four video frames and pair them with the supplied scene metadata."""
+    import cv2
+
+    for metadata_name in ("scenes.json", "dream_scenes.json"):
+        metadata = BACKGROUND_DIR / metadata_name
+        if not metadata.is_file():
+            raise FileNotFoundError(
+                f"배경 영상과 함께 장면 설정 파일을 넣어 주세요: {metadata}\n"
+                "scenes.json에는 4개 장면의 emotion을 기쁨/슬픔/분노/공포/놀람/혐오/중립 중 하나로 지정해야 합니다."
+            )
+        shutil.copy2(metadata, target_dir / metadata_name)
+
+    scenes_path = target_dir / "scenes.json"
+    try:
+        scenes_data = json.loads(scenes_path.read_text(encoding="utf-8-sig"))
+        scenes = scenes_data["scenes"]
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ValueError(f"scenes.json 형식이 올바르지 않습니다: {scenes_path}") from exc
+    if not isinstance(scenes, list) or len(scenes) != 4:
+        raise ValueError("scenes.json에는 배경 영상의 네 장면에 대응하는 scenes 항목 4개가 필요합니다.")
+    invalid_emotions = sorted({
+        str(scene.get("emotion", "<누락>")) if isinstance(scene, dict) else "<장면 형식 오류>"
+        for scene in scenes
+        if not isinstance(scene, dict) or scene.get("emotion") not in SUPPORTED_EMOTIONS
+    })
+    if invalid_emotions:
+        accepted = ", ".join(sorted(SUPPORTED_EMOTIONS))
+        raise ValueError(
+            f"scenes.json의 감정 라벨이 올바르지 않습니다: {', '.join(invalid_emotions)}\n"
+            f"사용 가능한 감정: {accepted}"
+        )
+
+    capture = cv2.VideoCapture(str(video_path))
+    if not capture.isOpened():
+        raise RuntimeError(f"배경 영상을 열 수 없습니다: {video_path}")
+    try:
+        frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        if frame_count < 4:
+            raise RuntimeError(f"배경 영상의 프레임 수가 부족합니다: {frame_count}")
+        for index, fraction in enumerate((0.10, 0.35, 0.65, 0.90), start=1):
+            frame_number = min(frame_count - 1, int(frame_count * fraction))
+            capture.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+            ok, frame = capture.read()
+            if not ok or frame is None:
+                raise RuntimeError(f"배경 영상에서 장면 프레임을 읽지 못했습니다: {frame_number}")
+            output_path = target_dir / f"scene_{index:02d}.png"
+            if not cv2.imwrite(str(output_path), frame):
+                raise RuntimeError(f"DreamModel 입력 프레임을 저장하지 못했습니다: {output_path}")
+    finally:
+        capture.release()
+
+
 def main() -> None:
     check_model_environment()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    background_video = find_background_video()
     music = find_music()
     background_layer = OUTPUT_DIR / f"{FILM}번_꿈재현_배경_v3_사운드.mp4"
     object_video = OUTPUT_DIR / "gridmodel_object_ca.mp4"
     final_video = OUTPUT_DIR / "team4_output.mp4"
 
-    # DreamModel's existing CLI supports custom sound and output directory.
-    run([
-        str(PYTHON_EXE), "-m", "team4.DreamModel.tools.render_background_ca",
-        "--film", str(FILM), "--sound", str(music),
-        "--out-dir", str(OUTPUT_DIR),
-    ], cwd=REPO_ROOT)
+    # DreamModel currently consumes four image plates plus scene metadata.
+    # Sample those plates from the one supplied MP4, then call its existing CLI.
+    with tempfile.TemporaryDirectory(prefix="dreammodel_storyboard_", dir=OUTPUT_DIR) as temp_dir:
+        storyboard_dir = Path(temp_dir)
+        make_dreammodel_storyboard(background_video, storyboard_dir)
+        run([
+            str(PYTHON_EXE), "-m", "team4.DreamModel.tools.render_background_ca",
+            "--from-input", "--scenario-dir", str(storyboard_dir),
+            "--film", str(FILM), "--sound", str(music),
+            "--out-dir", str(OUTPUT_DIR),
+        ], cwd=TEAM4_DIR.parent)
+
+    if not background_layer.exists():
+        raise FileNotFoundError(f"DreamModel 배경 결과가 없습니다: {background_layer}")
 
     # GridModel reads team4/input/object/object_line_1.mp4 and writes its layer
     # into team4/output via its local config.py.
     run([str(PYTHON_EXE), str(GRID_SCRIPT)], cwd=TEAM4_DIR)
 
-    if not background_layer.exists():
-        raise FileNotFoundError(f"DreamModel 배경 결과가 없습니다: {background_layer}")
     if not object_video.exists():
         raise FileNotFoundError(f"GridModel 오브제 결과가 없습니다: {object_video}")
 
     ffmpeg = find_ffmpeg()
-    # GridModel's black canvas is keyed out, leaving the object over DreamModel.
+    # GridModel's black canvas is keyed out over DreamModel's generated background.
     filter_graph = (
         "[1:v]colorkey=0x000000:0.12:0.06[object];"
         "[0:v][object]overlay=shortest=1,format=yuv420p[video]"
