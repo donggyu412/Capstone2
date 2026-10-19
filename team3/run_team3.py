@@ -31,6 +31,8 @@ run_team3.py — 2팀 꿈 스토리보드 → 3팀(배경 · 오브제 · 사운
   python team3/run_team3.py --serve                                  # 사진까지 있으면 배경 엔진 실행
   python team3/run_team3.py --sound                                  # 사진 뒤 1팀 사운드(아피찻퐁 · 약 3분) — --record 와 같이 써도 됨
   python team3/run_team3.py --sound-only                             # 지금 공용 자리 판으로 사운드만 다시(오브제 새 판이 나온 뒤)
+  python team3/run_team3.py --object --quick                         # (오브제 GPU PC) 판 확인 → PNG 생성 → 40초 시험 렌더(10-19)
+  python team3/run_team3.py --object --alpha                         # 실제 5분 오브제 영상 + 4팀 합성용 투명도판
   python team3/run_team3.py --record                                 # START 없이 5분 배경 + 배경판 자동 기록(10-17 · 40~50분)
   python team3/run_team3.py --storyboard <다른 json>                  # 2팀 출력 대신 다른 판으로
   python team3/run_team3.py --mux 통합.mp4 dream_sound.wav            # 최종 영상(소리 붙이기)
@@ -423,6 +425,8 @@ def handoff():
     else:
         print('  배경: %s · %s' % (rel(bg[0]), rel(bg[1])))
     print('\n  [B 오브제 · 오브제 담당 PC] (교수님 10/15: 선화 · 어린아이 로봇이 그리는 과정 = 엔진 기본)')
+    print('    한 줄: python team3/run_team3.py --object   (판 확인 → PNG 생성 → 렌더 · 시험은 --quick · 4팀용 투명도는 --alpha)')
+    print('    손으로 할 때:')
     print('    cd team3/object')
     print('    python generate_objects_comfy.py --story %s' % story)
     print('    ※ 오브제 PNG 는 반드시 이 대본으로 새로 만든다 — 엔진은 이름이 안 맞아도 같은 번호의 옛 PNG 를 그대로 쓴다')
@@ -483,6 +487,87 @@ def sound(style='apichatpong', objects=None):
     wav = SOUND / 'output' / 'dream_sound.wav'
     print('  사운드: %s · %.0f초 걸림' % (rel(wav), time.time() - t0))
     return wav
+
+
+# ──────────────────────────────────────────────────────────
+# 4-3) 오브제 — 같은 판 확인 → (다르면) PNG 생성 → 오브제 엔진 렌더 (10-19 · 오브제 담당 GPU PC)
+# ──────────────────────────────────────────────────────────
+OBJ = TEAM3 / 'object'
+OBJ_RESULT = OBJ / 'output'                    # 렌더 결과 · 옛 판 보관 (루트 .gitignore 의 output/ — 깃 제외)
+COMFY = 'http://127.0.0.1:8188'
+
+
+def comfy_up(url=COMFY):
+    import urllib.request
+    try:
+        urllib.request.urlopen(url + '/system_stats', timeout=3)
+        return True
+    except Exception:
+        return False
+
+
+def objects_step(quick=False, alpha=False, generate=True, objects_dir=None):
+    """공용 자리 대본과 같은 판 오브제로 오브제 영상을 만든다.
+       오브제 엔진은 이름이 안 맞아도 같은 번호의 옛 PNG 를 쓰므로, 여기서 판을 먼저 확인하고 다르면 렌더하지 않는다."""
+    banner('4-3) 오브제 — 판 확인 → PNG → 렌더%s' % (' (빠른 시험: 장면 10초 · 절반 해상도)' if quick else ''))
+    story = SLOT / 'dream_scenes.json'
+    rows = load_storyboard(story)
+    obj_dir = Path(objects_dir) if objects_dir else OBJ_OUT
+    env = dict(os.environ, PYTHONUTF8='1', PYTHONIOENCODING='utf-8')
+    stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    problems, _ = check_objects(rows, obj_dir)
+    if problems:
+        print('  지금 오브제는 이 대본과 다른 판입니다 — ' + problems[0].split('\n')[0])
+        if objects_dir or not generate:
+            sys.exit('[중단] 같은 판 오브제가 없습니다 (옛 판으로는 렌더하지 않음):\n    ' + '\n    '.join(problems[:4]))
+        if not comfy_up():
+            sys.exit('[중단] ComfyUI(%s)가 꺼져 있습니다 → run_nvidia_gpu.bat 으로 켠 뒤 다시 실행하세요.\n'
+                     '       (PNG 생성은 GPU · LoRA 가 있는 오브제 담당 PC 에서만 됩니다)' % COMFY)
+        keep = OBJ_RESULT / 'objects_archive' / stamp       # 지우지 않고 옮겨 둔다 (깃에 있던 옛 판은 git 으로도 되살릴 수 있음)
+        keep.mkdir(parents=True)
+        for name in ('output_objects', 'output_objects_raw'):
+            if (OBJ / name).exists():
+                shutil.move(str(OBJ / name), str(keep / name))
+        print('  옛 판 오브제 보관 → %s' % rel(keep))
+        print('  PNG 생성 (ComfyUI · 오브제 하나에 수십 초)')
+        sys.stdout.flush()
+        r = subprocess.run([sys.executable, 'generate_objects_comfy.py', '--story', str(story), '--out', 'output_objects'],
+                           cwd=str(OBJ), env=env)
+        problems, _ = check_objects(rows, obj_dir)          # 생성기는 연결이 끊겨도 0 으로 끝날 수 있어 다시 확인
+        if r.returncode != 0 or problems:
+            for name in ('output_objects', 'output_objects_raw'):     # 실패하면 원래대로 — 반쯤 만든 것은 보관 폴더로
+                if (OBJ / name).exists():
+                    shutil.move(str(OBJ / name), str(keep / (name + '_failed')))
+                if (keep / name).exists():
+                    shutil.move(str(keep / name), str(OBJ / name))
+            print('  옛 판 오브제를 제자리로 돌려놓음 · 반쯤 만든 것은 %s' % rel(keep))
+            sys.exit('[중단] PNG 생성이 끝나지 않았습니다:\n    ' + '\n    '.join(problems[:4] or ['종료 코드 %d' % r.returncode]))
+    print('  오브제: %s (대본과 같은 판)' % rel(obj_dir))
+
+    out_dir = OBJ_RESULT / ('render_%s%s' % (stamp, '_quick' if quick else ''))
+    base = [sys.executable, str(OBJ / 'object_engine.py'), '--story', str(story), '--objects', str(obj_dir)]
+    if quick:
+        base += ['--scene-sec', '10', '--scale', '0.5']
+    bg = latest_background()
+    jobs = []
+    if bg:
+        jobs.append(('배경 위 통합', base + ['--bg', str(bg[0]), '--bg-json', str(bg[1]), '--out', str(out_dir / 'dream_integrated.mp4')]))
+    else:
+        print('  이 대본으로 찍은 배경 영상이 없어 오브제만 렌더합니다 (배경은 --record 로 기록)')
+        jobs.append(('오브제만', base + ['--out', str(out_dir / 'object_line.mp4')]))
+    if alpha:
+        jobs.append(('오브제만 + 투명도(4팀 합성용)', base + ['--alpha-out', '--out', str(out_dir / 'object_line_alpha.mp4')]))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for label, cmd in jobs:
+        print('\n  ▶ %s' % label)
+        sys.stdout.flush()
+        t0 = time.time()
+        if subprocess.run(cmd, cwd=str(OBJ), env=env).returncode != 0:
+            sys.exit('[중단] 오브제 엔진 오류 (%s)' % label)
+        print('  %s · %.0f초 걸림' % (label, time.time() - t0))
+    print('\n  결과: %s' % rel(out_dir))
+    print('  다음: python team3/run_team3.py --sound-only  →  --mux <영상> team3/sound/output/dream_sound.wav  →  --to-team4 --check')
+    return out_dir
 
 
 # ──────────────────────────────────────────────────────────
@@ -721,6 +806,12 @@ def main():
                     help='받기 · 사진을 거치지 않고 지금 공용 자리 판으로 사운드만 다시 만든다')
     ap.add_argument('--sound-style', default='apichatpong',
                     help='사운드 스타일 (기본 apichatpong — 교수님 10/15 · 그 밖에 default · apichatpong_deep · apichatpong_synth)')
+    ap.add_argument('--object', action='store_true',
+                    help='오브제 단계만: 공용 자리 대본과 같은 판인지 확인 → 다르면 ComfyUI 로 PNG 생성 → 오브제 엔진 렌더 '
+                         '(오브제 담당 GPU PC · 결과 team3/object/output/render_<시각>/)')
+    ap.add_argument('--quick', action='store_true', help='--object 와 함께: 빠른 시험 (장면 10초 · 절반 해상도 = 40초 영상)')
+    ap.add_argument('--alpha', action='store_true', help='--object 와 함께: 4팀 합성용 오브제만 + 투명도 영상도')
+    ap.add_argument('--no-gen', action='store_true', help='--object 와 함께: PNG 를 새로 만들지 않음 (다른 판이면 멈춤)')
     ap.add_argument('--mux', nargs=2, metavar=('VIDEO', 'AUDIO'), help='최종 영상: 영상에 소리만 붙인다')
     ap.add_argument('--out', help='--mux 결과 파일 (기본: <영상>_sound.mp4)')
     ap.add_argument('--to-team4', action='store_true', help='4팀 입력 자리(team4/input)에 배경판 · 오브제를 넣는다')
@@ -733,6 +824,9 @@ def main():
 
     if a.mux:
         mux(a.mux[0], a.mux[1], a.out)
+        return
+    if a.object:                             # 받기를 거치지 않는다 — 공용 자리 판 그대로
+        objects_step(a.quick, a.alpha, not a.no_gen, a.objects)
         return
     if a.sound_only:                         # 받기를 거치지 않는다 — 공용 자리 판 그대로
         sound(a.sound_style, a.objects)
