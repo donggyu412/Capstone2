@@ -21,7 +21,8 @@ run_team3.py — 2팀 꿈 스토리보드 → 3팀(배경 · 오브제 · 사운
   7) 4팀      --to-team4 → 배경판 4장 · scenes.json · dream_scenes.json · 오브제 PNG · objects.json 을
               4팀 입력 자리 team4/input/(storyboard · objects)에 넣는다 (10-14 · 4팀 코드는 고치지 않음).
               10-19: 이 판의 소리(dream_sound.wav) → team4/input/sound/ · 오브제만 영상(object_line_alpha.mp4)
-              → team4/input/object/object_line_1.mp4 도 넣는다 (4팀 main.py 가 읽는 자리 · 없으면 그대로 두고 알림).
+              → team4/input/object/object_line_1.mp4 · 배경만 5분 영상(--record) → team4/input/background/dream_background.mp4
+              도 넣는다 (4팀은 배경 · 오브제를 따로 받는다 · 없으면 그대로 두고 알림).
               4팀 DreamModel(주력 · 10-15 GridModel 삭제)은 대본의 오브제 이름과 오브제 파일이 짝이 맞아야 돌므로,
               배경판 · 오브제가 지금 대본과 같은 판일 때만 넣는다(아니면 아무것도 바꾸지 않고 멈춘다).
 
@@ -732,8 +733,8 @@ def latest_object_video(story_t):
     return None
 
 
-def team4_media(story_path, sound_path=None, object_video=None):
-    """4팀 main.py 가 읽는 소리 · 오브제 영상을 고른다 — (소리, 오브제 영상, 알림 목록).
+def team4_media(story_path, sound_path=None, object_video=None, bg_video=None):
+    """4팀 main.py 가 읽는 소리 · 오브제 영상 · 배경 영상을 고른다 — (소리, 오브제 영상, 배경 영상, 알림 목록).
     직접 준 파일은 그대로 쓰고, 기본값은 이 대본 뒤에 만든 것만 쓴다(옛 판이 섞이지 않게)."""
     story_t = Path(story_path).stat().st_mtime
     notes = []
@@ -755,11 +756,21 @@ def team4_media(story_path, sound_path=None, object_video=None):
         if obj is None:
             notes.append('오브제 영상: 이 대본으로 렌더한 object_line_alpha.mp4 가 없어 4팀 오브제 영상 자리는 그대로 둡니다 '
                          '(GPU PC 에서 --object --alpha 뒤 다시 · 다른 PC 결과면 --object-video 로 지정)')
-    return snd, obj, notes
+    if bg_video:
+        bgv = Path(bg_video)
+        if not bgv.is_file():
+            sys.exit('[중단] 배경 영상이 없습니다: ' + str(bgv))
+    else:
+        found = latest_background()          # --record 로 찍은 이 판의 5분 배경 영상 (배경만)
+        bgv = found[0] if found and found[0].suffix.lower() == '.mp4' else None
+        if bgv is None:
+            notes.append('배경 영상: 이 대본으로 기록한 배경 mp4 가 없어 4팀 배경 영상 자리는 그대로 둡니다 '
+                         '(--record 뒤 다시 · 다른 곳 결과면 --bg-video 로 지정)')
+    return snd, obj, bgv, notes
 
 
 def to_team4(story_path, plates_dir=None, objects_dir=None, team4_input=None, check_only=False, video=None,
-             sound_path=None, object_video=None):
+             sound_path=None, object_video=None, bg_video=None):
     banner('7) 4팀 — 입력 자리 채우기')
     story_path = Path(story_path)
     if not story_path.exists():
@@ -772,7 +783,8 @@ def to_team4(story_path, plates_dir=None, objects_dir=None, team4_input=None, ch
     print('  배경판: %s' % (rel(plates) if plates else '없음'))
     print('  오브제: %s' % rel(objects))
     print('  통합 영상: %s' % (video or '없음 (--video 로 5분 통합 영상도 넘길 수 있다)'))
-    snd, obj_video, media_notes = team4_media(story_path, sound_path, object_video)
+    snd, obj_video, bg_video, media_notes = team4_media(story_path, sound_path, object_video, bg_video)
+    print('  배경 영상: %s' % (rel(bg_video) if bg_video else '없음'))
     print('  소리  : %s' % (rel(snd) if snd else '없음'))
     print('  오브제 영상: %s' % (rel(obj_video) if obj_video else '없음'))
     print('  넣을 곳: %s' % rel(dst))
@@ -851,7 +863,12 @@ def to_team4(story_path, plates_dir=None, objects_dir=None, team4_input=None, ch
         od.mkdir(exist_ok=True)
         shutil.copyfile(obj_video, od / 'object_line_1.mp4')
         print('  저장: %s (오브제 영상)' % rel(od / 'object_line_1.mp4'))
-    print('  → 4팀: cd team4 → py .\\main.py  (배경은 4팀 main.py 가 input/storyboard 를 읽게 바뀐 뒤 이 판으로 나온다)')
+    if bg_video:                             # 4팀은 배경 · 오브제를 따로 받는다 (10-19 4팀 요청 · 배경만 5분 영상)
+        bd = dst / 'background'
+        bd.mkdir(exist_ok=True)
+        shutil.copyfile(bg_video, bd / 'dream_background.mp4')
+        print('  저장: %s (배경 영상)' % rel(bd / 'dream_background.mp4'))
+    print('  → 4팀: cd team4 → py .\\main.py')
 
 
 def main():
@@ -888,6 +905,7 @@ def main():
     ap.add_argument('--sound-file', help='--to-team4 와 함께: 4팀 소리 (기본: 이 판의 team3/sound/output/dream_sound.wav)')
     ap.add_argument('--object-video', help='--to-team4 와 함께: 4팀 오브제 영상 '
                                            '(기본: 이 판의 team3/object/output/render_*/object_line_alpha.mp4)')
+    ap.add_argument('--bg-video', help='--to-team4 와 함께: 4팀 배경 영상 (기본: 이 판의 --record 배경 mp4)')
     a = ap.parse_args()
 
     if a.mux:
@@ -901,7 +919,7 @@ def main():
         return
     if a.to_team4:                           # 받기를 거치지 않는다 — 공용 자리를 2팀 새 출력으로 바꾸지 않게
         to_team4(a.storyboard or SLOT / 'dream_scenes.json', a.plates, a.objects, a.team4_dir, a.check, a.video,
-                 a.sound_file, a.object_video)
+                 a.sound_file, a.object_video, a.bg_video)
         return
     scenes = receive(a.storyboard or DEFAULT_STORY)
     prompts()
