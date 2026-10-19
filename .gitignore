@@ -6,3 +6,5 @@ team2/output/
 *.pyc
 testVideo/
 .venv/
+# 3팀 --to-team4 가 실행할 때마다 채우는 배경 영상 (5분 · 100MB 넘을 수 있음 · 레포에 올리지 않음)
+team4/input/background/dream_background.mp4

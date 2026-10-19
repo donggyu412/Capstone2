@@ -23,6 +23,8 @@ run_team3.py — 2팀 꿈 스토리보드 → 3팀(배경 · 오브제 · 사운
               10-19: 이 판의 소리(dream_sound.wav) → team4/input/sound/ · 오브제만 영상(object_line_alpha.mp4)
               → team4/input/object/object_line_1.mp4 · 배경만 5분 영상(--record) → team4/input/background/dream_background.mp4
               도 넣는다 (4팀은 배경 · 오브제를 따로 받는다 · 없으면 그대로 두고 알림).
+              10-20: 배경 영상과 함께 scenes.json · dream_scenes.json 도 team4/input/background/ 에 넣고
+              (4팀은 감정을 여기서 읽는다) 그 폴더의 다른 영상은 지운다 (4팀은 영상 하나만 읽는다).
               4팀 DreamModel(주력 · 10-15 GridModel 삭제)은 대본의 오브제 이름과 오브제 파일이 짝이 맞아야 돌므로,
               배경판 · 오브제가 지금 대본과 같은 판일 때만 넣는다(아니면 아무것도 바꾸지 않고 멈춘다).
 
@@ -718,6 +720,7 @@ def check_video(video):
 
 
 AUDIO_EXT = ('.wav', '.mp3', '.m4a', '.aac', '.flac', '.ogg')   # 4팀 main.py find_music 과 같게
+VIDEO_EXT = ('.mp4', '.mov', '.mkv', '.avi', '.webm')           # 4팀 main.py find_background_video 와 같게
 
 
 def latest_object_video(story_t):
@@ -866,8 +869,16 @@ def to_team4(story_path, plates_dir=None, objects_dir=None, team4_input=None, ch
     if bg_video:                             # 4팀은 배경 · 오브제를 따로 받는다 (10-19 4팀 요청 · 배경만 5분 영상)
         bd = dst / 'background'
         bd.mkdir(exist_ok=True)
+        # 4팀 main.py 는 이 폴더에 영상이 하나만 있어야 돈다 → 다른 영상은 지운다 (10-20 4팀 요청)
+        for p in list(bd.iterdir()):
+            if p.is_file() and p.suffix.lower() in VIDEO_EXT and p.name != 'dream_background.mp4':
+                p.unlink()
+                print('  지움: %s (4팀은 배경 영상 하나만 읽는다)' % rel(p))
         shutil.copyfile(bg_video, bd / 'dream_background.mp4')
-        print('  저장: %s (배경 영상)' % rel(bd / 'dream_background.mp4'))
+        # 4팀은 영상에서 장면 4장을 뽑고, 감정은 같은 폴더의 scenes.json · dream_scenes.json 에서 읽는다 (10-20)
+        shutil.copyfile(plates / 'scenes.json', bd / 'scenes.json')
+        shutil.copyfile(story_path, bd / 'dream_scenes.json')
+        print('  저장: %s (배경 영상 · scenes.json · dream_scenes.json)' % rel(bd / 'dream_background.mp4'))
     print('  → 4팀: cd team4 → py .\\main.py')
 
 

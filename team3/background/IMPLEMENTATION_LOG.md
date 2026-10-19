@@ -177,6 +177,11 @@ output/                  실행하면 자동 생성 — 장면별 배경판·표
 > ※ **2026-09-25 폴더 개명:** `260917_dummy/` → `dummy/`. 아래 09-25 이전 기록에 나오는
 >   `260917_dummy/` 는 현재의 `dummy/` 와 같은 폴더다. 당시 기록이므로 이름을 고치지 않고 둔다.
 
+## [2026-10-20 · 84] 4팀 PR #7 검토 · `--to-team4` 배경 폴더에 json 2개 · 옛 4팀 1번 영상 삭제
+- **4팀 PR #7(`e980fa5` · `team4/main.py` + `input/background/` 시험용 json 2):** `input/background/`의 영상 하나에서 장면 4장(10·35·65·90%)을 뽑고, 감정은 같은 폴더 `scenes.json`·`dream_scenes.json`(4장면 · 7감정)에서 읽는다. 소리·오브제는 PR #6부터 `input/sound`·`input/object` 그대로. main 충돌 없음 · 다른 팀 파일 안 건드림 · `.venv` 없음.
+- **3팀 맞춤:** `--to-team4` 가 배경 영상과 함께 `scenes.json`(배경판)·`dream_scenes.json`(대본)을 `team4/input/background/` 에도 넣고, 그 폴더의 다른 영상은 지운다(4팀은 영상이 2개면 멈춤). 4팀 요청대로 옛 `1번_꿈재현_배경_사운드.mp4`(67MB) 레포에서 삭제 · `dream_background.mp4` 는 `.gitignore`(5분 영상 100MB 넘을 수 있음).
+- **시험(임시 폴더):** 짝 맞는 연습 판 → 옛 영상 지움 · 영상+json 2 저장 ✅ → 4팀 새 `main.py` 의 `find_background_video` · `make_dreammodel_storyboard` 로 읽기 → scene_01~04.png + json 2 ✅. DreamModel 5분 렌더는 미시험(GPU 없음 · 4팀 PC).
+
 ## [2026-10-19 · 83] 오브제 단계 `run_team3.py --object` · 담당 PC 시험 안내(`AUTO_TEST.md`)
 - **추가:** `--object` = 공용 자리 대본과 같은 판인지(`check_objects`) → 다르면 ComfyUI(127.0.0.1:8188) 켜져 있을 때만 옛 판을 `team3/object/output/objects_archive/<시각>/` 로 옮기고 `generate_objects_comfy.py` → 다시 판 확인(생성기는 연결 실패에도 0 으로 끝남) → 실패면 옛 판 되돌림 → `object_engine.py`(배경 영상 있으면 통합 · 없으면 오브제만) → `team3/object/output/render_<시각>/`(깃 제외). `--quick`(장면 10초 · 절반) · `--alpha`(투명도판) · `--no-gen`.
 - **시험(이 노트북 · 임시 worktree):** ComfyUI 꺼짐 → 멈춤 · 파일 그대로 ✅ / `--no-gen` + 다른 판 → 멈춤 ✅ / 가짜 ComfyUI(연결 실패) → 보관 후 되돌림 · git 깨끗 ✅ / 같은 판(시험용 이름 바꾼 PNG) `--quick --alpha` → 40초 오브제 + 투명도판 3분 55초 ✅. 실제 PNG 생성은 미시험(GPU 없음) → 오브제 담당이 `AUTO_TEST.md` 대로.
