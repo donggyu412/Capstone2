@@ -177,6 +177,12 @@ output/                  실행하면 자동 생성 — 장면별 배경판·표
 > ※ **2026-09-25 폴더 개명:** `260917_dummy/` → `dummy/`. 아래 09-25 이전 기록에 나오는
 >   `260917_dummy/` 는 현재의 `dummy/` 와 같은 폴더다. 당시 기록이므로 이름을 고치지 않고 둔다.
 
+## [2026-10-20 · 85] 1팀 → 4팀 한 줄 실행 `run_all.py` (저장소 루트)
+- 이미 따로 시험한 명령을 순서대로 부른다(각 팀 코드 안 고침): `run_pipeline.py` → `--record` → `--object --alpha` → `--sound-only` → `--mux` + `--to-team4 --video` → `team4/main.py`(4팀 .venv 있으면 그 Python).
+- 시작 전 검사: 1팀 입력 · Claude 키 · OpenAI 키 · ComfyUI(8188) · 4팀 torch/cv2/numpy (돌릴 단계에 필요한 것만). `--check` · `--from N` · `--until N` · `--quick`(배경 장면당 5초 · 오브제 40초 · --video 생략).
+- 5단계 뒤 4팀 입력 5개(배경 영상 · json 2 · 오브제 영상 · 소리)가 이번 판으로 바뀌었는지 확인 → 아니면 4팀 단계 전에 멈춤(`--to-team4` 는 없는 것을 알림만 하므로).
+- 시험(이 노트북): `--check` → ComfyUI 꺼짐만 ❌ · 시작 안 함 ✅ / `--from 5 --until 5` → 오브제 렌더 없음 → "--from 3" 안내 ✅ / `--from 5 --until 3` 오류 ✅. 실제 끝까지는 GPU PC 에서.
+
 ## [2026-10-20 · 84] 4팀 PR #7 검토 · `--to-team4` 배경 폴더에 json 2개 · 옛 4팀 1번 영상 삭제
 - **4팀 PR #7(`e980fa5` · `team4/main.py` + `input/background/` 시험용 json 2):** `input/background/`의 영상 하나에서 장면 4장(10·35·65·90%)을 뽑고, 감정은 같은 폴더 `scenes.json`·`dream_scenes.json`(4장면 · 7감정)에서 읽는다. 소리·오브제는 PR #6부터 `input/sound`·`input/object` 그대로. main 충돌 없음 · 다른 팀 파일 안 건드림 · `.venv` 없음.
 - **3팀 맞춤:** `--to-team4` 가 배경 영상과 함께 `scenes.json`(배경판)·`dream_scenes.json`(대본)을 `team4/input/background/` 에도 넣고, 그 폴더의 다른 영상은 지운다(4팀은 영상이 2개면 멈춤). 4팀 요청대로 옛 `1번_꿈재현_배경_사운드.mp4`(67MB) 레포에서 삭제 · `dream_background.mp4` 는 `.gitignore`(5분 영상 100MB 넘을 수 있음).

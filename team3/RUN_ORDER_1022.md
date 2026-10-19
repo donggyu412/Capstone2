@@ -3,6 +3,15 @@
 > 저장소 루트에서 실행. 시간은 10-17 이 노트북(i5 · 8GB · GPU 없음)에서 잰 값.
 > 🙋 = 사람 손 / 다른 PC 가 필요한 단계. 나머지는 명령 한 줄.
 
+## ▶ 한 줄 실행 (10-20 · `run_all.py` · 오브제 생성이 되는 PC)
+```
+python run_all.py --check --emotion-csv <감정 CSV>   # 준비 상태만 검사 (키 · ComfyUI · 4팀 환경)
+python run_all.py --emotion-csv <감정 CSV>           # 1팀 → 4팀 끝까지 → team4/output/team4_output.mp4
+python run_all.py --from 3                          # 멈춘 단계부터 다시
+python run_all.py --emotion-csv <감정 CSV> --quick --until 5   # 빠른 시험 (4팀 넘기기까지)
+```
+아래 표 1 → 3 → 4(오브제) → 5(사운드) → 6 → 7 → 8 을 그대로 부른다. 각 팀 코드는 안 고침. 4팀 입력 5개가 이번 판으로 안 바뀌면 4팀 단계 전에 멈춘다.
+
 | # | 단계 | 명령 | 어디서 | 걸린 시간 |
 |---|---|---|---|---|
 | 1 | 1팀 감정 → 2팀 꿈 이야기 4장면 | `python run_pipeline.py --emotion-csv <감정 CSV>` (실제 촬영이면 `--sources 0 1 --narration ...`) | 진행 PC | 약 5분 (Claude API) |
