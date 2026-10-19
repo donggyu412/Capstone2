@@ -1,0 +1,298 @@
+{
+  "version": "v3_plate_ca_linked",
+  "film": 3,
+  "scenario": "3_공포공포중립중립",
+  "sound_source": "dream_final_3.mp4",
+  "file": "C:\\Users\\carro\\.gemini\\antigravity\\scratch\\dream_background_v2\\output_v3\\3번_꿈재현_배경_v3_사운드.mp4",
+  "silent_file": "C:\\Users\\carro\\.gemini\\antigravity\\scratch\\dream_background_v2\\output_v3\\3번_꿈재현_배경_v3_무음.mp4",
+  "width": 1920,
+  "height": 1080,
+  "fps": 30,
+  "frames": 9000,
+  "duration_seconds": 300.0,
+  "bytes": 652991791,
+  "gigabytes_decimal": 0.653,
+  "memory_ca": [
+    {
+      "scene": 1,
+      "sparks": 40194,
+      "forgets": 11173
+    },
+    {
+      "scene": 2,
+      "sparks": 242036,
+      "forgets": 10543
+    },
+    {
+      "scene": 3,
+      "sparks": 247116,
+      "forgets": 18961
+    },
+    {
+      "scene": 4,
+      "sparks": 293496,
+      "forgets": 20637
+    }
+  ],
+  "field_evolution": [
+    {
+      "scene": 1,
+      "generations": [
+        {
+          "seconds": 0.0,
+          "fitness": 0.9218,
+          "novelty": 0.32,
+          "survivor_distance": 1.1731,
+          "affect_memory": 0.2005
+        },
+        {
+          "seconds": 11.5,
+          "fitness": 0.9436,
+          "novelty": 0.1366,
+          "survivor_distance": 1.0924,
+          "affect_memory": 0.3588
+        },
+        {
+          "seconds": 23.0,
+          "fitness": 0.847,
+          "novelty": 0.2495,
+          "survivor_distance": 3.6089,
+          "affect_memory": 0.4738
+        },
+        {
+          "seconds": 34.5,
+          "fitness": 0.9029,
+          "novelty": 0.1287,
+          "survivor_distance": 1.3455,
+          "affect_memory": 0.5546
+        },
+        {
+          "seconds": 46.0,
+          "fitness": 0.9249,
+          "novelty": 0.1301,
+          "survivor_distance": 2.8145,
+          "affect_memory": 0.601
+        },
+        {
+          "seconds": 57.5,
+          "fitness": 0.7294,
+          "novelty": 0.3704,
+          "survivor_distance": 1.9334,
+          "affect_memory": 0.6258
+        },
+        {
+          "seconds": 69.0,
+          "fitness": 0.8773,
+          "novelty": 0.2451,
+          "survivor_distance": 1.4287,
+          "affect_memory": 0.6421
+        },
+        {
+          "seconds": 80.5,
+          "fitness": 0.7542,
+          "novelty": 0.3302,
+          "survivor_distance": 2.2706,
+          "affect_memory": 0.6473
+        }
+      ]
+    },
+    {
+      "scene": 2,
+      "generations": [
+        {
+          "seconds": 68.0,
+          "fitness": 0.9284,
+          "novelty": 0.32,
+          "survivor_distance": 1.6345,
+          "affect_memory": 0.2006
+        },
+        {
+          "seconds": 79.5,
+          "fitness": 0.8561,
+          "novelty": 0.236,
+          "survivor_distance": 1.2673,
+          "affect_memory": 0.3506
+        },
+        {
+          "seconds": 91.0,
+          "fitness": 0.7727,
+          "novelty": 0.3362,
+          "survivor_distance": 1.1741,
+          "affect_memory": 0.45
+        },
+        {
+          "seconds": 102.5,
+          "fitness": 0.856,
+          "novelty": 0.227,
+          "survivor_distance": 2.194,
+          "affect_memory": 0.5197
+        },
+        {
+          "seconds": 114.0,
+          "fitness": 0.8531,
+          "novelty": 0.236,
+          "survivor_distance": 1.4683,
+          "affect_memory": 0.5643
+        },
+        {
+          "seconds": 125.5,
+          "fitness": 0.8842,
+          "novelty": 0.1987,
+          "survivor_distance": 2.4641,
+          "affect_memory": 0.5838
+        },
+        {
+          "seconds": 137.0,
+          "fitness": 0.8912,
+          "novelty": 0.1578,
+          "survivor_distance": 3.9159,
+          "affect_memory": 0.5966
+        },
+        {
+          "seconds": 148.5,
+          "fitness": 0.8749,
+          "novelty": 0.1542,
+          "survivor_distance": 3.1821,
+          "affect_memory": 0.6083
+        },
+        {
+          "seconds": 160.0,
+          "fitness": 0.8672,
+          "novelty": 0.2052,
+          "survivor_distance": 2.9815,
+          "affect_memory": 0.5502
+        }
+      ]
+    },
+    {
+      "scene": 3,
+      "generations": [
+        {
+          "seconds": 143.0,
+          "fitness": 0.9167,
+          "novelty": 0.32,
+          "survivor_distance": 1.0785,
+          "affect_memory": 0.2005
+        },
+        {
+          "seconds": 154.5,
+          "fitness": 0.8963,
+          "novelty": 0.2513,
+          "survivor_distance": 1.6847,
+          "affect_memory": 0.3076
+        },
+        {
+          "seconds": 166.0,
+          "fitness": 0.8573,
+          "novelty": 0.2155,
+          "survivor_distance": 2.7618,
+          "affect_memory": 0.3378
+        },
+        {
+          "seconds": 177.5,
+          "fitness": 0.8427,
+          "novelty": 0.2247,
+          "survivor_distance": 2.3661,
+          "affect_memory": 0.3531
+        },
+        {
+          "seconds": 189.0,
+          "fitness": 0.786,
+          "novelty": 0.2788,
+          "survivor_distance": 1.5423,
+          "affect_memory": 0.3565
+        },
+        {
+          "seconds": 200.5,
+          "fitness": 0.7838,
+          "novelty": 0.2891,
+          "survivor_distance": 1.2456,
+          "affect_memory": 0.4023
+        },
+        {
+          "seconds": 212.0,
+          "fitness": 0.9005,
+          "novelty": 0.1828,
+          "survivor_distance": 1.6279,
+          "affect_memory": 0.4234
+        },
+        {
+          "seconds": 223.5,
+          "fitness": 0.861,
+          "novelty": 0.1842,
+          "survivor_distance": 2.9807,
+          "affect_memory": 0.4118
+        },
+        {
+          "seconds": 235.0,
+          "fitness": 0.7896,
+          "novelty": 0.2529,
+          "survivor_distance": 2.9721,
+          "affect_memory": 0.3994
+        }
+      ]
+    },
+    {
+      "scene": 4,
+      "generations": [
+        {
+          "seconds": 218.0,
+          "fitness": 0.9174,
+          "novelty": 0.32,
+          "survivor_distance": 1.6464,
+          "affect_memory": 0.2002
+        },
+        {
+          "seconds": 229.5,
+          "fitness": 0.9106,
+          "novelty": 0.2317,
+          "survivor_distance": 1.1389,
+          "affect_memory": 0.2678
+        },
+        {
+          "seconds": 241.0,
+          "fitness": 0.8316,
+          "novelty": 0.282,
+          "survivor_distance": 1.4431,
+          "affect_memory": 0.3137
+        },
+        {
+          "seconds": 252.5,
+          "fitness": 0.8816,
+          "novelty": 0.2071,
+          "survivor_distance": 3.0238,
+          "affect_memory": 0.3406
+        },
+        {
+          "seconds": 264.0,
+          "fitness": 0.8241,
+          "novelty": 0.2297,
+          "survivor_distance": 2.1573,
+          "affect_memory": 0.347
+        },
+        {
+          "seconds": 275.5,
+          "fitness": 0.8221,
+          "novelty": 0.2542,
+          "survivor_distance": 1.2777,
+          "affect_memory": 0.3514
+        },
+        {
+          "seconds": 287.0,
+          "fitness": 0.8985,
+          "novelty": 0.1506,
+          "survivor_distance": 1.0972,
+          "affect_memory": 0.3569
+        },
+        {
+          "seconds": 298.5,
+          "fitness": 0.8648,
+          "novelty": 0.1822,
+          "survivor_distance": 1.2373,
+          "affect_memory": 0.3653
+        }
+      ]
+    }
+  ],
+  "elapsed_minutes": 31.3
+}
