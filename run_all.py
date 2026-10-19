@@ -178,9 +178,10 @@ def main():
     if a.first <= 4 <= a.last:
         times[4] = run_step(4, [PY, t3, '--sound-only'])
     if a.first <= 5 <= a.last:
-        render = latest_render(0, a.quick)
+        story = ROOT / 'team3' / 'background' / 'input' / 'storyboard' / 'dream_scenes.json'
+        render = latest_render(story.stat().st_mtime if story.exists() else 0, a.quick)   # 이 대본 뒤 렌더만 (옛 판 섞임 방지)
         if render is None:
-            stop(5, '오브제 렌더 결과가 없습니다', resume=3)
+            stop(5, '이번 대본으로 만든 오브제 렌더 결과가 없습니다', resume=3)
         cmd = [PY, t3, '--to-team4']
         integrated = render / 'dream_integrated.mp4'
         if not a.quick and integrated.is_file() and SOUND_WAV.is_file():   # 3팀 최종 꿈 영상도 같이 (--video 는 5:00 만 받음)
