@@ -11,7 +11,7 @@
 | 4 🙋 | 오브제 생성 + 통합 렌더(선화 · 엔진 기본 · 10-19) | **`python team3/run_team3.py --object`** (판 확인 → PNG → 렌더 · 시험 `--quick` · 4팀 투명도 `--alpha` · `team3/object/AUTO_TEST.md`) | 오브제 담당 PC (GPU) | 오브제만 15분 30초 · 통합 약 30분 (10-12 담당 측정 · 아날로그 기준) · 이 노트북 원 해상도 10초 = 260초 |
 | 5 | 사운드(1팀 생성기 · 아피찻퐁) | **2단계에 `--sound` 를 붙이면 사진 뒤에 자동** (`python team3/run_team3.py --sound`) · 오브제 새 판이 나온 뒤 다시: `python team3/run_team3.py --sound-only` | 진행 PC (고품질은 1팀 PC) | **약 3분**(177초 · 5:00 wav) · 이 PC 는 그림 인식 꺼짐 |
 | 6 | 소리 붙이기 | `python team3/run_team3.py --mux <dream_integrated.mp4> <dream_sound.wav>` | 진행 PC | 수십 초 (다시 인코딩 안 함) |
-| 7 | 4팀에 넘기기 (배경판 · 오브제 · 5분 통합 영상) | `python team3/run_team3.py --to-team4 --check` → `--to-team4 --video <통합_sound.mp4>` | 진행 PC | 수 초 |
+| 7 | 4팀에 넘기기 (배경판 · 오브제 · 5분 통합 영상 · **소리 → `team4/input/sound/` · 오브제 영상 → `team4/input/object/object_line_1.mp4`** 10-19) | `python team3/run_team3.py --to-team4 --check` → `--to-team4 --video <통합_sound.mp4>` | 진행 PC | 수 초 |
 | 8 | 4팀 애니메이션 | 4팀 코드 (`team4/`) | 4팀 | 4팀 측정 |
 
 **안전장치(10-17 확인):** 7단계는 대본 · 배경판 · 오브제가 한 판이 아니면 4팀 자리를 건드리지 않고 멈춘다(다른 판 오브제 4장면 모두 잡아냄).
