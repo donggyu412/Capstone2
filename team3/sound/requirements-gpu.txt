@@ -1,0 +1,10 @@
+# 꿈 사운드 생성기 — 1단계 ③ 그림 인식용 (기본 requirements.txt 에 더해서)
+#   SigLIP 2 (Apache-2.0) · Florence-2 (MIT) · Depth Anything V2 Small (Apache-2.0) — 모두 상업 이용 가능
+#   그림을 읽기만 하고 소리는 만들지 않는다. 없으면 이 단계만 건너뛰고 나머지는 그대로 돈다.
+#
+# ① torch 를 먼저 설치한다. GPU 가 있으면 CUDA 판 (본체 CUDA 버전에 맞게 — https://pytorch.org/get-started/locally/)
+#      예) pip install torch --index-url https://download.pytorch.org/whl/cu130
+#    노트북(GPU 없음)은 그냥  pip install torch
+# ② 그다음:  pip install -r team3/sound/requirements-gpu.txt
+# ③ 처음 실행할 때 Hugging Face 에서 모델을 자동으로 내려받는다 (약 2.5GB, 한 번만 · 로그인·약관 동의 필요 없음)
+transformers>=5.0     # Florence-2 를 transformers 가 직접 지원하는 판 (10-08 시험: 5.18)

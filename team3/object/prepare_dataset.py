@@ -1,7 +1,23 @@
+"""
+LoRA 학습용 데이터셋 준비 — 장면별 오브제 PNG 를 Kohya 폴더 구조(dataset/10_dream_object)로 복사하고 1:1 캡션을 만든다.
+
+  python prepare_dataset.py                          (기본: output_objects → dataset/10_dream_object)
+  python prepare_dataset.py --source 다른_폴더
+
+캡션 짝짓기
+  파일 이름 obj_<번호>_<오브제_이름>.png 에서 이름을 그대로 꺼내 사전과 '정확히' 맞춘다.
+  정확히 맞는 것이 없을 때만 긴 이름부터 부분 일치를 본다 — '밤색 서류철' 이 '서류철' 로 잡히던 문제 수정.
+  사전에 없는 이름은 translations.json(generate_objects_comfy.py 가 만든 번역 기록)에서 찾는다.
+
+주의: 이미 LoRA 로 만든 결과(output_objects)를 다시 학습 데이터로 쓰면 LoRA 가 자기 결과를 다시 배우게 된다.
+      재학습할 때는 --source 로 원하는 학습용 이미지 폴더를 명시하는 것을 권한다.
+"""
+import argparse
+import json
 import os
+import re
 import shutil
 
-# 한글 -> 영문 캡션 매핑
 OBJ_ENGLISH_MAP = {
     "낡은 항해일지": "old weathered navigation logbook",
     "푸른빛 냉동액 웅덩이": "puddle of glowing blue cryogenic fluid",
@@ -15,48 +31,58 @@ OBJ_ENGLISH_MAP = {
     "벌어지는 타일 금": "cracking and widening floor tile fissures",
     "밤색 서류철": "dark brown leather document folder",
     "금이 간 타일 바닥": "cracked tiled floor surface",
-    "창백하고 얇은 손": "pale thin ghostly hand emerging"
+    "창백하고 얇은 손": "pale thin ghostly hand emerging",
 }
 
-# 학습 시 이 화풍을 불러올 키워드(Trigger Word)
-TRIGGER_WORD = "dream_object" 
+TRIGGER_WORD = "dream_object"  # 학습 시 이 화풍을 불러올 키워드
 COMMON_STYLE = "digital art style, abstract geometric shape, surreal, white background, standalone object"
+NAME_RE = re.compile(r"^obj_\d+_(.+)\.png$")
 
-source_dir = "output_objects"
-# Kohya_ss 표준 폴더 구조: {반복횟수}_{개념이름}
-target_dir = os.path.join("dataset", "10_dream_object") 
 
-os.makedirs(target_dir, exist_ok=True)
+def load_extra(path="translations.json"):
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return {k: v.get("en") for k, v in json.load(f).items() if v.get("en")}
+    return {}
 
-copied_count = 0
 
-for root, dirs, files in os.walk(source_dir):
-    for file in files:
-        if file.endswith(".png"):
-            src_path = os.path.join(root, file)
-            
-            # 한글 오브제명 찾기
-            eng_desc = "surreal object"
-            for kor_key, eng_val in OBJ_ENGLISH_MAP.items():
-                if kor_key.replace(" ", "_") in file or kor_key in file:
-                    eng_desc = eng_val
-                    break
-            
-            # 학습용 파일명 지정 (img_01, img_02 ...)
-            copied_count += 1
-            new_basename = f"obj_{copied_count:02d}"
-            dst_img_path = os.path.join(target_dir, f"{new_basename}.png")
-            dst_txt_path = os.path.join(target_dir, f"{new_basename}.txt")
+def caption_for(filename, table):
+    m = NAME_RE.match(filename)
+    if m:
+        name = m.group(1).replace("_", " ")
+        if name in table:  # 정확히 일치
+            return table[name], name
+    for key in sorted(table, key=len, reverse=True):  # 긴 이름부터 부분 일치
+        if key.replace(" ", "_") in filename or key in filename:
+            return table[key], key
+    return "surreal object", None
 
-            # 1. 이미지 복사
-            shutil.copy2(src_path, dst_img_path)
 
-            # 2. 1:1 매칭 캡션(.txt) 파일 생성
-            caption = f"{TRIGGER_WORD}, {eng_desc}, {COMMON_STYLE}"
-            with open(dst_txt_path, "w", encoding="utf-8") as f:
-                f.write(caption)
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--source", default="output_objects", help="장면별 오브제 PNG 폴더 (scene_NN/obj_i_이름.png)")
+    ap.add_argument("--target", default=os.path.join("dataset", "10_dream_object"), help="Kohya 형식: {반복횟수}_{개념이름}")
+    args = ap.parse_args()
 
-            print(f"[{copied_count}] 생성 완료: {new_basename}.png / .txt")
+    table = {**load_extra(), **OBJ_ENGLISH_MAP}
+    os.makedirs(args.target, exist_ok=True)
+    count = 0
+    for root, dirs, files in sorted(os.walk(args.source)):
+        dirs.sort()
+        for file in sorted(files):
+            if not NAME_RE.match(file):  # obj_*.png 만 — _review_sheet.png 같은 검수 이미지는 제외
+                continue
+            eng, key = caption_for(file, table)
+            if key is None:
+                print(f"  ! {file}: 캡션을 찾지 못해 'surreal object' 로 적습니다")
+            count += 1
+            base = f"obj_{count:02d}"
+            shutil.copy2(os.path.join(root, file), os.path.join(args.target, f"{base}.png"))
+            with open(os.path.join(args.target, f"{base}.txt"), "w", encoding="utf-8") as f:
+                f.write(f"{TRIGGER_WORD}, {eng}, {COMMON_STYLE}")
+            print(f"[{count}] {base}.png ← {os.path.basename(root)}/{file}  ({eng})")
+    print(f"\n총 {count}개 준비 완료 → {os.path.abspath(args.target)}")
 
-print(f"\n총 {copied_count}개의 데이터셋 준비 완료!")
-print(f"저장 위치: {os.path.abspath(target_dir)}")
+
+if __name__ == "__main__":
+    main()

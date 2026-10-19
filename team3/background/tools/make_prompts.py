@@ -47,14 +47,26 @@ ACT_MOOD = {
     '결': '짙은 안개나 뿌연 공기가 공간을 천천히 지워 가는 모습, 화면의 많은 부분이 비어 있는 넓은 여백',
 }
 
-# 감정 라벨 → 색·빛의 말. index.html EMOTIONS 표(채도·난색·안개·빛)와 같은 방향으로 적었다.
+# 1팀 7종 → (색, 밝기, 단순함). index.html EMO_TONE(c · lum · simple)과 같은 방향으로 적었다(10-11).
+# 10/8 발표 검토 "감정에 따라 때로는 어둡게, 때로는 화려하게, 때로는 단순하게" — 엔진은 파편이 사진에서
+# 색을 빨아들인 뒤 색조를 옮기므로, 사진이 회색이면 엔진 혼자 색을 만들어야 한다. 사진부터 같은 쪽으로 찍어 둔다.
+#   색     — 필터가 아니라 '그 장소의 빛·공기 색'으로 적는다(COMMON 의 '그 장소에 있는 빛 그대로'와 부딪히지 않게)
+#   밝기   — 어둡게 미는 감정도 빛이 닿는 곳은 남긴다(EXPOSURE · 균일하게 어두우면 화면이 탄다)
+#   단순함 — EMO_TONE 의 simple 이 0 보다 큰 감정(슬픔·혐오)만. 없으면 None
+# ※ EMO_TONE 값을 바꾸면 여기 말도 같이 본다. 중립은 색을 밀지 않는다(표에 없음).
+EMO_LOOK = {
+    '기쁨': ('금빛이 도는 따뜻한 빛, 색이 풍부함',            '전체적으로 밝고 환한 화면', None),
+    '슬픔': ('깊고 푸른 색조',                                '전체적으로 어둑하게 가라앉았지만 빛이 닿는 곳은 남아 있는 화면',
+             '사물이 적고 텅 빈 단순한 구도'),
+    '분노': ('붉은빛이 도는 뜨거운 색조, 강한 대비',          '조금 밝고 강렬한 화면', None),
+    '공포': ('남보랏빛이 도는 차가운 색조, 그림자가 깊음',    '조금 어두운 화면', None),
+    '놀람': ('자홍·분홍빛이 번지는 화려한 색, 선명한 명암',   '아주 밝고 눈부신 화면', None),
+    '혐오': ('탁한 풀빛·황록색이 도는 칙칙한 색조',           '조금 어둡고 빛이 가라앉은 화면',
+             '사물이 적은 단순한 구도'),
+}
+
+# 예전 라벨(더미) → 색·빛의 말. index.html EMOTIONS 표(채도·난색·안개·빛)와 같은 방향. 엔진 색조(EMO_TONE)는 안 걸린다.
 EMO_MOOD = {
-    # 1팀 7종 (09-27) — 중립은 색을 밀지 않는다
-    '슬픔':  '채도가 낮고 푸르스름한 회색 톤',
-    '공포':  '차갑고 어두운 색조, 그림자가 깊음',
-    '놀람':  '갑자기 트인 맑은 빛, 선명한 명암',
-    '혐오':  '탁하고 칙칙한 색조, 빛이 가라앉은 공기',
-    # 예전 라벨 (더미)
     '불안':  '차갑고 약간 푸른 색조, 불안정한 빛',
     '두려움': '차갑고 어두운 색조, 그림자가 깊음',
     '우울':  '채도가 낮고 푸르스름한 회색 톤',
@@ -62,9 +74,14 @@ EMO_MOOD = {
     '평온':  '부드럽고 따뜻한 중간 톤',
     '그리움': '빛바랜 따뜻한 색조, 오래된 사진 같은 느낌',
     '경이':  '맑고 밝은 빛, 은은하게 빛나는 공기',
-    '기쁨':  '따뜻하고 밝은 색조',
-    '분노':  '붉고 따뜻한 색조, 강한 대비',
 }
+
+
+def emo_words(emotion):
+    """감정 라벨 → 프롬프트에 넣을 말 목록(색 · 밝기 · 단순함 순). 모르는 라벨·중립이면 빈 목록."""
+    if emotion in EMO_LOOK:
+        return [w for w in EMO_LOOK[emotion] if w]
+    return [EMO_MOOD[emotion]] if emotion in EMO_MOOD else []
 
 # PDF 시스템 I '아날로그 느낌' — 빛·몽환·단순·바람·비·안개·여백.
 # '비'는 모든 장면에 강제하지 않는다(얼어붙은 호수에 비를 내리면 2팀 이야기를 바꾸게 된다).
@@ -73,6 +90,19 @@ COMMON = ('필름 카메라로 찍은 듯한 아날로그 사진, 은은한 필�
           '옅은 안개와 공기의 흐름, 단순한 구도와 넓은 여백, 몽환적이지만 사실적인 장소 사진, 가로로 넓은 16:9 화면')
 AVOID_BASE = '사람, 동물, 글자, 로고, 테두리, 그림체·일러스트·3D 렌더링 느낌'
 EXPOSURE = '화면 전체가 하얗거나 새까맣게 균일하지 않고, 밝은 부분과 어두운 부분이 함께 있을 것'
+# 전·결 가독성(10-14 · LOG 70): A판 전·결 사진이 엔진을 지나면 거의 안 보였다(윤곽 일치 전 0.06 · 결 −0.01).
+# 결은 ACT_MOOD 가 '안개가 공간을 지워 가는' 사진을 부르고, 전은 빛 한 줄기만 남는 사진이 나온다.
+# '어두운 바탕 + 여러 곳의 밝은 윤곽'으로 손으로 다시 만들었을 때 0.08 로 올랐다 → 그 말을 여기에 넣는다.
+# (전은 엔진 연출 glow · 소용돌이가 지배해 사진만으로는 한계가 있다 — 엔진 값은 10/15 피드백 뒤에.)
+CONTOUR = {
+    '전': '어두운 바탕 위에 여러 곳의 밝은 윤곽이 또렷하고, 장소의 큰 선(벽 · 바닥 · 창)을 알아볼 수 있을 것',
+    '결': '안개 속에서도 장소의 큰 선(벽 · 바닥 · 창)과 밝은 윤곽 몇 곳은 알아볼 수 있을 것',
+}
+# 금지 목록에 넣지 않는 오브제 — 빛 · 그림자는 사진의 명암 자체라 빼라고 하면 사진이 평평해지고
+# (A판 '빛(실 같은 빛…)' 이 본문 빛 요구와 부딪힘), 소리는 사진에 찍히지 않는다.
+NEVER_AVOID = ('빛', '그림자', '소리', '울음', '목소리')
+# 장소의 뼈대 낱말 — 배경이 이걸 부르면('창가 방') 같은 뼈대의 오브제('유리창')를 빼라고 하지 않는다(10-14).
+FRAME = ('창', '벽', '바닥', '문', '천장', '지붕')
 
 
 def split_objects(backgrounds, objects):
@@ -81,27 +111,82 @@ def split_objects(backgrounds, objects):
        2팀 데이터는 배경과 오브제가 겹치기도 한다(4장면: 배경 '자작나무 껍질 더미' / 오브제 '자작나무 껍질').
        둘 다 적으면 '껍질 더미를 그리되 껍질은 빼라'가 되어 생성기가 헷갈린다. 배경이 우선이다 —
        배경은 우리 몫이고, 오브제는 나중에 시스템 II 가 그 위에 얹는다."""
-    toks = set()
-    for b in backgrounds:
-        for t in b.replace('(', ' ').replace(')', ' ').replace(',', ' ').split():
-            if len(t) >= 2:
-                toks.add(t)
+    def words(t):
+        for ch in '()/,·':
+            t = t.replace(ch, ' ')
+        return t.split()
+
+    toks = {t for b in backgrounds for t in words(b) if len(t) >= 2}
+    bg_text = ' '.join(backgrounds)
     keep, overlap = [], []
     for o in objects:
-        (overlap if any(t in o for t in toks) else keep).append(o)
+        if any(w in o for w in NEVER_AVOID):
+            continue
+        # 배경 낱말이 오브제에 있거나('자작나무 껍질 더미' ↔ '자작나무 껍질'), 오브제 낱말이 배경에 있으면
+        # ('철판/선체' ↔ '튀어오르는 선체' · '벽' ↔ '둥근 벽으로') 겹친 것으로 본다(10-14: '/' · 한 글자 낱말을 못 맞췄다)
+        hit = (any(t in o for t in toks) or any(w in bg_text for w in words(o))
+               or any(f in o and f in bg_text for f in FRAME))
+        (overlap if hit else keep).append(o)
     return keep, overlap
 
 
-def build_prompt(sc, objects):
+# 배경 글(10-17 · 10/15 교수님 피드백 "배경에 대한 글 따로") — 장소 단어만으로는 사진이 이야기와 멀어진다.
+# 2팀 json 에 배경 글 칸이 생기면 그것을 먼저 쓰고, 없으면 2팀이 배경마다 글에서 뽑아 둔 근거 문장을 쓴다
+# (run_team3.py 받기 단계가 team2/output/scene{N}_elements.json 에서 뽑아 이 파일로 둔다 — .json 이 아니어야
+#  엔진·사운드가 스토리보드로 착각하지 않는다). 오브제가 섞인 문장은 뺀다 — 배경 사진에 오브제가 박히면 안 된다.
+BG_TEXT_FILE = 'background_text.txt'
+BG_TEXT_KEYS = ('background_story', 'background_text', 'bg_story')
+
+
+def load_bg_text(base_dir):
+    """background_text.txt → {장면 번호: [문장, ...]}. 없으면 빈 dict."""
+    path = os.path.join(base_dir, BG_TEXT_FILE)
+    out = {}
+    if not os.path.exists(path):
+        return out
+    with open(path, encoding='utf-8-sig') as f:
+        for line in f:
+            no, _, text = line.rstrip('\n').partition('\t')
+            if no.strip().isdigit() and text.strip():
+                out.setdefault(int(no), []).append(text.strip())
+    return out
+
+
+def _words(t):
+    for ch in '()/,·':
+        t = t.replace(ch, ' ')
+    return [w for w in t.split() if len(w) >= 2]
+
+
+def bg_sentences(row, file_lines, objects):
+    """(쓸 문장, 오브제가 섞여 뺀 문장 수). objects 는 장면의 오브제 전체(겹침 처리 전)."""
+    for k in BG_TEXT_KEYS:                       # 2팀이 배경 글 칸을 주면 그것이 먼저
+        v = row.get(k)
+        if isinstance(v, str) and v.strip():
+            sents = [s.strip() + '.' for s in v.replace('\n', ' ').split('.') if s.strip()]
+            break
+    else:
+        sents = list(file_lines or [])
+    toks = {w for o in objects for w in _words(o)} | {o for o in objects if len(o) >= 2}
+    keep = [s for s in sents if not any(t in s for t in toks)]
+    return keep, len(sents) - len(keep)
+
+
+def build_prompt(sc, objects, bg_text=None):
     bg = sc['backgrounds'] or [sc['title']]
     lines = [
         '다음 장소의 사진을 만들어 주세요: ' + ', '.join(bg) + '.',
+    ]
+    if bg_text:
+        lines.append('장소 묘사: ' + ' '.join(s.rstrip(' .,') + '.' for s in bg_text))
+    lines += [
         ACT_MOOD.get(sc['stage'], '') + '.',
     ]
-    if sc['emotion'] in EMO_MOOD:
-        lines.append(EMO_MOOD[sc['emotion']] + '.')
+    lines += [w + '.' for w in emo_words(sc['emotion'])]
     lines.append(COMMON + '.')
     lines.append(EXPOSURE + '.')
+    if sc['stage'] in CONTOUR:
+        lines.append(CONTOUR[sc['stage']] + '.')
     avoid = AVOID_BASE + (', ' + ', '.join(objects) if objects else '')
     lines.append('들어가면 안 되는 것: ' + avoid + '.')
     return ' '.join(l for l in lines if l.strip('. '))
@@ -111,25 +196,28 @@ def main():
     mode, path, base_dir = app.pick_source()
     if mode != 'storyboard':
         sys.exit('input/storyboard/ 에 2팀 스토리보드 JSON 이 없습니다. (더미 자료는 이미지가 이미 있어 프롬프트가 필요 없습니다)')
-    rows = app.read_scene_list(path) or []
-    rows = sorted(rows, key=lambda r: r.get('act') or r.get('scene') or 0)
+    rows = app.read_scene_list(path) or []      # 번호순 정렬·번호 정리까지 끝나서 온다
 
     out = ['배경 이미지 프롬프트 — %s (%d장면)' % (os.path.relpath(path, ROOT).replace('\\', '/'), len(rows)),
            '각 문장을 이미지 생성기에 붙여넣고, 결과를 input/storyboard/ 에 옆에 적힌 이름으로 저장하세요.',
            '(가로 16:9, 1280px 이상 권장 · png 가 아니어도 이름만 scene_01.png 면 읽힙니다)', '']
+    bg_file = load_bg_text(base_dir)
     for i, row in enumerate(rows):
         sc = app.to_scene(i, len(rows), row, base_dir)
-        objects = [o for o in (row.get('objects') or []) if isinstance(o, str)]
-        objects, overlap = split_objects(sc['backgrounds'] or [], objects)
+        all_objects = [o for o in (row.get('objects') or []) if isinstance(o, str)]
+        bg_text, dropped = bg_sentences(row, bg_file.get(row.get('_num', i + 1)), all_objects)
+        objects, overlap = split_objects(sc['backgrounds'] or [], all_objects)
         name = 'scene_%02d.png' % sc['act']
         have = os.path.exists(os.path.join(base_dir, name))
         out += ['=' * 70,
                 '%d. [%s] %s   → %s %s' % (sc['act'], sc['stage'], sc['title'], name, '(있음)' if have else '(필요)'),
                 '   감정: %s%s' % (sc['emotion'] or '없음',
                                  ' ← "%s"' % sc['emotion_src'] if sc['emotion_src'] else ''),
+                *(['   색·밝기·단순함: ' + ' / '.join(emo_words(sc['emotion']))] if emo_words(sc['emotion']) else []),
                 *(['   ※ 배경과 겹쳐 제외 목록에서 뺀 오브제: ' + ', '.join(overlap)] if overlap else []),
+                '   배경 글: %d문장%s' % (len(bg_text), ' (오브제가 섞여 뺀 문장 %d)' % dropped if dropped else ''),
                 '-' * 70,
-                build_prompt(sc, objects), '']
+                build_prompt(sc, objects, bg_text), '']
 
     text = '\n'.join(out)
     print(text)
