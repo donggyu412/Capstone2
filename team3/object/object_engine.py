@@ -19,13 +19,24 @@
     배경과 통합  python object_engine.py --bg dream.mp4 --bg-json video.json --out integrated.mp4
 
   세 가지 그리기 방식 (--style)
-    analog   부드러운 빛 입자 · 번짐 · 안개 — 아날로그 꿈 (기본)
+    line     (기본 · 10/22 메인) 아래 설명 + 어린아이 로봇이 그리는 과정 —
+             펜을 대고 망설이다가 획을 그리고, 그리다 멈칫하고, 비뚤게 그린 획은 멈추고 지우개로 지운 뒤 다시 그리고,
+             가끔 한 번 더 덧그린다. 펜(밝은 점)과 지우개(빈 동그라미)가 화면에 보인다. 다 그린 뒤에도 가끔 지웠다 다른 색으로 다시 그린다.
+             그리는 순서 · 틀릴 획 · 멈칫할 자리는 스토리로 만든 시드로 정해져 같은 스토리면 같은 영상이 나온다.
+    analog   부드러운 빛 입자 · 번짐 · 안개 — 아날로그 꿈
     digital  격자에 맞물리는 사각 블록 · 평평한 색 · 통통 튀는 조립 — 로봇의 꿈 (추상·기하·단순·원초적)
     line     굵은 손그림 선의 기하 도형 — 오브제 윤곽을 다각형·원으로 단순화하고, 물리 법칙을 덧그림 기호로
              (부유 = 물결 · 회전 = 나선 · 갈라짐 = 지그재그 · 바스러짐 = 흩어진 짧은 선 · 팔락임 = 옆 지그재그 …).
              획이 하나씩 그려졌다가 지워지고, 장면의 오브제 조각이 메아리처럼 작게 떠다닌다.
              기승전결에 따라 커졌다가(전 = 절정 · 반전 때 획이 화면 가득 터짐) 다시 작아진다. (교수님 10/15 예제 영상 방향)
     python object_engine.py --style line
+
+  다른 팀에 넘길 때
+    오브제만 + 투명도   python object_engine.py --alpha-out --out object_line.mp4
+                        → object_line.mp4(검은 바탕 · 투명도를 곱한 색) + object_line_matte.mp4(흰색 = 오브제)
+                        합성: out = bg × (1 − matte) + fill
+    남의 배경 위에 합성 python object_engine.py --bg 배경.mp4 --bg-audio   (배경 영상의 소리를 그대로 붙인다)
+    4팀용 두 가지를 한 번에: render_team4.py
 
   빠른 미리보기 (장면당 10초 · 절반 해상도)
     python object_engine.py --scene-sec 10 --scale 0.5 --out preview.mp4
@@ -967,9 +978,70 @@ def _wobble(pts, amp, seed, t):
     return pts + off * amp
 
 
+# 어린아이 로봇이 그리는 과정 — 획마다 '펜을 대고 망설이다 → 그리다 멈추고 → 틀리면 지우고 → 다시 그린다'
+#   획을 그리는 속도(장면 단위 길이 / 초) · 틀렸다가 지우고 다시 그릴 확률 · 중간에 멈칫할 확률 · 한 번 더 덧그릴 확률
+CHILD_SPEED = {'기': 0.45, '승': 0.55, '전': 0.75, '결': 0.45}
+CHILD_RETRY, CHILD_HESITATE, CHILD_OVERDRAW = 0.35, 0.25, 0.20
+
+
+def _plan_strokes(items, start, act, prng):
+    """오브제 하나의 획들을 언제 · 어떻게 그릴지 정한다 → (획마다 [(시작, 끝, 동작, 처음 비율, 끝 비율, 판)] , 다 그린 시각)"""
+    t = start
+    speed = CHILD_SPEED.get(act, 0.55)
+    plans = []
+    for k, it in enumerate(items):
+        L = max(0.2, (len(it['pts']) - 1) * 0.03)
+        td = max(0.5, L / speed)
+        acts = [('pause', prng.uniform(0.6, 1.1) if k == 0 else prng.uniform(0.2, 0.6), 0.0, 0.0, 'ok')]  # 펜을 대고 망설임
+        r = prng.random()
+        if r < CHILD_RETRY:  # 비뚤게 그리다가 멈추고 → 지우고 → 다시 그린다
+            f0 = prng.uniform(0.35, 0.7)
+            acts += [('draw', td * f0, 0.0, f0, 'wrong'), ('pause', prng.uniform(0.5, 1.0), f0, f0, 'wrong'),
+                     ('erase', max(0.4, td * f0 * 0.5), f0, 0.0, 'wrong'), ('pause', 0.3, 0.0, 0.0, 'ok'),
+                     ('draw', td, 0.0, 1.0, 'ok')]
+        elif r < CHILD_RETRY + CHILD_HESITATE:  # 그리다가 멈칫하고 이어 그린다
+            f1 = prng.uniform(0.3, 0.7)
+            acts += [('draw', td * f1, 0.0, f1, 'ok'), ('pause', prng.uniform(0.4, 0.9), f1, f1, 'ok'),
+                     ('draw', td * (1 - f1), f1, 1.0, 'ok')]
+        else:
+            acts += [('draw', td, 0.0, 1.0, 'ok')]
+        if prng.random() < CHILD_OVERDRAW:  # 한 번 더 덧그린다
+            acts += [('draw', td * 0.6, 0.0, 1.0, 'over')]
+        seq = []
+        for typ, dur, f0, f1, var in acts:
+            seq.append((t, t + dur, typ, f0, f1, var))
+            t += dur
+        plans.append(seq)
+        it['wrong'] = (prng.uniform(-0.25, 0.25), prng.uniform(1.08, 1.2), prng.uniform(-0.06, 0.06), prng.uniform(-0.06, 0.06))
+    return plans, t
+
+
+def _stroke_state(seq, ts):
+    """지금 시각의 획 상태 — 바른 획 비율 · 틀린 획 비율 · 덧그림 비율 · 펜(동작, 비율, 판) · 지우는 자국(지금, 처음, 남은 정도)"""
+    ok = wrong = over = 0.0
+    pen = smear = None
+    for a, b, typ, f0, f1, var in seq:
+        if ts < a:
+            break
+        p = 1.0 if ts >= b else (ts - a) / max(b - a, 1e-6)
+        f = f0 + (f1 - f0) * p
+        if var == 'over':
+            over = f
+        elif var == 'wrong':
+            wrong = f
+        else:
+            ok = f
+        if ts < b:
+            pen = (typ, f, var)
+            if typ == 'erase':
+                smear = (f, f0, 1 - p)
+    return ok, wrong, over, pen, smear
+
+
 class LineScene:
-    def __init__(self, S, files, keep, seed):
+    def __init__(self, S, files, keep, seed, scene_sec=75.0):
         self.S = S
+        self.scene_sec = scene_sec
         self.L = LINE_ACT[S.act]
         order = LINE_EMO_ORDER.get(S.emo_label, LINE_EMO_ORDER['중립'])
         self.pal = [np.array(LINE_PAL[n], np.float32) / 255 for n in order]
@@ -995,6 +1067,10 @@ class LineScene:
             if beh.get('precede'):  # 결과가 먼저 — 덧그림 기호부터 그린다
                 items = [it for it in items if it['kind'] == 'mark'] + [it for it in items if it['kind'] != 'mark']
             self.glyphs.append(dict(items=items, beh=beh, size=float(max(S.sizes[j])) * self.L['scale']))
+        # 그리는 계획 — 오브제마다 등장 시각부터 획을 하나씩 (펜 · 멈칫 · 틀림 · 지움 · 다시 그림 · 덧그림)
+        prng = np.random.default_rng(seed + 101)
+        for j, g in enumerate(self.glyphs):
+            g['plan'], g['done_t'] = _plan_strokes(g['items'], float(S.enter[j]) * scene_sec, S.act, prng)
         # 메아리 — 이 장면 오브제 조각이 작게 그려졌다 사라진다 (언제 · 어디서 · 무엇을 · 얼마나 크게)
         dur = 1.0
         n_echo = int(self.L['echo_rate'] * 75)
@@ -1056,49 +1132,92 @@ class LineScene:
             cv2.polylines(layer, [P], False, (col * alpha).tolist(), th, cv2.LINE_AA)
             cv2.polylines(mask, [P], False, alpha, th + 6, cv2.LINE_AA)
 
+        pens = []
+
+        def at(pts, frac):
+            return pts[min(len(pts) - 1, max(0, int(round((len(pts) - 1) * frac))))]
+
+        def burst_off(pts, j):
+            if burst <= 0:
+                return pts
+            d = pts - S.anchors[j]
+            return pts + d / (np.linalg.norm(d, axis=1, keepdims=True) + 1) * (H * 0.45 * burst)
+
         for j, g in enumerate(self.glyphs):
             items = g['items']
             if not items:
                 continue
             beh = g['beh']
             n = len(items)
-            prog_in = float(smoothstep(S.enter[j], S.formed[j] - 0.06, u)) * n
             out = float(smoothstep(S.dissolve[j], S.dissolve[j] + RELEASE_SPAN, u))
             if out >= 1:
                 continue
             amp = 0.0 if beh.get('still') else 0.006 * g['size']
-            fl_on = True
+            drawn = t >= g['done_t']
             for k, it in enumerate(items):
-                frac = prog_in - k
-                if frac <= 0:
-                    break
+                ok, wrong, over, pen, smear = _stroke_state(g['plan'][k], t)
+                if ok <= 0 and wrong <= 0 and pen is None and smear is None:
+                    continue
                 # 지워짐: 위쪽 획부터 · 그 밖은 나중 획부터 차례로 지워진다
                 rank = (k / max(n - 1, 1))
                 if beh.get('vanish'):
                     rank = 1 - float((it['pts'][:, 1].mean() + 0.5))
-                erase = np.clip(out * 1.6 - (1 - rank) * 0.6, 0, 1)
-                frac = min(frac, 1.0) * (1 - erase)
-                if beh.get('flicker'):  # 있다 없다 — 획마다 1.4초에 한 번씩 켜지고 꺼진다
-                    fl_on = ((k * 2654435761 + int(t / 1.4) * 40503 + j * 97) % 7) > 2
-                    if not fl_on:
+                erase = float(np.clip(out * 1.6 - (1 - rank) * 0.6, 0, 1))
+                if beh.get('flicker') and ok >= 1:  # 있다 없다 — 획마다 1.4초에 한 번씩 켜지고 꺼진다
+                    if ((k * 2654435761 + int(t / 1.4) * 40503 + j * 97) % 7) <= 2:
                         continue
                 col = it['col']
-                if prog_in >= n and out == 0 and burst == 0:
-                    # 다 그려진 뒤에도 살아 있게 — 획마다 7~10초에 한 번 지워졌다 다른 색으로 다시 그려진다
+                frac = ok
+                if drawn and out == 0 and burst == 0:
+                    # 다 그린 뒤에도 — 획마다 7~10초에 한 번 지웠다가 다른 색으로 다시 그린다
                     period = 7.0 + (k * 1.3 + j * 0.7) % 3.0
                     ph = (t + k * 2.3 + j * 1.7) % period
                     cyc = int((t + k * 2.3 + j * 1.7) // period)
                     if ph < 1.4:
                         frac = min(frac, abs(1 - 2 * ph / 1.4))
+                        pens.append(('erase' if ph < 0.7 else 'draw', None, j, k, frac))
                     if ph >= 0.7 or cyc > 0:
                         col = self.pal[(k + j + cyc) % len(self.pal)] if (cyc + (ph >= 0.7)) % 2 else it['col']
-                pts = self._xf(_wobble(it['pts'], amp / max(g['size'], 1), k * 3.7 + j, tq), j,
-                               F, dx, dy, sx, tilt, scale, stretch, gap, flut, t)
-                if burst > 0:  # 반전 — 획이 바깥으로 터졌다가 다시 모인다
-                    d = pts - S.anchors[j]
-                    pts = pts + d / (np.linalg.norm(d, axis=1, keepdims=True) + 1) * (H * 0.45 * burst)
-                stroke(pts, col, it['w'], frac, k, amp,
-                       dash=bool(beh.get('ash')) and erase > 0.05)
+                frac = frac * (1 - erase)
+                base = _wobble(it['pts'], amp / max(g['size'], 1), k * 3.7 + j, tq)
+                pts = burst_off(self._xf(base, j, F, dx, dy, sx, tilt, scale, stretch, gap, flut, t), j)
+                stroke(pts, col, it['w'], frac, k, amp, dash=bool(beh.get('ash')) and erase > 0.05)
+                if 0 < erase < 1 and frac > 0:  # 장면 끝에 지우개가 지나간다
+                    pens.append(('erase', at(pts, frac), j, k, frac))
+                # 틀린 획 — 조금 돌아가고 커지고 비켜난 자리에 그렸다가 지운다
+                if wrong > 0 or (smear is not None and pen and pen[2] == 'wrong'):
+                    rot, sc_, ox, oy = it['wrong']
+                    c_, s_ = math.cos(rot), math.sin(rot)
+                    wp = base @ np.array([[c_, s_], [-s_, c_]], np.float32) * sc_ + np.array([ox, oy], np.float32)
+                    wpts = burst_off(self._xf(wp, j, F, dx, dy, sx, tilt, scale, stretch, gap, flut, t), j)
+                    stroke(wpts, col * 0.9, it['w'], wrong, k, amp)
+                    if smear is not None:  # 지우는 중 — 지운 자리에 옅은 자국이 잠깐 남는다
+                        f_now, f_from, left = smear
+                        i0, i1 = int((len(wpts) - 1) * f_now), int((len(wpts) - 1) * f_from) + 1
+                        if i1 - i0 >= 2:
+                            stroke(wpts[i0:i1], col, it['w'] * 0.8, 1.0, k, amp, alpha=0.22 * left)
+                    if pen and pen[2] == 'wrong':
+                        pens.append((pen[0], at(wpts, pen[1]), j, k, pen[1]))
+                if over > 0:  # 덧그림 — 살짝 비켜난 자리에 가늘게 한 번 더
+                    op = burst_off(self._xf(base + np.array([0.012, -0.01], np.float32), j, F, dx, dy, sx, tilt, scale, stretch, gap, flut, t), j)
+                    stroke(op, col, it['w'] * 0.55, over, k, amp, alpha=0.85)
+                    if pen and pen[2] == 'over':
+                        pens.append((pen[0], at(op, pen[1]), j, k, pen[1]))
+                if pen and pen[2] == 'ok':
+                    pens.append((pen[0], at(pts, pen[1]), j, k, pen[1]))
+        # 펜 · 지우개 — 그리는 손이 보이게 (펜 = 밝은 점 · 지우개 = 빈 동그라미)
+        for kind, p, j, k, f in pens:
+            if p is None:
+                continue
+            x, y = int(p[0]), int(p[1])
+            r = max(3, int(thick * 0.9))
+            if kind == 'erase':
+                cv2.circle(layer, (x, y), int(r * 1.9), (0.85, 0.85, 0.9), max(1, thick // 3), cv2.LINE_AA)
+                cv2.circle(mask, (x, y), int(r * 2.2), 0.8, -1, cv2.LINE_AA)
+            else:
+                cv2.circle(layer, (x, y), r, (1.0, 1.0, 0.95), -1, cv2.LINE_AA)
+                cv2.circle(layer, (x, y), int(r * 2.2), (0.35, 0.35, 0.3), max(1, thick // 4), cv2.LINE_AA)
+                cv2.circle(mask, (x, y), int(r * 2.2), 0.9, -1, cv2.LINE_AA)
         # 메아리
         for e in self.echo:
             a = (u - e['t0']) / e['life']
@@ -1125,7 +1244,6 @@ class LineScene:
         frame = frame * (1 - lum) + layer
         glow = cv2.resize(cv2.GaussianBlur(cv2.resize(layer, q, interpolation=cv2.INTER_AREA), (0, 0), 3 * H / 1080 + 1), (W, H))
         frame = frame + glow * 0.35
-        frame = draw_seed_lights(frame, S.seed_lights(u, t), H, W)
         return frame
 
 
@@ -1141,6 +1259,23 @@ def label_overlay(sc_obj, W, H):
     d.text((x, y + int(H * 0.035)), '   '.join(sc_obj.names), font=small, fill=(170, 175, 190, 170))
     a = np.asarray(img).astype(np.float32) / 255.0
     return a
+
+
+def matte_path(out):
+    out = Path(out)
+    return out.with_name(out.stem + '_matte' + out.suffix)
+
+
+def attach_bg_audio(out, bg):
+    """배경 영상에 소리가 있으면 결과에 그대로 붙인다 (영상은 다시 인코딩하지 않음)"""
+    tmp = out.with_name(out.stem + '_tmp_audio' + out.suffix)
+    r = subprocess.run([ffmpeg_exe(), '-y', '-loglevel', 'error', '-i', str(out), '-i', str(bg), '-map', '0:v:0', '-map', '1:a:0?',
+                        '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest', '-movflags', '+faststart', str(tmp)])
+    if r.returncode == 0 and tmp.exists():
+        tmp.replace(out)
+        print(f'  배경 소리 붙임 → {out.name}')
+    else:
+        print('  ! 배경 소리를 붙이지 못했습니다 (배경 영상에 소리가 없을 수 있음)')
 
 
 def run_parallel(args, jobs):
@@ -1163,6 +1298,7 @@ def run_parallel(args, jobs):
     if args.bg_json: base += ['--bg-json', str(Path(args.bg_json).resolve())]
     if args.no_label: base += ['--no-label']
     if args.no_reversal: base += ['--no-reversal']
+    if args.alpha_out: base += ['--alpha-out']
     per = int(round(args.scene_sec * args.fps))
     total = per * len(nums)
     print(f'병렬 렌더 · 장면 {len(nums)}개를 동시에 {jobs}개씩 (프로세스당 스레드 {threads}) → {out.name}')
@@ -1196,9 +1332,18 @@ def run_parallel(args, jobs):
     lst.write_text(''.join(f"file '{parts[k].as_posix()}'\n" for k in nums), encoding='utf-8')
     subprocess.run([ffmpeg_exe(), '-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', str(lst),
                     '-c', 'copy', '-movflags', '+faststart', str(out)], check=True)
+    if args.alpha_out:
+        lst_m = tmp / 'concat_matte.txt'
+        lst_m.write_text(''.join(f"file '{matte_path(parts[k]).as_posix()}'\n" for k in nums), encoding='utf-8')
+        subprocess.run([ffmpeg_exe(), '-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', str(lst_m),
+                        '-c', 'copy', '-movflags', '+faststart', str(matte_path(out))], check=True)
+    if args.bg_audio and args.bg:
+        attach_bg_audio(out, Path(args.bg))
     metas = [json.load(open(parts[k].with_suffix('.json'), encoding='utf-8')) for k in nums]
     meta = dict(metas[0])
     meta['video'] = out.name
+    if args.alpha_out:
+        meta['matte'] = matte_path(out).name
     meta['scenes'], meta['law_map'], meta['reversal'] = [], [], []
     for i, m in enumerate(metas):
         off = i * per
@@ -1228,8 +1373,8 @@ def main():
     ap.add_argument('--bg', default='', help='배경 엔진 mp4 — 주면 통합 영상')
     ap.add_argument('--bg-json', default='', help='배경 엔진 video.json (장면 시작 시각)')
     ap.add_argument('--no-label', action='store_true', help='좌하단 서사 표지 끄기')
-    ap.add_argument('--style', choices=['analog', 'digital', 'line'], default='analog',
-                    help='analog: 빛 입자 · digital: 사각 블록 · line: 손그림 선의 기하 도형')
+    ap.add_argument('--style', choices=['line', 'analog', 'digital'], default='line',
+                    help='line: 손그림 선의 기하 도형 (기본 · 어린아이 로봇이 그리는 과정) · analog: 빛 입자 · digital: 사각 블록')
     ap.add_argument('--block', type=int, default=12, help='digital 블록 크기(1080p 기준 픽셀)')
     ap.add_argument('--crf', type=int, default=18)
     ap.add_argument('--emerge', choices=['point', 'cloud'], default='point', help='point: 한 점에서 서서히 드러남 · cloud: 예전 방식')
@@ -1238,6 +1383,9 @@ def main():
     ap.add_argument('--seed-glow', type=float, default=1.0, help='오브제가 드러나기 전 시작점 빛의 세기 (0 = 끔)')
     ap.add_argument('--dissolve-shift', type=float, default=0.0, help='오브제가 풀리는 시점 앞뒤 조정 (장면 비율 · +0.02 = 1.5초 늦게)')
     ap.add_argument('--contrast', type=float, default=-1, help='밝은·색 배경 대비 보정 세기 0~1 (기본: 통합이면 1, 오브제만이면 0)')
+    ap.add_argument('--alpha-out', action='store_true',
+                    help='오브제만 + 투명도: 검은 바탕 오브제 영상과 투명도(흑백) 영상 _matte.mp4 를 함께 낸다 (다른 팀이 자기 배경에 합성할 때)')
+    ap.add_argument('--bg-audio', action='store_true', help='--bg 로 넣은 배경 영상의 소리를 결과에 그대로 붙인다')
     ap.add_argument('--jobs', default='auto', help='동시에 렌더할 장면 수 (auto = CPU 에 맞춰 최대 4 · 1 = 한 줄로)')
     ap.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
     ap.add_argument('--progress-file', default='', help=argparse.SUPPRESS)
@@ -1265,6 +1413,10 @@ def main():
         order = [i for i in order if scenes[i].get('scene') in want]
     n_all = len(scenes)
     composite = bool(args.bg)
+    if args.alpha_out and composite:
+        sys.exit('--alpha-out 은 오브제만 렌더할 때 쓴다 (--bg 와 같이 쓰지 않는다)')
+    if args.alpha_out:
+        args.no_label = True
     contrast = (1.0 if composite else 0.0) if args.contrast < 0 else args.contrast
     seed = int(hashlib.sha1(json.dumps(scenes, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:8], 16)
     rng = np.random.default_rng(seed)
@@ -1284,6 +1436,10 @@ def main():
            '-r', str(args.fps), '-i', '-', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', str(args.crf),
            '-pix_fmt', 'yuv420p', '-movflags', '+faststart', str(out)]
     enc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    enc_m = None
+    if args.alpha_out:
+        matte = matte_path(out)
+        enc_m = subprocess.Popen(cmd[:-1] + [str(matte)], stdin=subprocess.PIPE)
 
     law_map, marks = [], []
     prev_cloud = None
@@ -1332,46 +1488,33 @@ def main():
         LS = None
         if args.style == 'line':
             keep = [i for i, fp in enumerate(files) if fp is not None]
-            LS = LineScene(S, files, keep, seed + si * 7919)
+            LS = LineScene(S, files, keep, seed + si * 7919, args.scene_sec)
         for f in range(frames_per_scene):
             tau = f / args.fps
             u = f / frames_per_scene
             if LS is not None:
-                frame = LS.render(bg.get(si, tau), u, tau, composite)
+                draw = lambda b, u=u, tau=tau: LS.render(b, u, tau, composite)
+            else:
+                step_out = S.step(u, tau)
+                if digital:
+                    draw = lambda b: compose_digital(S, b, step_out, contrast, cell, gap_mask)
+                else:
+                    draw = lambda b, u=u: compose_analog(S, b, step_out, u, composite, contrast, fog_col)
+            if args.alpha_out:
+                # 오브제만 + 투명도 — 검은 바탕 · 흰 바탕에 각각 그려 차이로 투명도를 구한다 (합성 식이 바탕에 대해 1차라 정확하다)
+                f0 = draw(np.zeros((H, W, 3), np.float32))
+                f1 = draw(np.ones((H, W, 3), np.float32))
+                alpha = np.clip(1 - (f1 - f0).mean(2), 0, 1)
+                enc.stdin.write((np.clip(f0, 0, 1) * 255).astype(np.uint8).tobytes())
+                enc_m.stdin.write(np.repeat((alpha * 255).astype(np.uint8)[..., None], 3, 2).tobytes())
+            else:
+                frame = draw(bg.get(si, tau))
+                # 장면 경계 — 들어오고 나갈 때 1초씩 부드럽게
                 edge = min(1.0, tau / 1.0, (args.scene_sec - tau) / 1.0) if not composite else 1.0
                 if label is not None:
                     la = label[..., 3:4] * edge
                     frame = frame * (1 - la) + label[..., :3] * la
                 enc.stdin.write((np.clip(frame, 0, 1) * 255).astype(np.uint8).tobytes())
-                done += 1
-                if args.progress_file and done % 30 == 0:
-                    Path(args.progress_file).write_text(str(done))
-                if done % (args.fps * 5) == 0 or done == total:
-                    el = time.time() - t0
-                    print(f'\r  {done}/{total} 프레임 · {el:.0f}초 경과 · 남은 시간 약 {el / done * (total - done):.0f}초   ', end='', flush=True)
-                continue
-            step_out = S.step(u, tau)
-            if digital:
-                frame = compose_digital(S, bg.get(si, tau), step_out, contrast, cell, gap_mask)
-                edge = min(1.0, tau / 1.0, (args.scene_sec - tau) / 1.0) if not composite else 1.0
-                if label is not None:
-                    la = label[..., 3:4] * edge
-                    frame = frame * (1 - la) + label[..., :3] * la
-                enc.stdin.write((np.clip(frame, 0, 1) * 255).astype(np.uint8).tobytes())
-                done += 1
-                if args.progress_file and done % 30 == 0:
-                    Path(args.progress_file).write_text(str(done))
-                if done % (args.fps * 5) == 0 or done == total:
-                    el = time.time() - t0
-                    print(f'\r  {done}/{total} 프레임 · {el:.0f}초 경과 · 남은 시간 약 {el / done * (total - done):.0f}초   ', end='', flush=True)
-                continue
-            frame = compose_analog(S, bg.get(si, tau), step_out, u, composite, contrast, fog_col)
-            # 장면 경계 — 들어오고 나갈 때 1초씩 부드럽게
-            edge = min(1.0, tau / 1.0, (args.scene_sec - tau) / 1.0) if not composite else 1.0
-            if label is not None:
-                la = label[..., 3:4] * edge
-                frame = frame * (1 - la) + label[..., :3] * la
-            enc.stdin.write((np.clip(frame, 0, 1) * 255).astype(np.uint8).tobytes())
             done += 1
             if args.progress_file and done % 30 == 0:
                 Path(args.progress_file).write_text(str(done))
@@ -1382,9 +1525,17 @@ def main():
         print()
     enc.stdin.close()
     enc.wait()
+    if enc_m is not None:
+        enc_m.stdin.close()
+        enc_m.wait()
+    if args.bg_audio and composite and not args.worker:
+        attach_bg_audio(out, Path(args.bg))
     meta = {'video': out.name, 'fps': args.fps, 'size': [W, H], 'scene_sec': args.scene_sec, 'seed': seed,
-            'mode': 'integrated' if composite else 'objects_only', 'style': args.style, 'emerge': args.emerge,
-            'reversal': reversals, 'scenes': marks, 'law_map': law_map}
+            'mode': 'integrated' if composite else ('objects_alpha' if args.alpha_out else 'objects_only'),
+            'style': args.style, 'emerge': args.emerge, 'reversal': reversals, 'scenes': marks, 'law_map': law_map}
+    if args.alpha_out:
+        meta['matte'] = matte_path(out).name
+        meta['composite'] = 'out = bg * (1 - matte) + fill   (fill = 이 영상 · 이미 matte 를 곱한 색 · matte = 흰색일수록 오브제)'
     json.dump(meta, open(out.with_suffix('.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
     print(f'완료 → {out}  ·  장면 시각·법칙 대응표 → {out.with_suffix(".json")}')
 

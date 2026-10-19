@@ -422,12 +422,15 @@ def handoff():
         print('  이번 스토리보드로 찍은 배경 영상이 아직 없습니다 → --record(자동) 또는 --serve(브라우저)로 기록하세요.')
     else:
         print('  배경: %s · %s' % (rel(bg[0]), rel(bg[1])))
-    print('\n  [B 오브제 · 오브제 담당 PC] (교수님 10/8: 아날로그)')
+    print('\n  [B 오브제 · 오브제 담당 PC] (교수님 10/15: 선화 · 어린아이 로봇이 그리는 과정 = 엔진 기본)')
     print('    cd team3/object')
     print('    python generate_objects_comfy.py --story %s' % story)
+    print('    ※ 오브제 PNG 는 반드시 이 대본으로 새로 만든다 — 엔진은 이름이 안 맞아도 같은 번호의 옛 PNG 를 그대로 쓴다')
     if bg:
-        print('    python object_engine.py --story %s --style analog --bg %s --bg-json %s --out dream_integrated.mp4'
+        print('    python object_engine.py --story %s --bg %s --bg-json %s --out dream_integrated.mp4'
               % (story, from_object(bg[0]), from_object(bg[1])))
+    print('    (4팀이 직접 합성할 오브제만 + 투명도: python object_engine.py --story %s --alpha-out --out object_line.mp4)'
+          % story)
     wav = SOUND / 'output' / 'dream_sound.wav'
     story_t = (SLOT / 'dream_scenes.json').stat().st_mtime
     print('\n  [C 사운드 · 1팀 생성기 · 아피찻퐁] (교수님 10/8 · 10/15) — 이 PC 에서 약 3분')
