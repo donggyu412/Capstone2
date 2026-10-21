@@ -177,6 +177,12 @@ output/                  실행하면 자동 생성 — 장면별 배경판·표
 > ※ **2026-09-25 폴더 개명:** `260917_dummy/` → `dummy/`. 아래 09-25 이전 기록에 나오는
 >   `260917_dummy/` 는 현재의 `dummy/` 와 같은 폴더다. 당시 기록이므로 이름을 고치지 않고 둔다.
 
+## [2026-10-21 · 86] 최종 점검 — 코드 · 깃 · 키 없이 뽑은 결과물(`바탕화면/RENDER_OUTPUT.zip`) 확인
+- **깃:** main = team3 = `3c736d1` · 로컬 = 원격 · 원격 모든 브랜치(team1 · team2 · team4 · pr/1~6 등) main 에 반영됨(앞선 커밋 0). `.env` 3곳 깃 제외 · 기록에 키 · `.env` 없음. 파이썬 전 파일 컴파일 OK.
+- **zip(10-20 · 오브제 담당 PC · API 키 없이 저장소의 시험 대본으로):** 오브제 PNG 16장(512 · 투명 · 이름이 `input/storyboard/dream_scenes.json` 4장면과 일치) · `render_20261020-152357/object_line(_alpha/_alpha_matte).mp4` 5:00 · 1080p · 30fps · `team4_output.mp4` 5:00 · 1080p · AAC 48k(평균 -22.7dB · 무음 아님). 프레임 육안: 배경 + 선화 오브제 · 195초 3장면 반전(선 가득)은 설정대로. → **오브제 → 사운드 → 4팀까지 정상.** `--alpha` 라 `dream_integrated.mp4`(3팀 통합 영상)는 없음(정상).
+- **아직 미시험:** 키를 넣은 1·2팀 새 대본 · 배경 사진 단계부터 끝까지(오브제 담당이 키 받아 시험 예정) · 실제 카메라 `--sources 0 1 --narration team1/video/narration.mp3` — 1팀 코드(step3b)에 이미 있고 `run_pipeline.py`/`run_all.py` 가 그대로 넘김 → 우리 코드 수정 불필요 · 10/22 당일 1팀과 한 줄 확인만.
+- **Next Step:** 이 노트북에서 할 코드 작업 없음. 팀원 실행 결과(또는 오류 메시지) 받아 확인 → 10/22 실측·시연 → 10/24 전달 · 10/26 발표 자료.
+
 ## [2026-10-20 · 85] 1팀 → 4팀 한 줄 실행 `run_all.py` (저장소 루트)
 - 이미 따로 시험한 명령을 순서대로 부른다(각 팀 코드 안 고침): `run_pipeline.py` → `--record` → `--object --alpha` → `--sound-only` → `--mux` + `--to-team4 --video` → `team4/main.py`(4팀 .venv 있으면 그 Python).
 - 시작 전 검사: 1팀 입력 · Claude 키 · OpenAI 키 · ComfyUI(8188) · 4팀 torch/cv2/numpy (돌릴 단계에 필요한 것만). `--check` · `--from N` · `--until N` · `--quick`(배경 장면당 5초 · 오브제 40초 · --video 생략).
