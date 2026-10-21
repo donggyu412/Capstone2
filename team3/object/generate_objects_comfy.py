@@ -62,6 +62,11 @@ ABSTRACT_PROMPT = ("minimalist abstract geometric form, simple primitive shapes,
                    "no texture, white background, standalone object")
 ABSTRACT_NEGATIVE = NEGATIVE + ", realistic, photo, photorealistic, texture, detailed, hands, fingers, face, text"
 FALLBACK = "surreal object"
+# 자동 번역기가 엉뚱하게 옮기는 낱말 — 번역기에 넘기기 전에 같은 뜻의 쉬운 말로 바꾼다
+#   '성에' → castle(城) 로 옮겨짐 (10/21 실행에서 "glass walls in the castle")
+KO_REWORD = {
+    "성에": "서리",
+}
 TRANSLATIONS = "translations.json"
 
 
@@ -102,9 +107,19 @@ def _make_providers():
             ("mymemory", lambda: MyMemoryTranslator(source="korean", target="english us"))]
 
 
+RETRANSLATED = set()  # 이번 실행에서 다시 번역한 오브제 — 예전 번역으로 만든 PNG 를 새로 만든다
+
+
+def reword(ko):
+    for a, b in KO_REWORD.items():
+        ko = ko.replace(a, b)
+    return ko
+
+
 def auto_translate(ko):
     """(영어, 번역기 이름) — 모두 실패하면 (None, None)"""
     global _providers
+    ko = reword(ko)
     if _providers is None:
         _providers = _make_providers()
     for name, make in list(_providers):
@@ -126,13 +141,19 @@ def auto_translate(ko):
 def translate(ko, tr):
     """(영어, 출처) — 출처: manual / dict / auto / fallback"""
     entry = tr.get(ko)
-    if entry and entry.get("en"):
+    # 낱말 바꾸기 전에 자동 번역해 둔 기록(예: 성에 → castle)은 버리고 다시 옮긴다. 사람이 고친 번역은 그대로
+    stale = entry and entry.get("source") == "auto" and reword(ko) != ko and not entry.get("reworded")
+    if entry and entry.get("en") and not stale:
         return entry["en"], entry.get("source", "manual")
+    if stale:
+        RETRANSLATED.add(ko)
     if ko in OBJ_ENGLISH_MAP:
         return OBJ_ENGLISH_MAP[ko], "dict"
     en, provider = auto_translate(ko)
     if en:
         tr[ko] = {"en": en, "source": "auto", "provider": provider}
+        if reword(ko) != ko:
+            tr[ko]["reworded"] = reword(ko)
         save_translations(tr)
         return en, "auto"
     print(f"  ! '{ko}' 번역 실패 → '{FALLBACK}' 로 생성합니다 (translations.json 에 직접 적어 주세요)")
@@ -285,7 +306,7 @@ def main():
                 continue
 
             save_path = os.path.join(folder, fname)
-            if os.path.exists(save_path) and not reseed:
+            if os.path.exists(save_path) and not reseed and ko not in RETRANSLATED:
                 print("      패스 (이미 있음)")
                 continue
             os.makedirs(folder, exist_ok=True)

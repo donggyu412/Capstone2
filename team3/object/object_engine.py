@@ -122,19 +122,20 @@ GROUPS = {
     '손': ['손', '손끝'],
 }
 LAW_RULES = [
-    ('float',      ['떠', '부유', '공중', '닿지 않', '튕겨', '튀어 오', '위로 떨어', '위로 떠', '머무는 시간']),
-    ('glide',      ['미끄러지듯', '미끄러져', '옆으로', '따라가', '따라감']),
+    ('float',      ['떠', '부유', '공중', '닿지 않', '튕겨', '튀어 오', '위로 떨어', '위로 떠', '머무는 시간', '거꾸로 솟', '솟아', '거꾸로 배관']),
+    ('glide',      ['미끄러지듯', '미끄러져', '옆으로', '따라가', '따라감', '옮겨']),
     ('weightless', ['무게가 사라', '가벼워', '무게를 잃', '무게가 실리지 않', '무게가 점차 사라']),
-    ('heavy',      ['무거워', '무게만 늘', '무게가 늘', '가라앉']),
+    ('heavy',      ['무거워', '무게만 늘', '무게가 늘', '가라앉', '쌓이', '쌓임', '눌어붙']),
     ('rotate',     ['회전', '돌며', '천천히 돈']),
     ('ash',        ['바스러', '재처럼', '부서']),
-    ('vanish',     ['사라짐', '사라지', '지워', '없어', '흡수', '삼키', '소멸']),
-    ('stretch',    ['늘어', '길게', '비율', '길어지', '넓게 벌어', '팽창']),
-    ('flutter',    ['팔락', '넘어가', '넘어감', '떨리', '떨림', '수축', '휘어']),
+    ('vanish',     ['사라짐', '사라지', '지워', '없어', '흡수', '삼키', '소멸', '메워']),
+    ('stretch',    ['늘어', '길게', '비율', '길어지', '넓게 벌어', '팽창', '번져', '번지']),
+    ('flutter',    ['팔락', '넘어가', '넘어감', '떨리', '떨림', '수축', '휘어', '동기화', '박동', '맥박', '숨결']),
     ('crack',      ['균열', '금이', '벌어', '갈라']),
     ('precede',    ['먼저', '앞서', '역전', '닿기도 전', '닿기 전', '늦게 따라', '한 박자 늦게']),
-    ('flicker',    ['나타나고 사라', '있다가 없다가', '임의로 변', '깜빡']),
-    ('still',      ['변하지 않', '흔들리지 않', '잔물결 하나', '고정되어', '그대로 매달려', '그대로 머', '움직이지 않']),
+    ('flicker',    ['나타나고 사라', '있다가 없다가', '임의로 변', '깜빡', '다시 앞에 나타', '다시 나타']),
+    ('still',      ['변하지 않', '흔들리지 않', '잔물결 하나', '고정되어', '그대로 매달려', '그대로 머', '움직이지 않',
+                    '멈추고', '멈춰', '멈춘 채', '어긋남 없이']),
     ('recede',     ['멀어', '좁혀지지 않', '작아지', '아득']),
 ]
 # 먼저 보고 지우는 표현 — 이 말 안의 낱말이 다른 동작으로 두 번 잡히지 않게
@@ -165,16 +166,24 @@ def name_tokens(name):
         for i, w in enumerate(words):
             if len(w) >= 3 and w[-1] in '의과와':
                 w = w[:-1]
-            if i == len(words) - 1 or not _jong_n(w[-1]):
+            if i == len(words) - 1 or not _jong_n(w[-1]) or any(c.isdigit() for c in w):
                 toks.append(w)
     return list(dict.fromkeys(t for t in toks if t))
 
 
 def _hit(tok, law):
     if len(tok) >= 2:
-        return tok in law
+        # '바닥에서 떠오름' 처럼 '~에서' 로만 나오면 장소일 뿐 주어가 아니다
+        return any(not law.startswith('에서', i + len(tok)) for i in _find_all(tok, law))
     # 한 글자(손 · 막 · 금 · 문 · 종)는 낱말 경계에서만 — '손바닥' 의 '손', '막다' 의 '막' 오인 방지
     return _re.search(rf'(?<![{_HANGUL}]){tok}(?=$|[^{_HANGUL}]|[이가을를은는의에도만과와로])', law) is not None
+
+
+def _find_all(tok, text):
+    i = text.find(tok)
+    while i >= 0:
+        yield i
+        i = text.find(tok, i + 1)
 
 
 def _says(word, text):
@@ -200,8 +209,13 @@ def analyze_scene(sc):
     beh = [dict() for _ in objs]
     log = []
     for law in sc.get('physics_laws') or []:
-        hits = [i for i, gs in enumerate(groups)
-                if any(any(w in law for w in GROUPS[g]) for g in gs) or any(_hit(t, law) for t in toks[i])]
+        # 무리 낱말 중 한 글자(손)는 낱말 경계에서만 — '손상' 의 '손' 오인 방지
+        ghit = [any(any((w in law) if len(w) >= 2 else _hit(w, law) for w in GROUPS[g]) for g in gs) for gs in groups]
+        hits = [i for i in range(len(objs)) if ghit[i] or any(_hit(t, law) for t in toks[i])]
+        # '바닥 자국' · '손가락 자국' 처럼 흔한 낱말 하나만 겹친 오브제는, 이름이 더 많이 겹친 오브제가 있으면 뺀다
+        score = {i: sum(_hit(t, law) for t in toks[i]) for i in hits}
+        if hits and max(score.values()) >= 2:
+            hits = [i for i in hits if score[i] >= 2 or ghit[i]]
         found, rest = [], law
         for b in PRIORITY + [r for r, _ in LAW_RULES if r not in PRIORITY]:
             words = dict(LAW_RULES)[b]
