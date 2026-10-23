@@ -21,7 +21,8 @@
   세 가지 그리기 방식 (--style)
     line     (기본 · 10/22 메인) 아래 설명 + 어린아이 로봇이 그리는 과정 —
              펜을 대고 망설이다가 획을 그리고, 그리다 멈칫하고, 비뚤게 그린 획은 멈추고 지우개로 지운 뒤 다시 그리고,
-             가끔 한 번 더 덧그린다. 펜(밝은 점)과 지우개(빈 동그라미)가 화면에 보인다. 다 그린 뒤에도 가끔 지웠다 다른 색으로 다시 그린다.
+             가끔 한 번 더 덧그린다. 펜(밝은 점)과 지우개(빈 동그라미)가 화면에 보인다. 지우는 건 잘못 그은 획뿐이고,
+             오브제는 장면의 80% 안에 완성되어 장면 끝까지 머물다가 마지막 2.5초에 부드럽게 사라진다. 크기는 장면 안에서도 숨쉬듯 바뀐다.
              그리는 순서 · 틀릴 획 · 멈칫할 자리는 스토리로 만든 시드로 정해져 같은 스토리면 같은 영상이 나온다.
     analog   부드러운 빛 입자 · 번짐 · 안개 — 아날로그 꿈
     digital  격자에 맞물리는 사각 블록 · 평평한 색 · 통통 튀는 조립 — 로봇의 꿈 (추상·기하·단순·원초적)
@@ -882,6 +883,14 @@ LINE_EMO_ORDER = {  # 흰색은 맨 뒤 — 예제처럼 선명한 색이 대부
     '혐오': ['초록', '보라', '노랑', '하늘', '분홍', '주황', '빨강', '흰'],
     '중립': ['주황', '초록', '하늘', '분홍', '노랑', '보라', '빨강', '흰'],
 }
+# 크기 변화 (10/15 피드백 "작았다 커졌다") — 장면 안에서도 오브제 크기가 계속 바뀐다
+#   숨쉬기: 6~11초 주기로 천천히 커졌다 작아짐 (폭) · 부풀기: 18~30초마다 4~6초 동안 크게 부풀었다 돌아옴 (폭)
+#   법칙 흐름: 늘어남 → 점점 커짐 · 무거워짐 → 점점 작아짐 · 부유/무게 잃음 → 조금 커짐 · 멀어짐 → 점점 작아짐(기존)
+#   전(轉): 반전 6초 전부터 부풀어 오르다 터진다
+SIZE_BREATH = {'기': 0.10, '승': 0.14, '전': 0.20, '결': 0.10}
+SIZE_SWELL = {'기': 0.25, '승': 0.35, '전': 0.55, '결': 0.25}
+SIZE_TREND = {'stretch': 0.35, 'heavy': -0.25, 'float': 0.10, 'weightless': 0.15}
+
 LINE_ACT = {  # 크기 배율 · 메아리(초당 개수 · 크기 범위) · 선 굵기 배율
     # 예제 영상처럼 '작게 시작해서 절정에 크게 터진다' — 기·승은 작게, 전은 화면을 덮을 만큼, 결은 다시 작게
     '기': dict(scale=0.45, echo_rate=0.90, echo_size=(0.04, 0.12), thick=0.75),
@@ -996,6 +1005,7 @@ def _wobble(pts, amp, seed, t):
 #   획을 그리는 속도(장면 단위 길이 / 초) · 틀렸다가 지우고 다시 그릴 확률 · 중간에 멈칫할 확률 · 한 번 더 덧그릴 확률
 CHILD_SPEED = {'기': 0.45, '승': 0.55, '전': 0.75, '결': 0.45}
 CHILD_RETRY, CHILD_HESITATE, CHILD_OVERDRAW = 0.35, 0.25, 0.20
+DRAW_DEADLINE = 0.80  # 오브제는 장면의 80% 안에 다 그리고, 나머지는 완성된 채로 머문다 (장면 끝 2.5초에 부드럽게 사라짐)
 
 
 def _plan_strokes(items, start, act, prng):
@@ -1084,7 +1094,22 @@ class LineScene:
         # 그리는 계획 — 오브제마다 등장 시각부터 획을 하나씩 (펜 · 멈칫 · 틀림 · 지움 · 다시 그림 · 덧그림)
         prng = np.random.default_rng(seed + 101)
         for j, g in enumerate(self.glyphs):
-            g['plan'], g['done_t'] = _plan_strokes(g['items'], float(S.enter[j]) * scene_sec, S.act, prng)
+            start = float(S.enter[j]) * scene_sec
+            g['plan'], g['done_t'] = _plan_strokes(g['items'], start, S.act, prng)
+            deadline = DRAW_DEADLINE * scene_sec  # 장면이 넘어가기 전에 완성되어 머무는 시간을 남긴다
+            if g['done_t'] > deadline and g['done_t'] > start:
+                k_ = max(0.2, (deadline - start) / (g['done_t'] - start))
+                g['plan'] = [[(start + (a - start) * k_, start + (b - start) * k_, typ, f0, f1, var)
+                              for a, b, typ, f0, f1, var in seq] for seq in g['plan']]
+                g['done_t'] = start + (g['done_t'] - start) * k_
+        # 크기 변화 계획 — 오브제마다 숨쉬기 주기 · 부풀 시각 (스토리 시드로 정해져 같은 스토리면 같다)
+        for j, g in enumerate(self.glyphs):
+            g['breath'] = (prng.uniform(6.0, 11.0), prng.uniform(0, 2 * np.pi))
+            sw, t_ = [], float(S.enter[j]) * scene_sec + prng.uniform(8.0, 16.0)
+            while t_ < scene_sec - 6:
+                sw.append((t_, prng.uniform(4.0, 6.0), SIZE_SWELL.get(S.act, 0.3) * prng.uniform(0.7, 1.0)))
+                t_ += prng.uniform(18.0, 30.0)
+            g['swell'] = sw
         # 메아리 — 이 장면 오브제 조각이 작게 그려졌다 사라진다 (언제 · 어디서 · 무엇을 · 얼마나 크게)
         dur = 1.0
         n_echo = int(self.L['echo_rate'] * 75)
@@ -1102,13 +1127,30 @@ class LineScene:
                                   size=rng.uniform(*self.L['echo_size']), ang=rng.uniform(-0.6, 0.6),
                                   seed=float(rng.uniform(0, 100))))
 
+    def size_mult(self, j, u, t):
+        """지금 이 오브제의 크기 배율 — 숨쉬기 × 부풀기 × 법칙 흐름 × (전) 반전 전 부풀기"""
+        S, g = self.S, self.glyphs[j]
+        per, ph = g['breath']
+        m = 1 + SIZE_BREATH.get(S.act, 0.12) * math.sin(2 * math.pi * t / per + ph)
+        for t0, dur, amp in g['swell']:
+            if t0 <= t <= t0 + dur:
+                m *= 1 + amp * math.sin(math.pi * (t - t0) / dur) ** 2
+        span = max(float(S.dissolve[j] - S.enter[j]), 1e-3)
+        prog = min(1.0, max(0.0, (u - float(S.enter[j])) / span))
+        m *= 1 + sum(v * prog for k, v in SIZE_TREND.items() if g['beh'].get(k))
+        if S.rev is not None:
+            lead = 6.0 / self.scene_sec
+            if S.rev - lead <= u < S.rev:
+                m *= 1 + 0.30 * float(smoothstep(S.rev - lead, S.rev, u))
+        return min(1.9, max(0.5, m))  # 화면 밖으로 넘치거나 점처럼 줄지 않게
+
     def _xf(self, pts, j, F, dx, dy, sx, tilt, scale, stretch, gap, flut, t):
         S = self.S
         g = self.glyphs[j]
         p = pts.copy()
         p[:, 1] = np.where(p[:, 1] > 0, p[:, 1] * (1 + stretch[j]), p[:, 1])
         p[:, 0] = p[:, 0] + flut[j] / max(g['size'], 1) * np.sin(p[:, 1] * 9 + 6 * t) * np.abs(p[:, 0]) * 2
-        p = p * g['size']
+        p = p * (g['size'] * self.mult[j])
         p[:, 0] *= sx[j] * scale[j]
         p[:, 1] *= scale[j]
         c, s = math.cos(tilt[j]), math.sin(tilt[j])
@@ -1122,6 +1164,7 @@ class LineScene:
         F, dx, dy, sx, tilt, scale, stretch, gap, flut = S.transforms(u, t)
         flip, pull, cmix = S.rev_phase(u)
         burst = (1 - min(1.0, pull)) if flip else 0.0
+        self.mult = [self.size_mult(j, u, t) for j in range(len(self.glyphs))]
         tq = math.floor(t * 8) / 8  # 손그림처럼 1초에 8번 떨린다
         thick = max(2, int(H * 0.0075 * self.L['thick']))
         layer = np.zeros((H, W, 3), np.float32)
@@ -1163,48 +1206,31 @@ class LineScene:
                 continue
             beh = g['beh']
             n = len(items)
-            out = float(smoothstep(S.dissolve[j], S.dissolve[j] + RELEASE_SPAN, u))
-            if out >= 1:
+            # 다 그린 오브제는 장면 끝까지 완성된 채로 머물다가, 마지막 2.5초에 부드럽게 사라진다 (지우개로 지우지 않음)
+            fade = 1.0 - float(smoothstep(self.scene_sec - 2.5, self.scene_sec - 0.2, t))
+            if fade <= 0:
                 continue
             amp = 0.0 if beh.get('still') else 0.006 * g['size']
-            drawn = t >= g['done_t']
             for k, it in enumerate(items):
                 ok, wrong, over, pen, smear = _stroke_state(g['plan'][k], t)
                 if ok <= 0 and wrong <= 0 and pen is None and smear is None:
                     continue
-                # 지워짐: 위쪽 획부터 · 그 밖은 나중 획부터 차례로 지워진다
-                rank = (k / max(n - 1, 1))
-                if beh.get('vanish'):
-                    rank = 1 - float((it['pts'][:, 1].mean() + 0.5))
-                erase = float(np.clip(out * 1.6 - (1 - rank) * 0.6, 0, 1))
-                if beh.get('flicker') and ok >= 1:  # 있다 없다 — 획마다 1.4초에 한 번씩 켜지고 꺼진다
-                    if ((k * 2654435761 + int(t / 1.4) * 40503 + j * 97) % 7) <= 2:
-                        continue
                 col = it['col']
                 frac = ok
-                if drawn and out == 0 and burst == 0:
-                    # 다 그린 뒤에도 — 획마다 7~10초에 한 번 지웠다가 다른 색으로 다시 그린다
-                    period = 7.0 + (k * 1.3 + j * 0.7) % 3.0
-                    ph = (t + k * 2.3 + j * 1.7) % period
-                    cyc = int((t + k * 2.3 + j * 1.7) // period)
-                    if ph < 1.4:
-                        frac = min(frac, abs(1 - 2 * ph / 1.4))
-                        pens.append(('erase' if ph < 0.7 else 'draw', None, j, k, frac))
-                    if ph >= 0.7 or cyc > 0:
-                        col = self.pal[(k + j + cyc) % len(self.pal)] if (cyc + (ph >= 0.7)) % 2 else it['col']
-                frac = frac * (1 - erase)
+                a_ = fade
+                if beh.get('flicker') and ok >= 1:  # 있다 없다 — 획이 사라지지 않고 1.4초마다 희미해졌다 돌아온다
+                    if ((k * 2654435761 + int(t / 1.4) * 40503 + j * 97) % 7) <= 2:
+                        a_ *= 0.35
                 base = _wobble(it['pts'], amp / max(g['size'], 1), k * 3.7 + j, tq)
                 pts = burst_off(self._xf(base, j, F, dx, dy, sx, tilt, scale, stretch, gap, flut, t), j)
-                stroke(pts, col, it['w'], frac, k, amp, dash=bool(beh.get('ash')) and erase > 0.05)
-                if 0 < erase < 1 and frac > 0:  # 장면 끝에 지우개가 지나간다
-                    pens.append(('erase', at(pts, frac), j, k, frac))
+                stroke(pts, col, it['w'], frac, k, amp, alpha=a_)
                 # 틀린 획 — 조금 돌아가고 커지고 비켜난 자리에 그렸다가 지운다
                 if wrong > 0 or (smear is not None and pen and pen[2] == 'wrong'):
                     rot, sc_, ox, oy = it['wrong']
                     c_, s_ = math.cos(rot), math.sin(rot)
                     wp = base @ np.array([[c_, s_], [-s_, c_]], np.float32) * sc_ + np.array([ox, oy], np.float32)
                     wpts = burst_off(self._xf(wp, j, F, dx, dy, sx, tilt, scale, stretch, gap, flut, t), j)
-                    stroke(wpts, col * 0.9, it['w'], wrong, k, amp)
+                    stroke(wpts, col * 0.9, it['w'], wrong, k, amp, alpha=fade)
                     if smear is not None:  # 지우는 중 — 지운 자리에 옅은 자국이 잠깐 남는다
                         f_now, f_from, left = smear
                         i0, i1 = int((len(wpts) - 1) * f_now), int((len(wpts) - 1) * f_from) + 1
@@ -1214,7 +1240,7 @@ class LineScene:
                         pens.append((pen[0], at(wpts, pen[1]), j, k, pen[1]))
                 if over > 0:  # 덧그림 — 살짝 비켜난 자리에 가늘게 한 번 더
                     op = burst_off(self._xf(base + np.array([0.012, -0.01], np.float32), j, F, dx, dy, sx, tilt, scale, stretch, gap, flut, t), j)
-                    stroke(op, col, it['w'] * 0.55, over, k, amp, alpha=0.85)
+                    stroke(op, col, it['w'] * 0.55, over, k, amp, alpha=0.85 * fade)
                     if pen and pen[2] == 'over':
                         pens.append((pen[0], at(op, pen[1]), j, k, pen[1]))
                 if pen and pen[2] == 'ok':
@@ -1240,7 +1266,7 @@ class LineScene:
             frac = min(1.0, a / 0.4)
             alpha = 1.0 if a < 0.75 else (1 - a) / 0.25
             it = e['it']
-            sz = e['size'] * min(H, W) * 0.5
+            sz = e['size'] * min(H, W) * 0.5 * (0.55 + 0.9 * a)  # 작게 나타나 커지며 사라진다
             p = _wobble(it['pts'], 0.01, e['seed'], tq) * sz
             c, s = math.cos(e['ang']), math.sin(e['ang'])
             P = np.stack([e['x'] * W + p[:, 0] * c - p[:, 1] * s, e['y'] * H + p[:, 0] * s + p[:, 1] * c], 1)
