@@ -95,8 +95,9 @@ def _hann(n):
     return w
 
 
-def granular(srcs, D, sr, density, grain, spread, reverse, speed, pitch0, rng):
-    """알갱이 합성 — 조각을 20~600ms 알갱이로 다시 짠다. 밀도가 '초당'이라 길이에 비례해 늘어난다."""
+def granular(srcs, D, sr, density, grain, spread, reverse, speed, pitch0, rng, wander=0.0):
+    """알갱이 합성 — 조각을 20~600ms 알갱이로 다시 짠다. 밀도가 '초당'이라 길이에 비례해 늘어난다.
+    wander > 0 (스타일 '자연스럽게'): 밀도가 느린 1/f 잡음을 따라 짙어졌다 옅어지고, 조각도 무작위로 고른다."""
     n = int(round(D * sr))
     out = np.zeros(n, dtype=np.float32)
     srcs = [s for s in srcs if len(s) > sr * 0.3]
@@ -104,9 +105,14 @@ def granular(srcs, D, sr, density, grain, spread, reverse, speed, pitch0, rng):
         return out
     count = max(1, int(density * D))
     times = (np.arange(count) + rng.random(count)) / density
+    if wander:                                       # 시간을 휘어 밀도를 출렁이게 (평균 개수는 같다)
+        g = np.linspace(0, D, 512)
+        m = np.clip(1 + wander * style.wander(512, 512 / D, rng, 0.12), 0.15, None)
+        cum = np.concatenate([[0], np.cumsum((m[1:] + m[:-1]) / 2)])
+        times = np.interp(times / D * cum[-1], cum, g)
     r = rng.random((count, 5))
     for j, t in enumerate(times):
-        src = srcs[j % len(srcs)]
+        src = srcs[int(r[j, 4] * len(srcs))] if wander else srcs[j % len(srcs)]
         gl = max(32, int(grain * sr * (0.7 + 0.6 * r[j, 0])) // 16 * 16)
         rate = 2 ** ((pitch0 + spread * (2 * r[j, 1] - 1)) / 12)
         need = int(gl * rate) + 2
@@ -120,8 +126,9 @@ def granular(srcs, D, sr, density, grain, spread, reverse, speed, pitch0, rng):
     return out
 
 
-def place_times(count, D, positions, cluster, rng, accel=False):
-    """사건 시각 — 글 속 위치(0~1) 둘레에 몰리게(cluster) · 층화 표집 · accel 이면 뒤로 갈수록 촘촘."""
+def place_times(count, D, positions, cluster, rng, accel=False, shape=None):
+    """사건 시각 — 글 속 위치(0~1) 둘레에 몰리게(cluster) · 층화 표집 · accel 이면 뒤로 갈수록 촘촘.
+    shape (스타일 '불규칙하게'): 층화 표집 대신 감마 간격(모양 < 1) — 몰렸다가 오래 비는, 박자 없는 간격."""
     if count <= 0:
         return np.array([])
     grid = np.linspace(0, 1, 512)
@@ -133,15 +140,21 @@ def place_times(count, D, positions, cluster, rng, accel=False):
         p = p * (0.25 + 1.75 * grid)
     cdf = np.cumsum(p)
     cdf /= cdf[-1]
-    q = (np.arange(count) + rng.random(count)) / count
+    if shape:
+        g = rng.gamma(shape, 1.0, count + 1)
+        q = np.cumsum(g)[:-1] / g.sum()
+    else:
+        q = (np.arange(count) + rng.random(count)) / count
     return np.sort(np.interp(q, cdf, grid) * D)
 
 
-def anchored_times(count, D, positions, cluster, rng, accel=False):
-    """근거 문장마다 한 번은 '그 문장 자리'에 반드시 놓고(닻), 나머지는 place_times 로 흩는다."""
+def anchored_times(count, D, positions, cluster, rng, accel=False, shape=None, spread=None):
+    """근거 문장마다 한 번은 '그 문장 자리'에 반드시 놓고(닻), 나머지는 place_times 로 흩는다.
+    spread (스타일 '불규칙하게'): 닻을 문장 자리에서 0.1~spread 초 뒤 무작위로 (늘 0.25초 뒤에 '딱' 오지 않게)."""
     anchors = sorted(set(round(u, 3) for u in positions or []))[:max(0, count)]
-    at = [min(D - 0.05, u * D + 0.25) for u in anchors]
-    rest = place_times(count - len(at), D, positions, cluster, rng, accel)
+    hi = min(spread, 0.5 * NEAR * D) if spread else 0
+    at = [min(D - 0.05, u * D + (float(rng.uniform(0.1, max(0.1, hi))) if spread else 0.25)) for u in anchors]
+    rest = place_times(count - len(at), D, positions, cluster, rng, accel, shape)
     return np.sort(np.concatenate([np.array(at, dtype=float), rest]))
 
 
@@ -168,6 +181,20 @@ def _why(sents, u):
     return (best[1], best[2]) if best else None
 
 
+def _vary(y, g, pan, sr, rng, nat):
+    """스타일 '자연스럽게' — 소리마다 음높이 · 크기 · 거리 · 자리를 조금씩 다르게 (같은 조각도 매번 다르게 들리게)."""
+    if not nat:
+        return y, g, pan
+    sd = nat.get('pitch_sd', 0)
+    if sd:
+        y = synth.pitch(y, float(np.clip(rng.normal(0, sd), -2.5 * sd, 2.5 * sd)))
+    g = g * 10 ** (float(np.clip(rng.normal(0, nat.get('gain_db', 0)), -9, 6)) / 20)
+    if rng.random() < nat.get('far_p', 0):                           # 멀리서 — 고역이 먹먹하고 작게
+        y = synth.lowpass(y, float(rng.uniform(1500, 5000)), sr, 1)
+        g *= 0.7
+    return y, g, float(np.clip(pan + rng.normal(0, 0.1), -1, 1))
+
+
 def count(rate_per_sec, D, rng):
     """초당 빈도 × 길이 → 개수. 확률적 반올림이라 어떤 길이에서도 기대 밀도가 같다
     (10-08: '최소 1개'로 올리던 방식은 8초 미리듣기에서 사건 종류가 많은 장면을 실제보다 붐비게 만들었다)."""
@@ -190,12 +217,15 @@ def arrange(sc, P, mats, D, sr, rng, note):
     st = {k: np.zeros((n, 2), dtype=np.float32) for k in ('bed', 'object', 'event', 'seen')}
 
     # 바닥 — 룸톤을 알갱이로. 고역을 걷어 '쉬익' 대신 '웅' 하는 공기로 (10-07: 잡음의 주원인이었음)
-    bed = granular(mats['bed'], D, sr, P['bed_density'], P['bed_grain'], P['bed_spread'], 0.1, 0.6, gp, rng)
+    sty = style.get(sc)                              # 주변 소리 층은 여기서 놓지 않는다 — 공간·곡선을 거치지 않게 preview/render 가 따로 더한다
+    nat = sty.get('natural') or {}                   # '느리고 불규칙하게 · 자연스럽게' (없으면 기존 방식 그대로)
+    shp, spr = nat.get('ioi_shape'), nat.get('anchor_spread')
+    bed = granular(mats['bed'], D, sr, P['bed_density'], P['bed_grain'], P['bed_spread'], 0.1, 0.6, gp, rng,
+                   wander=nat.get('wander', 0.0))
     bed = synth.lowpass(bed / (np.sqrt(np.mean(bed ** 2)) + 1e-9) * 0.1, 2200, sr, 1)
     st['bed'] += _pan(bed, 0.0)
     note(0, D, 'bed', 'bed', '방의 공기(룸톤) · 알갱이 %.0f개/초' % P['bed_density'],
          why=('배경: ' + ' / '.join(sc.get('backgrounds') or ['(배경 묘사 없음)']), None), src='배경 사진 수치 → 룸톤 합성')
-    sty = style.get(sc)                              # 주변 소리 층은 여기서 놓지 않는다 — 공간·곡선을 거치지 않게 preview/render 가 따로 더한다
 
     # 오브제 — 이름이 나오는 문장 자리에서 두드림·문지름, 그리고 정체 소리(그림 인식)
     objs = sc['objects']
@@ -204,12 +234,16 @@ def arrange(sc, P, mats, D, sr, rng, note):
         if not clips:
             continue
         pan = W * (-0.6 + 1.2 * idx / (len(objs) - 1) if len(objs) > 1 else 0.0)
-        times = anchored_times(count(P['obj_rate'] / 10, D, rng), D, o['positions'], 0.75, rng)
+        times = anchored_times(count(P['obj_rate'] / 10, D, rng), D, o['positions'], 0.75, rng, shape=shp, spread=spr)
+        last = -1
         for j, t in enumerate(times):
-            y = synth.pitch(clips[j % len(clips)], gp + o['pitch_offset'])
+            ci = style.pick(clips, last, rng) if nat else j % len(clips)
+            last = ci
+            y = synth.pitch(clips[ci], gp + o['pitch_offset'])
             soft = 'uneven' in laws and j % 2
             g = (0.25 if soft else 1.0) * (0.6 + 0.4 * rng.random()) * 0.5
-            _add(st['object'], _pan(y * g, pan), int(t * sr))
+            y, g, p1 = _vary(y, g, pan, sr, rng, nat)
+            _add(st['object'], _pan(y * g, p1), int(t * sr))
             note(t, len(y) / sr, 'object', o['name'], '%s 울림' % o['name'], o.get('sentences'),
                  '매번 다른 크기(작게)' if soft else None, src='오브제 실루엣%s → 모달 합성' % (
                      ' + 재질 ' + o['features']['material'] if o['features'].get('material') else ''))
@@ -228,7 +262,7 @@ def arrange(sc, P, mats, D, sr, rng, note):
             idt = None                                 # 정령·그림자는 소리 없이 (스타일)
         iclips = mats['event'].get(idt['event'], []) if idt else []
         if iclips:                                     # 정체 소리 — 오브제 이름이 나오는 문장 자리에서만(최대 3번), 없으면 두 번
-            k3 = min(3, len(times))                    # 두드림 수보다 많지 않게 — 짧은 미리듣기에서도 밀도가 같도록
+            k3 = min(nat.get('seen_max', 3), len(times))                    # 두드림 수보다 많지 않게 — 짧은 미리듣기에서도 밀도가 같도록
             at = [u * D + 0.4 for u in sorted(set(o['positions'] or []))[:k3]] or list(times[:2])
             for j, t1 in enumerate(at):
                 y = synth.pitch(iclips[j % len(iclips)], gp + 1.0 * (2 * rng.random() - 1))
@@ -252,9 +286,13 @@ def arrange(sc, P, mats, D, sr, rng, note):
         rate = EVENT_RATE[k] / 10 * P['evt_rate'] * (0.5 + 1.5 * e['weight'])
         cnt = count(rate, D, rng)
         accel = 'accel' in laws and k in IMPULSIVE
-        for j, t in enumerate(anchored_times(cnt, D, e['positions'], P['evt_cluster'], rng, accel)):
+        last = -1
+        for j, t in enumerate(anchored_times(cnt, D, e['positions'], P['evt_cluster'], rng, accel,
+                                             shape=None if accel else shp, spread=spr)):
             semis = gp + 1.5 * (2 * rng.random() - 1) - (3 * t / D if 'sink' in laws else 0)
-            y = synth.pitch(clips[int(rng.integers(0, len(clips)))], semis)
+            ci = style.pick(clips, last, rng) if nat else int(rng.integers(0, len(clips)))
+            last = ci
+            y = synth.pitch(clips[ci], semis)
             lw = []
             if accel:
                 lw.append('빨라지는 간격')
@@ -275,6 +313,7 @@ def arrange(sc, P, mats, D, sr, rng, note):
             g = (0.25 if soft else 1.0) * (0.5 + 0.5 * rng.random()) * 0.4
             jit = float(rng.uniform(-0.8, 0.8))
             pan = W * (0.85 * seen[k]['x'] + 0.15 * jit if k in seen else jit)
+            y, g, pan = _vary(y, g, pan, sr, rng, nat)
             _add(st['event'], _pan(y * g, pan), start)
             note(start / sr, len(y) / sr, 'event', k, EVENT_NAME[k], e.get('sentences'), ' · '.join(lw) or None,
                  src='이야기 사건 → 자체 합성%s' % ((' · 위치: 그림 속 %s(%s)' % (seen[k]['word'], _side(seen[k]['x'])))
@@ -287,12 +326,13 @@ def arrange(sc, P, mats, D, sr, rng, note):
         clips = mats['event'].get(k, [])
         if not clips:
             continue
-        pos = sorted(set(w['positions']))[:4]
+        pos = sorted(set(w['positions']))[:nat.get('word_max', 4)]
         nmax = count(len(pos) / 75.0, D, rng) if D < 60 else len(pos)
         for j, u0 in enumerate(pos[:nmax]):
-            t = min(D - 0.1, u0 * D + 0.6 + 0.6 * rng.random())
+            t = min(D - 0.1, u0 * D + 0.6 + (rng.uniform(0.0, 1.6) if nat else 0.6 * rng.random()))
             y = synth.pitch(clips[j % len(clips)], gp + 1.0 * (2 * rng.random() - 1))
-            _add(st['event'], _pan(y * 0.3 * (0.7 + 0.3 * rng.random()), W * float(rng.uniform(-0.7, 0.7))), int(t * sr))
+            y, g, p1 = _vary(y, 0.3 * (0.7 + 0.3 * rng.random()), W * float(rng.uniform(-0.7, 0.7)), sr, rng, nat)
+            _add(st['event'], _pan(y * g, p1), int(t * sr))
             note(t, len(y) / sr, 'word', k, '%s (\'%s\')' % (WORD_NAME.get(k, k), ' · '.join(w['words'][:2])),
                  w.get('sentences'), why=_why(w.get('sentences'), u0), src='이야기 낱말 → 자체 합성')
 
@@ -305,7 +345,7 @@ def arrange(sc, P, mats, D, sr, rng, note):
             continue
         near = float(x.get('near', 0.5))
         cnt = count(EVENT_RATE.get(k, 1.0) / 10 * 0.45 * P['evt_rate'], D, rng)
-        for j, t in enumerate(place_times(cnt, D, None, 0.0, rng)):
+        for j, t in enumerate(place_times(cnt, D, None, 0.0, rng, shape=shp)):
             y = synth.pitch(clips[j % len(clips)], gp + 1.0 * (2 * rng.random() - 1))
             if near < 0.6:
                 y = synth.lowpass(y, 1200 + 9000 * near, sr, 1)

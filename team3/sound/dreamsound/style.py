@@ -22,6 +22,8 @@
             꿈의 변형: 이질적 침입 · 음색 치환 대신 ① 침묵의 틈 ② 깊은 쿵(꿈 전체에 한 번) ③ 소리 시퀀스 (변신 · 데자뷔는 그대로)
             그림자·정령이 나오는 문장에서도 '존재감' 소리를 내지 않음 — 이상한 존재가 아무렇지 않게 있다
             기승전결 음량 곡선을 거의 평평하게 (결 장면 끝 25%만 천천히 낮춤)
+            느리고 불규칙하게 · 자연스럽게 (10-26 · natural): 초당 0.12~0.55개 · 사건 간격 감마 분포 · 소리마다 음높이·크기·거리를
+            조금씩 다르게 · 바람·벌레 울음·알갱이 밀도는 주기 없는 1/f 잡음으로 출렁임 · 소리 시퀀스·라디오도 느리게 흔들리게
             주변 소리 층은 공간·잔향(막의 먹먹함)을 거치지 않는 별도 버스 · 장면 경계에서 8초 겹쳐 이음 (10-16 강화)
   apichatpong_deep  위와 같고 라디오 없음(음악 0) · 소리 시퀀스 28초 · 침묵의 틈 장면마다 2번
   스타일은 음악적 방식(아이디어)이라 저작권 대상이 아니고, 영화 소리를 샘플링하지 않으므로 '외부 음원 0개'는 그대로다.
@@ -47,18 +49,31 @@ STYLES = {
         'amb': True, 'music': False, 'radio': True, 'drone': False, 'flat_arc': True, 'fx': 'apichatpong',
         'mute_presence': True,
         # 3단계 평가 기준 — 사건이 주변 소리 속에 묻히듯(−3~+3dB) · 성기게 · 고르게  (10-16 강화: 0~6dB → −3~+3dB)
-        'listen': {'clarity_center': 0.0, 'clarity_tol': 3.0, 'pace_lo': 0.2, 'pace_hi': 0.8, 'bed_top_ok': True,
+        # 10-26 느리게: 초당 0.2~0.8개 → 0.12~0.55개
+        'listen': {'clarity_center': 0.0, 'clarity_tol': 3.0, 'pace_lo': 0.12, 'pace_hi': 0.55, 'bed_top_ok': True,
                    'sharp_allow': 0.06, 'flat_allow': 0.10, 'even_weight': 0.10},
         # 10-16 강화: 진화가 주변 소리를 줄이지 못하게 · 효과음이 붐비지 않게 — 유전자가 쓰는 값의 범위를 좁힌다
-        'gene_bounds': {'bed_gain': (0.6, 1.0), 'evt_rate': (0.3, 0.7), 'obj_rate': (0.3, 1.0)},
+        # 10-26 느리게: 사건 빈도 ≤ 0.7 → 0.4 · 오브제 울림 ≤ 10초당 1번 → 0.5번
+        'gene_bounds': {'bed_gain': (0.6, 1.0), 'evt_rate': (0.3, 0.4), 'obj_rate': (0.3, 0.5)},
+        # 10-26 불규칙 · 자연스럽게 — 소리가 '박자에 맞춰' 나오지 않게, 같은 소리가 똑같이 되풀이되지 않게
+        #   ioi_shape     사건 사이 간격 ~ 감마 분포(모양 0.6 < 1): 몰렸다가 오래 비는 간격 (1 = 무작위 포아송, 고르게 나눈 기존 방식보다 불규칙)
+        #   anchor_spread 근거 문장 자리에서 0.1~1.2초 늦게 (늘 0.25초 뒤에 '딱' 오지 않게)
+        #   pitch_sd · gain_db · far_p  소리마다 음높이(±반음 0.3)·크기(표준편차 4dB)·거리(35%는 멀리서 먹먹하게)를 조금씩 다르게
+        #   wander        알갱이 밀도·바람·벌레 울음이 느린 1/f 잡음을 따라 출렁임 (사인파 같은 주기 없이)
+        #   seq_slow · seq_jitter  소리 시퀀스 박을 1.35배 느리게 · 박마다 ±15% 흔들림 · 가끔 한 박 쉼
+        #   radio_beat · rubato    먼 라디오 박 0.42 → 0.52초 · 음마다 ±8% 늘고 줄음
+        #   word_max · seen_max    낱말 소리는 낱말마다 4번 → 2번 · 오브제 정체 소리는 3번 → 2번까지 (느리게)
+        'natural': {'ioi_shape': 0.6, 'anchor_spread': 1.2, 'pitch_sd': 0.3, 'gain_db': 4.0, 'far_p': 0.35,
+                    'wander': 0.6, 'seq_slow': 1.35, 'seq_jitter': 0.15, 'radio_beat': 0.52, 'rubato': 0.08,
+                    'word_max': 2, 'seen_max': 2},
         # 10-16 강화: 주변 소리 층은 막의 먹먹함(공간·잔향 처리)을 거치지 않고, 장면 경계에서 8초 겹쳐 이어진다
         'amb_xfade': 8.0,
         # 10-16: 주변 소리를 '장면 자기 재료'로 만든다 (derived) — 따로 합성한 밤 숲 소리(synth)는 apichatpong_synth 로 비교
         'amb_source': 'derived',
         'seq_len': 16.0, 'gaps_fixed': None,
         # 3단계 출발점 — 바닥(주변 소리) 크게 · 사건 적게 · 폭 넓게 · 잔향은 조금 덜 (트인 밤 공기)
-        'prior': {'bed_gain': ('set', 0.78), 'evt_rate': ('mul', 0.6), 'evt_gain': ('set', 0.45),
-                  'obj_rate': ('mul', 0.55), 'obj_gain': ('set', 0.45), 'seen_gain': ('set', 0.4),
+        'prior': {'bed_gain': ('set', 0.78), 'evt_rate': ('mul', 0.45), 'evt_gain': ('set', 0.45),
+                  'obj_rate': ('mul', 0.4), 'obj_gain': ('set', 0.45), 'seen_gain': ('set', 0.4),
                   'width': ('set', 1.0), 'space_wet': ('mul', 0.7)},
         'guide_render': '고른 구성으로 75초를 놓고, 주변 소리 층과 먼 라디오, 침묵의 틈 같은 꿈의 변형을 얹습니다.',
         'guide_music': '<b>♪ 먼 라디오</b> — 배경 음악(화성 패드·동기·지속음)은 끄고, 장면마다 한 번 장면 안 어딘가의 작은 스피커에서 '
@@ -79,6 +94,8 @@ STYLES = {
             ('소리 시퀀스', '장면의 기계음(전기 험 등) — 없으면 오브제 울림 — 한 토막이 리듬처럼 되풀이되며 조금씩 변한다'),
             ('정령은 소리 없이', '그림자·형상이 나오는 문장에서도 소리를 바꾸지 않는다 — 이상한 존재가 아무렇지 않게 있다'),
             ('평평한 곡선', '기승전결 음량 곡선을 거의 평평하게 (결 장면 끝만 천천히 낮춤)'),
+            ('느리고 불규칙하게', '초당 0.12~0.55개 · 낱말 소리는 낱말마다 2번까지 · 소리 사이 간격이 몰렸다 비었다 하고(감마 분포), 같은 소리도 매번 '
+                               '음높이·크기·거리가 조금씩 다르다 · 바람·벌레 울음은 주기 없이 출렁인다 — 박자에 맞춘 듯한 인공적인 느낌을 없앤다'),
         ],
     },
 }
@@ -120,6 +137,36 @@ def apply_prior(p, sty):
     for k, (op, v) in (sty.get('prior') or {}).items():
         p[k] = v if op == 'set' else p[k] * v
     return p
+
+
+def natural(x):
+    """스타일의 '불규칙 · 자연스럽게' 설정 (없으면 빈 dict = 기존 방식 그대로)."""
+    return get(x).get('natural') or {}
+
+
+def wander(n, sr, rng, hz=0.1, octaves=3):
+    """느린 1/f 잡음 (−1~1 근처) — hz 부터 한 옥타브씩 빠른 매끈한 무작위 곡선을 1/2 씩 작게 더한다.
+    사인파 합처럼 되풀이되는 주기가 없다 (자연의 바람·생물 소리의 출렁임은 1/f 에 가깝다)."""
+    out = np.zeros(n)
+    D = n / sr
+    for o in range(octaves):
+        f = hz * 2 ** o
+        m = max(3, int(D * f) + 3)
+        pts = rng.standard_normal(m)
+        x = np.linspace(0, m - 2, n)
+        i = x.astype(int)
+        fr = x - i
+        fr = fr * fr * (3 - 2 * fr)                                # 매끈한 보간
+        out += (pts[i] * (1 - fr) + pts[i + 1] * fr) * 0.5 ** o
+    return out / (np.std(out) + 1e-9) * 0.5
+
+
+def pick(clips, last, rng):
+    """조각 고르기 — 바로 앞과 같은 조각은 피한다 (같은 소리가 연달아 똑같이 나오면 기계처럼 들림)."""
+    k = int(rng.integers(0, len(clips)))
+    if len(clips) > 1 and k == last:
+        k = (k + 1 + int(rng.integers(0, len(clips) - 1))) % len(clips)
+    return k
 
 
 # ── 2 재료: 주변 소리 조각 (전부 수식 합성) ─────────────────────────────────
@@ -236,21 +283,41 @@ def _derived_streams(mats, D, sr, rng, sc):
     from .render import granular
     ev = mats.get('event') or {}
     out = []
+    nat = natural(sc) if sc else {}
+    wv = nat.get('wander', 0.0)
     sk = [k for k in SHIMMER_KEYS if ev.get(k)] or list(ev.keys())
     if sk:
         src = [c for k in sk for c in ev[k]]
         def shimmer():                                             # 짧은 조각을 2옥타브 올려 초당 70개 → 좁은 공명 몇 개로 울리고 빠르게 떨게 — 벌레 울음 같은 결
             n = int(round(D * sr))
-            y = granular(src, D, sr, 70, 0.035, 4.0, 0.3, 1.0, 24, rng)
+            y = granular(src, D, sr, 70, 0.035, 4.0, 0.3, 1.0, 24, rng, wander=wv)
             t = np.arange(n) / sr
             z = np.zeros(n)
             for _ in range(4):                                     # 마리마다: 고유 음높이(좁은 공명) · 떨림 박자 · 우는 구간
                 f = rng.uniform(3200, min(6500, sr / 2 - 800))
                 band = synth.bandpass(y, f * 0.97, f * 1.03, sr)
-                pulse = np.maximum(0, np.sin(2 * np.pi * rng.uniform(16, 36) * t)) ** 2
+                r0 = rng.uniform(16, 36)
                 per = rng.uniform(0.6, 1.6)
-                gate = ((t + rng.uniform(0, per)) % per) < per * rng.uniform(0.4, 0.75)
-                z += band / (np.std(band) + 1e-9) * pulse * gate * rng.uniform(0.5, 1.0)
+                duty = rng.uniform(0.4, 0.75)
+                if wv:                                             # 자연스럽게: 떨림 박자가 천천히 흔들리고, 우는 길이·쉬는 길이가 매번 다르며, 가끔 몇 초 멈춘다
+                    ph = 2 * np.pi * np.cumsum(r0 * (1 + 0.12 * wander(n, sr, rng, 0.15))) / sr
+                    pulse = np.maximum(0, np.sin(ph)) ** 2
+                    gate = np.zeros(n)
+                    i = int(rng.uniform(0, per) * sr)
+                    while i < n:
+                        on = int(per * duty * rng.lognormal(0, 0.35) * sr)
+                        gate[i:i + on] = 1
+                        off = per * (1 - duty) * rng.lognormal(0, 0.5)
+                        if rng.random() < 0.12:
+                            off += rng.uniform(2.0, 6.0)
+                        i += on + int(off * sr)
+                    gate = np.convolve(gate, np.hanning(int(0.02 * sr)) / (0.01 * sr), 'same')
+                    lvl = np.clip(1 + 0.5 * wander(n, sr, rng, 0.05), 0.2, 2.0)
+                else:
+                    pulse = np.maximum(0, np.sin(2 * np.pi * r0 * t)) ** 2
+                    gate = ((t + rng.uniform(0, per)) % per) < per * duty
+                    lvl = 1.0
+                z += band / (np.std(band) + 1e-9) * pulse * gate * lvl * rng.uniform(0.5, 1.0)
             return z + 0.15 * synth.bandpass(y, 2500, min(9000, sr / 2 - 500), sr) / (np.std(y) + 1e-9)
         out.append(('shimmer', AMB_KO['shimmer'], _names(sk) + ' 조각을 높고 촘촘하게', shimmer))
     ak = [k for k in AIR_KEYS if ev.get(k)]
@@ -258,17 +325,21 @@ def _derived_streams(mats, D, sr, rng, sc):
     if asrc:
         def air():                                                 # 길게 늘여 느리게 일렁이게 — 바람 같은 공기
             n = int(round(D * sr))
-            y = granular(asrc, D, sr, 10, 0.45, 1.5, 0.2, 0.3, -5, rng)
+            y = granular(asrc, D, sr, 10, 0.45, 1.5, 0.2, 0.3, -5, rng, wander=wv)
             y = synth.bandpass(y, 250, 3000, sr)
             t = np.arange(n) / sr
-            gust = sum(rng.uniform(0.3, 1) * np.sin(2 * np.pi * rng.uniform(0.03, 0.2) * t + rng.uniform(0, 6)) for _ in range(3))
+            if wv:                                                 # 자연스럽게: 주기 없는 돌풍 (느린 1/f 잡음)
+                gust = wander(n, sr, rng, 0.025, 4)
+            else:
+                gust = sum(rng.uniform(0.3, 1) * np.sin(2 * np.pi * rng.uniform(0.03, 0.2) * t + rng.uniform(0, 6)) for _ in range(3))
             return y * (0.35 + 0.65 * (gust - gust.min()) / (np.ptp(gust) + 1e-9))
         out.append(('air', AMB_KO['air'], (_names(ak) if ak else '룸톤') + ' 조각을 길게 늘여', air))
     drones = list((mats.get('drone') or {}).values()) or list(mats.get('bed') or [])
     if drones:
         def low():                                                 # 오브제 문지름을 2옥타브 내려 저역만
-            y = granular(drones, D, sr, 6, 0.6, 0.5, 0.0, 0.4, -24, rng)
-            return synth.lowpass(y, 150, sr)
+            y = granular(drones, D, sr, 6, 0.6, 0.5, 0.0, 0.4, -24, rng, wander=wv)
+            y = synth.lowpass(y, 150, sr)
+            return y * np.clip(1 + 0.25 * wander(len(y), sr, rng, 0.04), 0.5, 1.5) if wv else y
         objn = [o['name'] for o in (sc or {}).get('objects', [])][:2]
         out.append(('low', AMB_KO['low'], ('오브제(%s) 문지름을 낮게' % '·'.join(objn)) if objn and mats.get('drone') else '룸톤을 낮게', low))
     return out
@@ -353,7 +424,11 @@ def radio(sc, D, sr, rng):
         why = '장면 가운데쯤 — 배경 음악 대신 장면 안 어딘가에서 들리는 노래'
     notes = motif_notes(m, sc['stage'])
     notes = notes + notes[::-1] + notes                            # 짧은 노래 한 소절처럼
-    beat = 0.42
+    nat = natural(sc)
+    beat = nat.get('radio_beat', 0.42)
+    rub = nat.get('rubato', 0.0)
+    if rub:                                                        # 음마다 조금씩 늘고 줄어든다 (박자기에 맞춘 듯하지 않게)
+        notes = [(mt, r * float(np.clip(1 + rub * rng.standard_normal(), 0.8, 1.25))) for mt, r in notes]
     total = sum(r for _, r in notes) * beat + 1.0
     n = int(total * sr)
     y = np.zeros(n)
