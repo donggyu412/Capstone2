@@ -18,6 +18,9 @@ MODEL_PYTHON = TEAM4_DIR / "DreamModel" / ".venv" / "Scripts" / "python.exe"
 PYTHON_EXE = MODEL_PYTHON if MODEL_PYTHON.exists() else Path(sys.executable)
 FILM = 1
 SUPPORTED_EMOTIONS = {"기쁨", "슬픔", "분노", "공포", "놀람", "혐오", "중립"}
+# 3팀 배경 영상을 DreamModel 배경 위에 얹는 비율 (0 = 예전 그대로).
+# 10/26 교수님 피드백 "배경이 희미해 의미 전달이 안 됨" — 셀룰러를 거치며 뭉개진 형체를 3팀 원본 배경으로 되살린다.
+BG3_MIX = 0.55
 
 
 def find_music() -> Path:
@@ -165,13 +168,17 @@ def main() -> None:
 
     ffmpeg = find_ffmpeg()
     # GridModel's black canvas is keyed out over DreamModel's generated background.
+    # 3팀 배경 영상(input/background)을 BG3_MIX 만큼 섞은 뒤 오브제를 얹는다 — 오브제는 흐려지지 않는다.
     filter_graph = (
+        "[0:v]format=gbrp[ca];"
+        "[2:v]scale=1920:1080,fps=30,format=gbrp[bg3];"
+        f"[ca][bg3]blend=all_mode=normal:all_opacity={BG3_MIX}:shortest=1[bg];"
         "[1:v]colorkey=0x000000:0.12:0.06[object];"
-        "[0:v][object]overlay=shortest=1,format=yuv420p[video]"
+        "[bg][object]overlay=shortest=1,format=yuv420p[video]"
     )
     run([
         ffmpeg, "-y", "-v", "error",
-        "-i", str(background_layer), "-i", str(object_video),
+        "-i", str(background_layer), "-i", str(object_video), "-i", str(background_video),
         "-filter_complex", filter_graph,
         "-map", "[video]", "-map", "0:a:0",
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
