@@ -5,7 +5,7 @@ emotion_peaks.txt → 4개 꿈 장면 생성
 
 [파이프라인]
 장면1: 1팀 assembled_blueprint.json 첫 장면 재료 사용 (없으면 emotion_peaks 풀 폴백)
-장면2~4: 이전 장면 elements에서 Dream Drift + 코사인 유사도 샘플링 → 글 생성
+장면2~4: 이전 장면 elements + 타임테이블 전체 재료에서 Dream Drift + 코사인 유사도 샘플링 → 글 생성
 
 [조정 가능한 값]
 - COHERENCE   : 장면 간 연결 강도 (0=꿈처럼 단절, 1=이야기처럼 연결)
@@ -45,8 +45,8 @@ REVERSAL_BOOST = 1.6   # 클라이맥스 반전 목표 증폭. 글쓰기+사후�
                         # 목표가 실측상 절반 정도로 희석돼서, 미리 더 세게 잡는다.
 
 # 이전 글을 프롬프트에 얼마나 넘길지. COHERENCE와 분리돼 있다.
-# 0.0=안 넘김 / 0.5=직전 장면 마지막 문단만 / 1.0=직전 장면 전문
-CONTEXT_LEVEL = 0.5
+# 0.0=안 넘김 / 0.5=직전 장면 마지막 문단만 / 1.0=이전 모든 장면 전문
+CONTEXT_LEVEL = 1.0
 
 # 이전 장면에서 이미 쓴 재료가 다시 뽑힐 때 곱해지는 가중치
 REPEAT_PENALTY = 0.1
@@ -90,113 +90,169 @@ VECTOR_AXES = """4개 축의 의미 (Hourglass of Emotions 기반, 각 값 -1.0 
 # 프롬프트
 # ════════════════════════════════════════════════
 
-# 기승전결 역할별 지시. 전(클라이맥스)만 특별 취급하면 기·승·결은 전부 같은
-# 범용 규칙만 받아서, 벡터가 조금씩만 움직이는 만큼 재료도 거의 안 바뀐다.
-# 네 장면 각자에게 "지금 이야기에서 뭘 해야 하는가"를 다르게 지시한다.
+# 한 주인공의 목표, 행동, 결과를 누적하여 네 장면을 하나의 이야기로 구성한다.
 ROLE_PROMPTS = {
-    1: """[장면 역할 — 기(도입)]
-이야기의 첫 장면이다. 설명이나 배경지식으로 시작하지 않는다.
-아직 낯선 공간과 사물을 처음 마주하는 느낌으로 쓴다. 다음 장면이 더 깊이 들어갈 여지를 남긴다.
+    1: """[기 — 주인공의 목표와 사건의 시작]
+한 명의 주인공을 정하고, 그 사람이 지금 처한 상황과 이루려는 구체적인 목표를 세운다.
+첫 행동에서 목표나 필요가 드러나게 한다. 배경과 오브제는 행동의 대상이나 조건이 된다.
+주인공이 왜 그 목표에 매달리는지, 무엇을 바라거나 잃을까 두려워하는지 쉬운 말로 드러낸다.
+주인공이 목표를 향해 움직이다 예상 밖의 장애물이나 사건을 만난다.
+장면 안에서 주인공이 대응을 선택하고 실행하며, 그 결과가 다음 장면의 문제를 만든다.
+핵심 사물이나 관계에 작은 단서를 심어 이후 반전의 근거로 남긴다.
+마지막에는 주인공의 위치, 행동의 결과, 다음에 해야 할 일이 구체적으로 드러나게 한다.
 
 """,
-    2: """[장면 역할 — 승(전개)]
-직전 장면(기)에서 있던 낯섦이 조금씩 커지고 이상해지는 지점이다.
-기 장면과 같은 이름의 배경·오브제는 다시 쓰지 않는다. 새로운 공간과 사물로 이어가며 긴장을 쌓아올린다.
-다만 규칙11(잔상)처럼, 재료 자체가 아니라 기 장면의 분위기가 색이나 움직임의 결로 흐릿하게 한 번 스치는 건 괜찮다.
-같은 세계관 안에서 한 발 더 들어간 느낌으로 쓴다.
+    2: """[승 — 이전 행동의 결과와 갈등의 심화]
+앞선 이야기의 같은 주인공을 따라간다. 직전 행동의 결과가 이번 상황의 원인이 된다.
+주인공은 이미 세운 목표를 위해 구체적인 시도를 하고, 장애물의 반응 때문에 방법을 바꾼다.
+그 시도는 단서나 성과를 얻는 동시에 더 큰 대가, 위험, 갈등을 불러온다.
+이전 장면의 단서를 행동 속에서 발전시키고, 전에서 뒤집힐 상황에 설득력 있는 근거를 쌓는다.
+마지막에는 주인공이 피할 수 없는 선택이나 결정적인 행동의 문턱에 도달하게 한다.
+감정은 겪은 사건에 따라 변하고 그 변화가 다음 행동을 바꾸게 한다.
+시도가 어긋나는 순간의 속상함이나 두려움, 그래도 계속하려는 마음을 독자가 바로 이해하게 쓴다.
 
 """,
-    3: """[장면 역할 — 전(절정, 반전)]
-직전 장면과 정서의 질이 정반대로 느껴지게 써라. 재료 이름은 아래 그대로 쓰되,
-그것을 다루는 태도와 장면 전체의 공기를 뒤집는다.
-- 직전 장면이 위협적이고 차가웠다면, 이 장면은 편안하고 따뜻하게.
-- 직전 장면이 무력하고 가라앉는 느낌이었다면, 이 장면은 힘이 들어오고 또렷해지는 느낌으로.
-조명과 소리의 성격을 반대로 바꿔서 같은 재료로도 전혀 다른 공기를 만들어라.
-다만 낯섦 자체는 줄이지 않는다 — 규칙3(꿈의 어긋남)은 이 장면에도 그대로 적용되고,
-편안하고 따뜻한 공간이어도 여전히 기이할 수 있다. 반전되는 건 위협감이지 낯섦이 아니다.
-2번(주인공 미고정)·4번(감정을 환경으로 전달) 규칙도 그대로 지킨다.
+    3: """[전 — 행동으로 드러나는 반전과 결정적 선택]
+기와 승 전체를 읽고, 이미 등장한 단서와 주인공의 행동이 맞물리는 절정을 만든다.
+주인공의 시도나 선택 때문에 숨겨진 사실 또는 사물과 인물 사이의 진짜 관계가 드러난다.
+그 사건은 앞선 이야기의 해석을 크게 바꾼다. 보호라고 믿은 것이 구속이거나,
+방해라고 여긴 행동이 구조였다는 식으로 기존 단서에서 재료에 맞는 반전을 구성한다.
+장면 중간에 반전이 드러나고, 주인공은 달라진 상황을 이해하여 행동의 방향을 바꾼다.
+감정의 급격한 전환은 새로 드러난 사실과 그 인물이 치르는 대가에서 비롯되게 한다.
+직전 장면 전체의 메인 감정이 속한 그룹을 기준으로 반전 후의 중심 감정을 정한다.
+이번 입력이 이전과 같은 그룹이면 그 감정으로 시작하고, 반전 사건을 통해 다른 그룹의 감정으로 크게 이동한다.
+입력 감정이 둘 이상이면 이전 그룹과 다른 그룹의 감정을 반전 후 중심으로 우선 활용한다.
+이미 다른 그룹의 입력을 받았다면 이전 감정에서 그 입력 감정으로 넘어가는 사건을 구성하고, 전환된 감정이 후반을 지배하게 한다.
+후반 중심 감정은 A군 기쁨, B군 혐오·공포·분노·슬픔, C군 놀람 중 이전 그룹 바깥에서 고른다.
+반전 이후의 선택, 속마음, 행동의 결과에 새 감정을 반복해서 연결하여 이번 장면 전체의 메인 감정으로 자리 잡게 한다.
+장면 전반의 이전 감정에서 출발하여 반전의 사건을 거쳐 후반과 마지막 문단에 새로운 감정이 충분히 자리 잡게 한다.
+반전 직후에는 주인공이 받은 충격과 그 사실이 개인적으로 어떤 의미인지 충분히 담고 다음 선택으로 이어간다.
+마지막에는 주인공이 결말의 결과를 결정할 행동을 실제로 실행한다.
 
 """,
-    4: """[장면 역할 — 결(마무리)]
-이야기의 마지막 장면이다. 앞선 세 장면(기·승·전)과 같은 이름의 배경·오브제는 쓰지 않는다.
-전 장면에서 뒤집힌 분위기를 받아, 완전히 새로운 공간에서 끝맺는다.
-다만 규칙11(잔상)처럼, 재료 자체가 아니라 앞 장면들의 분위기가 흐릿한 흔적으로 한 번 스치는 건 괜찮다.
-결론이나 교훈으로 닫지 않는다는 기존 규칙(7번)은 그대로 지키되, 그 작은 변화가 일어나는 무대 자체는 새것이어야 한다.
+    4: """[결 — 선택의 결과와 하나의 이야기의 완결]
+전에서 실행한 행동의 결과를 이어서 보여 준다.
+직전 대표 감정과 다른 그룹의 감정이 이번 장면 전체를 이끌도록, 결과를 받아들이는 마음의 방향을 바꾼다.
+전이 기쁨이면 재회의 기쁨을 짧게 이어받은 뒤 잃어버린 시간에 대한 슬픔이나 새로 밝혀진 진실에 대한 놀람으로 이동하는 등 기존 사건에서 전환의 이유를 찾는다.
+전이 부정적인 감정이면 해결의 기쁨이나 예상 밖의 결과에 대한 놀람으로, 전이 놀람이면 사실을 받아들이는 기쁨 또는 상실의 슬픔 등으로 발전시킨다.
+초반에 이전 감정을 연결하고 중반부터 새 감정이 선택과 행동, 마지막 여운을 이끌게 한다. 안도에서 희망으로의 변화는 모두 기쁨이므로 같은 그룹의 연장임을 구별한다.
+기에서 시작한 목표와 핵심 갈등이 어떤 결과에 이르렀는지 분명하게 드러낸다.
+주인공이 얻거나 잃은 것과 달라진 관계를 구체적인 상황, 행동, 감정으로 묘사한다.
+앞선 핵심 사물이나 행동을 달라진 의미로 다시 활용하여 시작과 끝이 연결되게 한다.
+주인공의 마지막 행동으로 사건을 마무리하고, 그 결과를 받아들이는 감정적 여운을 남긴다.
+일이 끝난 뒤에도 남아 있는 마음과 처음에 비해 달라진 마음을 주인공의 눈높이에서 들려준다.
+이번 장면에서 네 장면으로 이루어진 하나의 스토리를 완결한다.
 
 """,
 }
 
 SCENE_PROMPT = """
-{이전_장면_컨텍스트}{이전_장면_제약}{역할_지시}아래 재료들을 사용해 꿈의 {장면번호}번째 장면을 한국어로 써라. 총 4개의 장면으로 이어지는 연작이다.
+{이전_장면_컨텍스트}{이전_장면_제약}{역할_지시}
+당신은 한 명의 주인공을 따라가는 영화적 단편 이야기를 쓴다.
+총 네 장면 중 {장면번호}번째 장면의 본문을 한국어로 작성한다.
+네 장면은 기·승·전·결을 이루는 하나의 연속된 스토리다.
+독자가 한 번 읽으며 사건을 따라가고 주인공의 마음에 공감할 수 있는 쉽고 자연스러운 이야기를 쓴다.
 
-[재료]
+[이번 장면에 활용할 재료]
 - 배경: {배경}
 - 오브제: {오브제}
 - 감정: {감정}
 
-[작성 규칙]
-1. 재료 사용
-- 모든 재료를 등장시키되 비중은 달라도 된다. 한두 개는 장면의 중심으로, 나머지는 스치듯 배치한다.
-- 재료 이름을 그대로 나열하지 말고, 각각 다른 방식(만지기, 소리로 스치기, 멀리 보이기 등)으로 등장시킨다.
-- 오브제 중 하나는 장면에서 가장 오래, 가장 자세하게 묘사되는 사물로 둔다.
-- 사물을 다시 가리킬 때는 처음 쓴 이름이나 '그것'을 쓴다. "~장치", "~물체"처럼 이름을 돌려 말하는 딱딱한 표현은 쓰지 않는다.
+[이야기 구성]
+1. 인물과 맥락
+기에서 한 명의 주인공을 세우고 결까지 같은 인물을 중심으로 쓴다.
+이름이나 호칭, 외형, 목표, 알고 있는 사실, 소지품, 부상, 인물 관계를 앞선 이야기와 일치시킨다.
+주변 인물은 주인공의 행동과 갈등에 필요한 만큼 등장시킨다.
+이전 이야기 전체에서 해결된 사건, 남은 문제, 단서를 읽고 그 이후의 사건을 전개한다.
+이번 장면만의 사건을 쓰되, 직전 장면에서 벌어진 일의 결과로 출발한다.
+시간이나 장소가 바뀌면 주인공이 왜, 어떻게 그곳에 도달했는지 자연스럽게 연결한다.
 
-2. 주인공과 시점
-- 3인칭 관찰자 시점으로 쓴다. 서술자는 카메라처럼 바깥에서 지켜볼 뿐, 누구의 머릿속에도 들어가지 않는다.
-- 이 장면의 주인공은 정해져 있지 않다. 사람, 동물, 기계, 사물, 공간, 빛, 소리, 추상적인 형태 모두 주인공이 될 수 있다.
-- 사람은 여러 후보 중 하나일 뿐이다. 사람이 아닌 후보를 먼저 떠올려 보고, 재료가 가장 강하게 요구하는 것을 고른다.
-- 생각, 기억, 판단을 서술하지 않는다("생각했다", "깨달았다", "기억했다", "알았다" 금지).
-- 사람이 아닌 존재는 사람처럼 말하거나 생각하거나 표정을 짓지 않는다.
-- 등장하는 존재는 이름 없이 하나의 호칭으로 통일한다.
+2. 행동과 인과관계
+각 장면은 '바라는 것 → 행동 → 예상 밖의 결과 → 마음의 반응 → 다음 선택'으로 자연스럽게 이어진다.
+주인공이 무엇을 하려 하고, 무엇 때문에 어려워지며, 어떻게 대응하는지 독자가 이해할 수 있게 쓴다.
+주요 행동에는 대상과 이유가 있고, 행동 뒤에는 상황이나 관계의 변화가 따른다.
+주요 사건 사이에는 인물이 그 일을 어떻게 받아들이는지 머무는 짧은 순간을 둔다.
+장면마다 핵심 사건 하나에 집중하고, 그 사건이 주인공에게 갖는 의미와 마음의 변화에 충분한 분량을 쓴다.
+첫 문장은 이번 상황에 맞는 주인공의 구체적인 행동으로 시작한다.
 
-3. 꿈의 논리
-- 꿈처럼 어긋난 요소를 넣는다. 몇 개인지보다, 그 어긋남들이 같은 주제(예: 시간, 무게, 거리)로 묶이는 게 중요하다.
-- 어긋남은 공간이나 사물에서 일어나게 한다.
-- 그 어긋남을 서술자도 등장하는 존재도 설명하거나 의아해하지 않는다.
-- '꿈'이라는 단어를 쓰지 않는다.
+3. 상황과 감정
+주인공을 가까이 따라가는 3인칭 시점으로 행동, 상황, 감정을 함께 묘사한다.
+주인공이 바라는 것, 걱정하는 것, 서운한 이유와 말하지 못한 마음을 서술자가 가까이서 들려준다.
+감정은 '두렵다', '서운하다', '안도한다'처럼 직접 표현하고, 그렇게 느끼는 개인적인 이유를 함께 쓴다.
+표정, 몸짓, 호흡과 함께 속마음을 담아 독자가 감정을 바로 이해할 수 있게 한다.
+예를 들어 '문고리를 세 번 돌린다'에 '밖에서 기다릴 동생을 생각하자, 혼자 남게 될까 두렵다'처럼
+행동의 대상과 맥락에 맞는 마음을 결합한다. 구체적인 표현은 이번 인물과 사건에서 찾는다.
+감정이 크게 바뀌는 대목에서는 그 마음을 한두 문장으로 충분히 들려준 뒤 다음 행동으로 이어간다.
+'사건을 겪음 → 감정이 바뀜 → 다음 행동을 선택함'의 흐름을 만든다.
+장면의 중심 감정은 다음 세 그룹 안에서 구체적으로 정한다.
+- A군: 기쁨
+- B군: 혐오, 공포, 분노, 슬픔
+- C군: 놀람
+중립 대신 인물이 무엇을 바라거나 두려워하고, 얻거나 잃는지 드러나는 선명한 감정을 중심에 둔다.
+차분한 장면도 기쁨의 안도나 슬픔의 여운처럼 세 그룹 중 하나에 속하는 마음으로 구체화한다.
+첫 장면은 입력과 상황에 맞는 A·B·C 감정 하나를 중심으로 세운다.
+두 번째 장면부터는 직전 본문 전체에서 메인 감정과 그 그룹을 먼저 파악한다.
+그룹 전환의 기준은 이번 입력 자체가 아니라 직전 장면의 메인 감정이 속한 그룹이다.
+직전 마지막 문장의 일시적인 반응보다 장면 전반을 지배하는 마음을 기준으로 삼는다.
+이번 입력이 이전 메인 감정과 같은 그룹이면 그 입력 감정으로 자연스럽게 시작한다.
+그 뒤 사건, 발견, 선택을 통해 다른 그룹의 감정으로 이동하여 이번 장면의 메인 감정으로 정착시킨다.
+- 직전 A군 → 이번 메인은 B군 또는 C군
+- 직전 B군 → 이번 메인은 A군 또는 C군
+- 직전 C군 → 이번 메인은 A군 또는 B군
+예를 들어 직전이 공포이고 이번 입력이 분노여도 모두 B군이다. 분노로 시작하여 기쁨이나 놀람이 중심이 되는 사건을 만든다.
+이번 입력이 이미 이전과 다른 그룹이면 그 감정을 새로운 중심으로 활용하고, 이전 마음에서 변화하는 이유를 보여 준다.
+예를 들어 직전이 공포이고 이번 입력이 기쁨이면, 공포를 이어받아 기쁨으로 넘어가며 기쁨을 충분히 펼친다.
+입력이 여러 개면 이전과 같은 그룹의 감정은 시작이나 갈등에, 다른 그룹의 감정은 전환 후 중심에 우선 배치한다.
+입력이 하나이거나 모두 이전과 같은 그룹이면 사건의 결과로 다른 그룹의 감정을 새롭게 도출한다.
+중립 입력은 잠시 감정을 누르는 상태로 해석하고, 사건의 개인적인 의미를 통해 A·B·C 중 하나로 구체화한다.
+이전 이야기가 중립적으로 읽히면 인물의 목표와 행동에서 가장 뚜렷한 A·B·C 감정을 출발 기준으로 찾는다.
+전환 후 감정을 중반 이후의 속마음, 행동, 마지막 결과에 일관되게 반영하여 장면 전체의 대표 정서가 되게 한다.
+전에서는 앞선 단서와 반전 사건을 맞물려 그룹 간 대비를 가장 크게 만든다.
+결에서도 이전과 다른 그룹의 감정으로 결과를 받아들이며 핵심 사건을 마무리한다.
+감정 방향 안내는 참고로 활용하고, 직전 그룹과 다른 그룹으로 도달하는 서사 및 장면 역할을 우선한다.
+감정 선택 과정은 본문 속 사건과 마음의 변화로 표현한다.
+놀람은 인물의 예상과 이해가 뒤집히는 마음으로, 공포는 위협을 피하려는 마음으로 구별한다.
+슬픔은 상실을 아파하는 마음, 분노는 부당함에 맞서는 마음, 혐오는 대상을 밀어내는 마음,
+기쁨은 소중한 것을 얻거나 지켜서 안도하는 마음으로 구체화한다.
+짧은 속말이나 자연스러운 대화로 인물의 바람, 망설임, 애착을 드러낸다.
 
-4. 감정
-- 감정을 나타내는 단어(무섭다, 불안하다, 외롭다, 그립다 등)를 쓰지 않는다.
-- 감정은 공간과 사물의 상태(소리의 세기, 빛의 흔들림, 온도, 재질의 변화, 움직임)로 전달한다.
-- 감정이 둘 이상이면 서로 다른 사물이나 현상에 나눠 담는다.
+4. 재료와 세계
+배경은 주인공이 행동하는 무대, 오브제는 목표·도구·장애물·단서로 활용한다.
+이번 배경 중 주요 공간 하나, 오브제 중 중심 사물 하나를 정하여 장면의 시각적 중심으로 삼는다.
+첫 문단의 행동 속에서 주요 공간의 이름, 주인공의 위치, 눈에 띄는 구조나 빛을 짧고 명확하게 보여 준다.
+중심 사물은 이름과 색·재질·형태 중 두 가지를 구체화하고 주인공이 직접 만지거나 사용하거나 지키려 하게 한다.
+장면의 중요한 선택과 결과가 그 공간의 특성 및 중심 사물의 용도나 상태 변화에 연결되게 한다.
+후반에도 중심 사물을 다시 등장시켜 달라진 상태나 주인공에게 갖는 의미를 보여 준다.
+이번 재료는 이야기의 맥락에 맞는 비중으로 모두 반영한다.
+이미 등장한 장소와 사물은 인물의 동선과 사건에 따라 이어서 활용할 수 있다.
+새 재료는 주인공의 이동, 발견, 접촉을 통해 기존 이야기로 연결한다.
+초현실적인 설정이 어울리면 앞서 정한 세계의 작동 방식과 사건의 인과를 유지하며 활용한다.
+인물의 동선과 사물의 상태는 상황을 이해하는 데 필요한 만큼 간결하게 쓴다.
+묘사의 초점은 주인공이 마음을 쓰는 대상과 그 대상이 주인공에게 갖는 의미에 둔다.
+빛, 소리, 온도, 촉감은 인물이 마주한 상황과 감정에 맞춰 선택한다.
 
-5. 문체
-- 현재형으로 쓴다.
-- "~듯", "~것 같은", "~느낌" 같은 불확실한 추측·헤징 표현은 쓰지 않는다. "~하듯"으로 움직임이나 모양을 비유하고 싶을 때도 이 표현을 피한다.
-  (틀린 예: "날개를 펼치듯 부풀어 오른다" / 맞는 예: "날개를 펼치는 모습과 닮아 부풀어 오른다", "날개가 펼쳐지는 모양으로 부풀어 오른다")
-- 다만 단정적인 비유("~와 닮아 있다", "~처럼 ~하다", "~모양으로")는 써도 된다 — 이건 확신을 갖고 두 대상을 연결하는 것이지, 느낌을 흐리는 게 아니다.
-- 문장 끝맺음과 리듬이 기계적으로 반복되지 않게 한다. 긴 문장과 짧은 문장을 자연스럽게 섞는다.
-- 같은 수식어나 의성어를 습관처럼 반복해서 쓰지 않는다.
-- 시각 외의 감각(소리, 냄새, 촉감, 온도 등)도 섞어 쓴다.
+5. 기승전결과 마무리
+기는 목표와 사건을 시작하고, 승은 행동의 대가로 갈등을 키운다.
+전은 앞선 단서가 맞물리는 반전과 결정적 선택을, 결은 그 선택의 결과와 갈등의 마무리를 보여 준다.
+기·승·전의 마지막 행동과 결과가 다음 장면을 필요하게 만든다.
+결에서는 처음 시작한 사건의 결과를 보여 주고 주인공의 마지막 행동으로 이야기를 완결한다.
 
-6. 뻔함 피하기
-- 재료를 가장 먼저 떠오르는 방식으로 쓰지 않는다.
-- 첫 문장이 매번 같은 방식으로 시작되지 않게 한다. 구체적 행동, 소리, 정지된 이미지, 변화나 소멸을 선언하는 짧은 문장 등 다양한 방식이 있을 수 있다. 배경 설명으로 시작하지는 않는다.
+6. 문체와 출력
+현재형을 중심으로 읽기 쉬운 소설 문장으로 쓴다.
+일상적인 어휘와 명확한 문장을 쓰고, 누가 무엇을 하며 왜 마음이 움직이는지 바로 읽히게 한다.
+한 문장에는 하나의 중심 내용을 담고, 짧은 행동 문장과 자연스럽게 이어지는 감정 문장을 섞는다.
+낯선 설정이나 반전은 주인공이 보고 이해하는 순서로 풀어 설명한다.
+관찰과 판단은 구체적으로 진술한다. '듯', '것 같', '느낌'에 기대는 표현은 명확한 상태와 행동으로 바꾼다.
+문단 수와 문장 길이는 행동, 대화, 감정의 흐름에 맞춰 조절한다.
+공백 제외 {최소글자수}~{최대글자수}자, 목표 {목표글자수}자 안팎으로 작성한다.
+출력은 이번 장면의 이야기 본문만으로 구성하고, 마지막 문장까지 완결한다.
 
-7. 열린 결말
-- 결론, 깨달음, 회상으로 닫지 않는다.
-- 다음 장면으로 이어질 작은 변화 하나에서 끊듯이 끝낸다.
-
-8. 분량과 출력
-- 공백 제외 {최소글자수}~{최대글자수}자 사이로 쓴다. {목표글자수}자 안팎이 가장 좋다.
-- 문단과 문장 구성은 내용의 리듬에 맡긴다. 특정 문단 수나 문장 길이에 맞추려고 하지 않는다.
-- 반드시 마지막 문장까지 완결해서 끝낸다.
-- 이야기 본문만 출력한다. 제목, 설명, 메타 코멘트 없이.
-
-9. 시각적 구체성과 추상
-- 장면 전체가 똑같이 선명할 필요는 없다. 어떤 부분은 색과 흐름, 질감만으로 추상적으로 존재하고, 한두 지점만 그림으로 그릴 수 있을 만큼 또렷한 형태로 맺혀도 된다.
-- 또렷하게 맺히는 지점이 있다면 색, 재질, 크기, 위치, 빛의 방향 같은 것으로 구체화한다.
-- 존재가 나온다면 그 생김새도 같은 방식으로, 또렷함과 흐릿함을 오가며 그린다.
-
-10. 공간과 분위기
-- 열린 자연(숲, 논, 강, 바다)이나 경계 공간(병원 복도, 폐건물, 국경 지대)이 배경으로 어울리면 적극적으로 쓴다.
-- 열기, 습도, 곤충 소리, 빗소리, 피부, 땀, 호흡, 체온 같은 감각을 어울리는 곳에 자연스럽게 섞는다.
-- 유령, 동물령, 기이한 존재가 등장할 때 특별한 일처럼 다루지 않는다. 그냥 거기 있는 것처럼 쓴다.
-
-11. 잔상
-- 직전 장면의 인상 한 조각이 색이나 움직임의 결로 아주 흐릿하게 한 번 스쳐도 된다. 재료 자체를 다시 쓰는 게 아니라, 느낌만 메아리처럼 남는 것이다.
-
-[중요] 공백을 제외한 글자 수가 반드시 {최소글자수}자 이상 {최대글자수}자 이하여야 한다. {최대글자수}자를 넘기면 안 된다."""
+[작성 전 확인]
+이전 이야기에서 주인공의 현재 상태와 남은 목표를 확인한다.
+이번 사건이 주인공에게 왜 중요하고, 사건 전후 마음이 어떻게 달라지는지 정한다.
+그 마음의 변화가 다음 행동으로 이어지도록 본문으로 구현한다.
+현재 장면의 역할에 맞춰 사건과 감정이 변화하는 하나의 연속된 장면을 쓴다.
+"""
 
 
 # ════════════════════════════════════════════════
@@ -360,7 +416,7 @@ def calc_material_counts(P: float) -> tuple:
 # ════════════════════════════════════════════════
 
 def extract_elements(client, scene_desc: str, sound: str) -> dict:
-    """타임테이블 장면 → 배경/오브제 추출 (장면1 폴백 재료용, 벡터 없음)"""
+    """타임테이블 장면 → 배경/오브제 추출 (장면 공통 후보, 벡터 없음)"""
     prompt = f"""아래 장면 설명과 사운드 특성에서 배경과 오브제를 추출해라.
 
 장면 설명: {scene_desc}
@@ -387,7 +443,7 @@ def extract_elements(client, scene_desc: str, sound: str) -> dict:
 
 
 def extract_peaks_pool(client, scenes: list) -> dict:
-    """타임테이블 전체 → 배경/오브제/감정 후보 풀 (장면1 폴백용)"""
+    """타임테이블 전체 → 배경/오브제/감정 후보 풀 (최초 한 번 추출하여 재사용)."""
     all_bg, all_obj, all_emo = [], [], []
     print(f"[추출] {len(scenes)}개 타임테이블에서 요소 추출 중...")
     for scene in scenes:
@@ -415,12 +471,42 @@ def extract_from_story(client, story: str, max_tries: int = 3) -> dict:
 
 {VECTOR_AXES}
 
+[대표 요소와 감정 평가]
+- main_emotion은 요소 벡터의 평균과 별개로, 이야기 본문에서 주인공의 대표 감정을 직접 판정한다.
+- label은 기쁨, 혐오, 공포, 분노, 슬픔, 놀람 중 하나를 선택한다. 차분한 안도와 감사, 희망도 맥락에 따라 기쁨으로 판정한다.
+- 핵심 사건의 개인적 의미, 중반 이후 지속되는 마음, 마지막 선택을 함께 근거로 삼는다. 마지막 한 문장이나 순간적인 충격만으로 정하지 않는다.
+- 반전이 있어도 그 뒤 안도와 재회의 희망이 충분히 전개되면 기쁨이 중심이다. 눈물도 상실의 슬픔인지 안도와 기쁨의 눈물인지 맥락으로 구별한다.
+- 놀람은 예상이 뒤집힌 반응 자체가 장면의 마음과 행동을 지배할 때 선택한다. 서로 다른 감정이 섞였다는 이유만으로 놀람을 선택하지 않는다.
+- intensity는 확신도가 아니라 대표 감정의 강도를 0.0~1.0으로 평가한다.
+- main_emotion_evidence에는 판정의 근거가 되는 본문의 실제 구절 하나를 그대로, main_emotion_reason에는 그 감정이 중심인 이유를 쓴다.
+- 입력 후보나 원하는 그룹 전환보다 실제 완성된 본문에 근거하여 판정한다.
+- main_background: 주인공이 핵심 사건을 겪는 주요 배경 하나를 배경 배열의 항목 이름과 정확히 일치하게 선택한다.
+- main_object: 사건의 핵심이면서 한 장의 그림에서 독립된 형태로 식별할 수 있는 물리적인 사물 하나를 오브제 배열의 항목 이름과 정확히 일치하게 선택한다.
+- 후보들을 사건에서의 중요성, 시각적으로 구별되는 형태, 주인공과의 직접적인 상호작용 순으로 비교한다. 등장 횟수보다 선택과 결과를 바꾸는 사물을 우선한다.
+- 인물이나 신체 부위, 장소, 감정, 추상적인 현상은 각각 인물·배경·감정 묘사로 다루고 주요 오브제는 캡슐, 레버, 계기판, 케이블 같은 사물에서 고른다.
+- 서로 독립된 사물은 별도 항목으로 추출한다. '패널과 전선'처럼 묶기보다 실제 행동의 대상이 된 하나를 고른다. 하나의 조립된 사물은 고유한 이름으로 부른다.
+- 이름은 본문에 나타난 구체적인 종류와 색·형태 등 식별 특징을 간결하게 담는다. 본문에 없는 외형을 추가하지 않는다.
+- main_object_evidence는 해당 사물에 대한 행동이나 상태가 드러나는 본문의 실제 구절, main_object_reason은 시각적 중심으로 선택한 이유다. 적합한 사물이 없으면 main_object는 null, 근거는 빈 문자열로 둔다.
+- 등장 횟수뿐 아니라 사건에서의 역할을 기준으로 고르고, 해당 요소가 없으면 null을 쓴다.
+- 각 배열은 이야기에서 중요한 항목부터 정렬한다.
+- 벡터는 실제 본문에서 각 요소가 갖는 정서적 의미로 평가한다. 배경과 오브제도 주인공에게 위협인지, 상실의 대상인지, 희망이나 안도의 근거인지 구별한다.
+- 높은 긴장이나 낯섦만으로 감정을 놀람으로 해석하지 않는다. 놀람은 예상 밖의 일을 마주하는 반응이며, 공포·슬픔·기쁨 등 지속되는 감정과 구별한다.
+- 감정 배열에는 주인공의 중심 감정을 먼저 두고, 짧은 반응과 오래 지속되는 마음을 판단근거에 구별해서 설명한다.
+- 공간의 차가움이나 사물의 기계적인 재질 자체와, 본문에서 그 요소가 지닌 감정적 의미를 구별한다. 판단은 실제 근거문장에 따른다.
+
 [물리법칙 정의]
 - 이 글에서 현실과 어긋난 꿈의 논리를 짧게 서술 (예: "거리가 걸어도 좁혀지지 않음", "물체가 위로 떨어짐")
 - 없으면 빈 배열
 
 [출력 형식 — JSON만 출력, 주석 없이 순수 JSON]
 {{
+  "main_emotion": {{"label": "기쁨", "intensity": 0.8}},
+  "main_emotion_evidence": "본문에서 그대로 가져온 근거 구절",
+  "main_emotion_reason": "핵심 사건과 지속되는 마음을 근거로 한 판정 이유",
+  "main_background": "배경 배열에서 선택한 항목 이름 또는 null",
+  "main_object": "오브제 배열에서 선택한 항목 이름 또는 null",
+  "main_object_evidence": "해당 사물과 행동을 보여 주는 본문의 실제 구절",
+  "main_object_reason": "사건에서의 역할과 시각적 식별성을 근거로 한 이유",
   "배경": [{{
     "항목": "...",
     "벡터": [Pleasantness, Attention, Sensitivity, Aptitude],
@@ -460,16 +546,66 @@ def extract_from_story(client, story: str, max_tries: int = 3) -> dict:
             print(f"  [추출 재시도 {attempt}/{max_tries}] JSON 없음")
             continue
         try:
-            return json.loads(m.group())
-        except json.JSONDecodeError as e:
-            print(f"  [추출 재시도 {attempt}/{max_tries}] JSON 파싱 오류: {e}")
+            elements = json.loads(m.group())
+            elements["main_emotion"] = validate_story_emotion(elements, story)
+            validate_visual_object(elements, story)
+            elements["main_background"] = select_main_element(elements, "배경", "main_background")
+            elements["main_object"] = select_main_element(elements, "오브제", "main_object")
+            return elements
+        except (ValueError, TypeError, AttributeError) as e:
+            print(f"  [추출 재시도 {attempt}/{max_tries}] 추출 결과 오류: {e}")
 
-    # 재시도를 모두 썼다. 7~8분짜리 전체 실행을 한 장면 추출 실패로 날리는 대신,
-    # 이 장면만 중립 벡터로 비워두고 계속 진행한다. main_emotion은 더 이상 여기서
-    # 안 채워도 된다 — compute_scene_vector가 빈 항목을 [0,0,0,0]으로 처리하고,
-    # classify_emotion([0,0,0,0])이 자동으로 "중립"을 반환한다.
-    print("  ※ 추출 재시도를 모두 사용했습니다. 이 장면은 중립 벡터로 비워두고 계속 진행합니다.")
-    return {"배경": [], "오브제": [], "감정": [], "물리법칙": []}
+    # 실패한 판정을 벡터 라벨로 대체하지 않고 명시적으로 미판정으로 남긴다.
+    print("  ※ 추출 재시도를 모두 사용했습니다. 요소는 비우고 대표 감정은 미판정으로 남깁니다.")
+    return {"배경": [], "오브제": [], "감정": [], "물리법칙": [],
+            "main_background": None, "main_object": None,
+            "main_emotion": {"label": None, "intensity": 0.0},
+            "main_object_evidence": "", "main_object_reason": "추출 재시도 실패로 미판정",
+            "main_emotion_evidence": "", "main_emotion_reason": "추출 재시도 실패로 미판정"}
+
+
+def validate_visual_object(elements: dict, story: str) -> None:
+    """주요 오브제가 추출 항목에 속하고 실제 본문 근거를 갖는지 확인한다."""
+    selected = elements.get("main_object")
+    if selected is None:
+        return
+    names = [item.get("항목") for item in elements.get("오브제", [])]
+    evidence = elements.get("main_object_evidence")
+    reason = elements.get("main_object_reason")
+    if selected not in names:
+        raise ValueError("주요 오브제는 추출된 사물 중 하나여야 합니다.")
+    if not isinstance(evidence, str) or not evidence.strip() or evidence not in story:
+        raise ValueError("주요 오브제의 실제 본문 근거가 필요합니다.")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("주요 오브제의 선택 이유가 필요합니다.")
+
+
+def validate_story_emotion(elements: dict, story: str) -> dict:
+    """본문 기반 감정 판정의 라벨, 강도, 실제 근거를 검증한다."""
+    emotion = elements.get("main_emotion")
+    if not isinstance(emotion, dict) or emotion.get("label") not in {
+        "기쁨", "혐오", "공포", "분노", "슬픔", "놀람"
+    }:
+        raise ValueError("본문 대표 감정의 라벨이 누락되었거나 유효하지 않습니다.")
+    intensity = emotion.get("intensity")
+    if isinstance(intensity, bool) or not isinstance(intensity, (int, float)) or not 0 <= intensity <= 1:
+        raise ValueError("대표 감정 강도는 0~1의 수여야 합니다.")
+    evidence = elements.get("main_emotion_evidence")
+    reason = elements.get("main_emotion_reason")
+    if not isinstance(evidence, str) or not evidence.strip() or evidence not in story:
+        raise ValueError("대표 감정의 실제 본문 근거가 필요합니다.")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("대표 감정의 판정 이유가 필요합니다.")
+    return {"label": emotion["label"], "intensity": round(float(intensity), 3)}
+
+
+def select_main_element(elements: dict, category: str, field: str) -> str | None:
+    """대표 요소를 추출된 항목으로 제한하고, 누락 시 중요도순 첫 항목을 쓴다."""
+    if field in elements and elements[field] is None:
+        return None
+    names = [item["항목"] for item in elements.get(category, []) if item.get("항목")]
+    selected = elements.get(field)
+    return selected if selected in names else (names[0] if names else None)
 
 
 # ════════════════════════════════════════════════
@@ -557,6 +693,7 @@ def dream_drift(current_vector: list, reversal: bool = False) -> list:
         target[0] = -current_vector[0] * REVERSAL_BOOST
         target[3] = -current_vector[3] * REVERSAL_BOOST
     return clip_vector(target)
+
 
 
 # 목표 벡터(수치)를 글쓰기 모델에게 숫자가 아니라 말로 전달하기 위한 축별 라벨.
@@ -739,10 +876,9 @@ def sample_elements(elements: dict, target_vector: list,
 
 
 def build_context(previous_stories: list) -> str:
-    """CONTEXT_LEVEL에 따라 직전 장면 컨텍스트 구성.
+    """CONTEXT_LEVEL에 따라 이전 이야기 컨텍스트 구성.
 
-    직전 1편까지만 넘긴다. 이전 장면 전체를 넘기면 프롬프트가 수천 자로 불어나
-    모델이 새 장면을 쓰는 대신 같은 장면을 계속 이어쓴다.
+    기본 설정에서는 지금까지 생성한 모든 장면의 전문을 순서대로 전달한다.
     """
     if not previous_stories or CONTEXT_LEVEL <= 0:
         return ""
@@ -750,7 +886,16 @@ def build_context(previous_stories: list) -> str:
     if CONTEXT_LEVEL < 1.0:
         last_para = last.split("\n\n")[-1]
         return f"[직전 장면 마지막 문단]\n{last_para}\n\n"
-    return f"[직전 장면]\n{last}\n\n"
+    scenes = "\n\n".join(
+        f"[장면 {i}]\n{story.strip()}"
+        for i, story in enumerate(previous_stories, start=1)
+    )
+    return (
+        f"[이전까지 생성된 이야기 — 장면 순서대로 전문]\n{scenes}\n\n"
+        "위 이야기의 같은 주인공, 목표, 인물 관계와 사건의 결과를 이어받는다. "
+        "직전 행동의 결과에서 이번 장면을 시작하고, "
+        "이전 전체의 단서와 선택을 발전시켜 하나의 스토리로 연결한다.\n\n"
+    )
 
 
 def extract_opening(story: str, n_sentences: int = 2) -> str:
@@ -815,33 +960,57 @@ def generate_scene(client, scene_num: int,
                    previous_stories: list,
                    used_physics: list = None,
                    previous_backgrounds: list = None,
-                   target_vector: list = None) -> str:
+                   target_vector: list = None,
+                   previous_main_emotion: dict = None,
+                   previous_main_emotions: list = None) -> str:
     context = build_context(previous_stories)
 
     lines = []
     if used_physics or previous_backgrounds:
-        lines.append("[이전 장면에서 이미 사용한 것 — 이번 장면에서 반복 금지]")
+        lines.append("[이전에 확립된 세계와 공간 — 이야기의 연속성을 위한 참고]")
         if used_physics:
-            lines.append(f"- 초현실 물리 법칙: {', '.join(used_physics)}")
+            lines.append(f"- 세계의 작동 방식: {', '.join(used_physics)}")
         if previous_backgrounds:
-            lines.append(f"- 배경 공간: {', '.join(previous_backgrounds)}")
-        lines.append("→ 위 법칙과 배경은 이번 장면에 쓰지 않는다. 새로운 공간과 새로운 꿈의 어긋남을 만들어라.")
+            lines.append(f"- 주인공이 거쳐 온 배경: {', '.join(previous_backgrounds)}")
+        lines.append("→ 인물의 동선과 사건의 원인에 맞춰 공간과 사물을 이어서 활용한다. 새로운 장소는 이동의 이유와 과정을 연결하고, 세계의 작동 방식은 일관되게 유지한다.")
 
     if previous_stories:
-        prev_opening = extract_opening(previous_stories[-1])
-        lines.append(f"[직전 장면의 시작 문장]\n{prev_opening}")
-        lines.append(
-            "→ 이번 장면의 첫 문장(들)은 위와 같은 문형을 그대로 재사용하지 않는다. "
-            "특히 [사물+동사 반복] → [의성어 두 번] → [간격·리듬 서술] 같은 틀을 그대로 베끼지 않는다. "
-            "문장 길이, 어순, 시작 방식(동작/소리/사물/대화/정지된 장면 등)을 직전 장면과 다르게 가져간다."
-        )
+        lines.append("[연속 장면 지시]")
+        if previous_main_emotion and previous_main_emotion.get("label"):
+            lines.append(
+                f"직전 장면의 본문 기반 대표 감정: {previous_main_emotion['label']}. "
+                "이 감정이 속한 그룹을 출발 기준으로 삼고 이번 장면은 다른 그룹의 감정이 중심이 되게 한다. "
+                "이전 감정은 초반의 연결에 활용하고 새 감정이 중반 이후와 마지막 행동을 이끌게 한다."
+            )
+        lines.append("같은 주인공의 현재 위치, 소지품, 신체 상태, 알고 있는 사실을 이전 본문에서 확인한다. 직전 행동의 결과에 대응하는 다음 행동으로 시작한다.")
+
+    if scene_num == 4 and previous_main_emotions:
+        groups = {"기쁨": "A", "혐오": "B", "공포": "B", "분노": "B", "슬픔": "B", "놀람": "C"}
+        history = [label for label in previous_main_emotions if label in groups]
+        if history:
+            last_group = groups[history[-1]]
+            unused = [label for label in groups if label not in history]
+            preferred = [label for label in unused if groups[label] != last_group]
+            lines.append("[마지막 장면의 감정 다양성 — 감정 방향 안내보다 우선]")
+            lines.append(f"앞선 장면의 실제 대표 감정 순서: {' → '.join(history)}")
+            lines.append(f"지금까지 쓰지 않은 감정: {', '.join(unused) or '없음'}")
+            lines.append(f"우선 검토할 감정: {', '.join(preferred or unused) or '맥락에 맞는 가장 적게 사용한 감정'}")
+            lines.append(
+                "직전과 다른 그룹이면서 아직 쓰지 않은 감정을 결말의 중심으로 우선 검토한다. "
+                "후보 중 기존 단서와 인물의 선택에서 가장 자연스럽게 도출되는 감정을 정한다. "
+                "이전 감정은 초반에 짧게 이어받고 중반부터 선택한 새 감정의 이유와 행동을 충분히 펼친다. "
+                "사건의 해결이 곧 기쁨을 뜻하지는 않는다. 해결 과정에서 치른 대가와 잃은 것, 새로 알게 된 사실도 결말의 마음이 될 수 있다. "
+                "마지막 한 문장에 감정 이름을 붙이는 대신 장면 전체의 중심 정서가 달라지게 구성한다. "
+                "다양성은 우선순위이며 앞선 사실과 인물의 동기를 유지하면서 하나의 이야기를 완결한다."
+            )
 
     prev_constraint = ("\n".join(lines) + "\n\n") if lines else ""
 
     role_note = ROLE_PROMPTS.get(scene_num, "")
     if target_vector:
         role_note = (
-            f"[이 장면이 향해야 할 감정 방향]\n{describe_target_vector(target_vector)}\n\n"
+            f"[사건과 선택을 통해 향할 감정 방향]\n{describe_target_vector(target_vector)}\n"
+            "이 방향은 참고이며, 직전 메인 감정과의 대비 및 장면 역할의 감정 전환 지시를 우선한다. 주인공이 겪는 사건에서 변화의 계기를 만든다.\n\n"
             + role_note
         )
 
@@ -893,7 +1062,8 @@ def generate_scene(client, scene_num: int,
             + "\n\n[직전 초안]\n" + story
             + "\n\n[직전 초안의 문제점]\n" + "\n".join(f"- {p}" for p in problems)
             + "\n\n위 초안을 바탕으로 문제를 고쳐서 처음부터 끝까지 다시 써라. "
-              "분량이 부족하면 문단을 추가해 장면을 더 길게 펼쳐라."
+              "분량이 부족하면 주인공의 시도, 상대의 반응, 선택의 이유와 결과를 구체화한다. "
+              "같은 주인공과 앞선 사건의 인과관계를 유지하여 이번 장면 본문 전체를 출력한다."
         )
 
     print(f"  ※ 재시도 횟수를 모두 사용했습니다. 벌점이 가장 낮은 결과를 사용합니다 (벌점 {best_penalty}).")
@@ -920,11 +1090,12 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
 
     # ── 장면1 재료: 1팀 blueprint 우선, 빈 카테고리만 emotion_peaks로 보충 ──
     pool = load_blueprint_scene1(blueprint_path) or {"배경": [], "오브제": [], "감정": []}
+    # 설계도가 완전해도 타임테이블 전체를 추출하여 후속 장면의 후보를 넓힌다.
+    peaks_pool = extract_peaks_pool(client, scenes)
 
     missing = [c for c in ("배경", "오브제", "감정") if not pool.get(c)]
     if missing:
         print(f"  [폴백] blueprint에서 비어 있는 카테고리: {missing}")
-        peaks_pool = extract_peaks_pool(client, scenes)
         for c in missing:
             pool[c] = peaks_pool[c]
 
@@ -934,6 +1105,7 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
     print(f"  감정 후보 {len(all_emo)}개: {all_emo}")
 
     previous_stories = []
+    previous_main_emotions = []
     current_vector   = None
     all_used_physics = []
     used_bg_names    = []   # 실제 글에 쓴 배경 — 프롬프트 금지 + 샘플링 패널티 공용
@@ -975,7 +1147,10 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
             else:
                 source_elements = prev_elements
 
-            merged = merge_candidates(source_elements, all_bg, all_obj, all_emo)
+            merged = merge_candidates(
+                source_elements,
+                peaks_pool["배경"], peaks_pool["오브제"], peaks_pool["감정"],
+            )
 
             bg, obj, emo = sample_elements(
                 merged, target_vector,
@@ -996,6 +1171,8 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
             used_physics=all_used_physics or None,
             previous_backgrounds=used_bg_names or None,
             target_vector=target_vector,
+            previous_main_emotion=prev_elements.get("main_emotion") if scene_num > 1 else None,
+            previous_main_emotions=previous_main_emotions,
         )
 
         # ── 저장 ───────────────────────────────────────────
@@ -1008,7 +1185,7 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
         h, total, ratio = human_subject_ratio(story)
         print(f"  [참고] 사람이 주어인 문장: {h}/{total} ({ratio:.0%})")
         if ratio > HUMAN_WARN_RATIO:
-            print("  [참고] 사람 중심 쏠림이 높습니다.")
+            print("  [참고] 인물 중심 서술 비중이 높습니다. 현재 이야기 구성 방향에 부합합니다.")
 
         print(f"\n{'─'*40}")
         print(story)
@@ -1034,13 +1211,15 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
         used_emo_names.extend(emo)
 
         current_vector = compute_scene_vector(elements)
-        main_emotion = classify_emotion(current_vector)
-        elements["main_emotion"] = main_emotion  # elements.json에도 남겨 투명하게 확인 가능
+        main_emotion = elements["main_emotion"]  # 본문 판정: 재료 선택용 벡터와 분리
         elements_path.write_text(json.dumps(elements, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"  장면{scene_num} 벡터: {[round(x, 2) for x in current_vector]}")
         print(f"  장면{scene_num} 감정: {main_emotion['label']} ({main_emotion['intensity']})")
+        print(f"  주요 배경: {elements['main_background']}")
+        print(f"  주요 오브제: {elements['main_object']}")
 
         previous_stories.append(story)
+        previous_main_emotions.append(main_emotion["label"])
 
     print(f"\n{'═'*50}")
     print("  4개 장면 생성 완료")
@@ -1061,7 +1240,13 @@ def main(input_path: str = "team2/output/parsed_scenes.json",
             "objects":     [e["항목"] for e in elem.get("오브제", [])],
             "emotions":    [e["항목"] for e in elem.get("감정",  [])],
             "physics_laws": elem.get("물리법칙", []),
-            "main_emotion": classify_emotion(scene_vector),  # 벡터로 결정 — Claude에게 다시 안 물음
+            "main_emotion": elem["main_emotion"],
+            "main_emotion_evidence": elem["main_emotion_evidence"],
+            "main_emotion_reason": elem["main_emotion_reason"],
+            "main_background": select_main_element(elem, "배경", "main_background"),
+            "main_object": select_main_element(elem, "오브제", "main_object"),
+            "main_object_evidence": elem.get("main_object_evidence", ""),
+            "main_object_reason": elem.get("main_object_reason", ""),
             "vector":      [round(x, 3) for x in scene_vector],
         })
 
