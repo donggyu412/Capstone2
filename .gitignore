@@ -5,6 +5,7 @@ output/
 !team2/output/
 team2/output/*
 !team2/output/dream_scenes.json
+!team2/output/parsed_scenes.json
 *.pyc
 testVideo/
 .venv/
