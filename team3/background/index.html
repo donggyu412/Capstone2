@@ -1744,11 +1744,14 @@ function geneNorm(g) {
 }
 
 /* 막이 운동에 요구하는 성질 — 기는 흩날리고 결은 멎는다. DB 로는 잡히지 않는 축이다. */
+/* hueRange(색 퍼짐) 목표 추가(10-27) — 전엔 막 목표가 없어 DB 근접도만 보고 '클수록 좋다'로 끌려가
+   상한 200 에 붙은 채 공연 내내 좌우 색이 같은 폭으로 갈라져 있었다(46세대 실측 · 진화가 멈춤).
+   기는 넓게 흩어진 색 · 승은 모임 · 전은 다시 벌어짐 · 결은 한 색으로 잦아듦. */
 const ACT_GENE = {
-  '기': { freq: 0.80, amp: 0.85, turb: 0.90, spiralAbs: 0.00, w: 0.9 },
-  '승': { freq: 0.20, amp: 0.15, turb: 0.10, spiralAbs: 0.00, w: 1.0 },
-  '전': { freq: 0.55, amp: 0.55, turb: 0.45, spiralAbs: 0.75, w: 1.0 },
-  '결': { freq: 0.10, amp: 0.05, turb: 0.05, spiralAbs: 0.00, w: 1.0 },
+  '기': { freq: 0.80, amp: 0.85, turb: 0.90, spiralAbs: 0.00, hueRange: 0.70, w: 0.9 },
+  '승': { freq: 0.20, amp: 0.15, turb: 0.10, spiralAbs: 0.00, hueRange: 0.30, w: 1.0 },
+  '전': { freq: 0.55, amp: 0.55, turb: 0.45, spiralAbs: 0.75, hueRange: 0.60, w: 1.0 },
+  '결': { freq: 0.10, amp: 0.05, turb: 0.05, spiralAbs: 0.00, hueRange: 0.15, w: 1.0 },
 };
 
 /* ★ 적합도 = (DB 근접도) x (막 적합도).
@@ -1792,12 +1795,14 @@ function fitness(g) {
   const a = ACT_GENE[act];
   let af = 0, cnt = 0;
   for (const gk in a) {
-    if (gk === 'w') continue;
+    if (gk === 'w' || gk === 'hueRange') continue;
     af += 1 - Math.abs(gn[gk] - a[gk]); cnt++;
   }
   af = (af / cnt) * a.w;
+  // 색 퍼짐은 따로 곱한다 — 평균에 섞으면 1/5 무게라 DB 쪽 당김(hconc)에 묻혀 승 · 결에서도 상한 200 에 붙었다(10-27 재측정)
+  const hueFit = 1 - Math.abs(gn.hueRange - a.hueRange);
 
-  return near * af;
+  return near * af * hueFit;
 }
 
 let population = Array.from({length: 24}, newGene);
@@ -1902,6 +1907,7 @@ function updateParticles() {
   /* 바람 없는 흔들림은 흩날림(chaos)도 절반 거둔다 — 기(1막)는 흩날림이 세서, 바람만 거두면
      떨림이 묻혀 차이가 안 보였다(09-27 A/B: 속도 3.61 → 3.53). 흩어지던 것이 '제자리에서 떠는' 것으로 바뀐다 */
   const lawChaos = (1 - 0.50 * LAW.fixed) * (1 - 0.50 * LAW.still);
+  const holdCut = clamp(sceneMean + 0.3, 0.5, 0.95);   // ③-b 윤곽 붙들기 기준 밝기 (10-27)
   const trem  = 1.20 * LAW.still, tremW = 0.35;                                  // 떨림 세기 · 각속도(약 0.3초 주기)
   /* 숨 — 파편마다 정해진 방향으로 4초 주기로 밀었다 당긴다(+ 부풂 / − 오므림).
      처음엔 '제 자리에서 떨어진 만큼' 밀었는데, 승처럼 제 자리에 붙어 있는 막에선 밀 거리가 없어 2px,
@@ -1957,8 +1963,10 @@ function updateParticles() {
     /* ③-b 윤곽 붙들기 — 어두운 파편일수록 제 자리로 끌린다.
        소용돌이는 모든 파편을 빛 쪽으로 끌어내 방·복도의 형체를 지웠다. 밝은 파편은
        그대로 빨려들게 두고 어두운 파편만 붙들어, 절정의 소용돌이와 흐릿한 윤곽이 함께 남는다. */
-    if (A.hold > 0.0005 && br < 0.5) {
-      const t = 1 - br / 0.5, h = A.hold * t * t * revPull;   // 밝기 0.5 이상은 0 — 밝은 파편의 소용돌이는 건드리지 않는다
+    // 기준 밝기 = 사진 평균 + 0.3 (0.5~0.95). 10-27: 0.5 고정이면 밝은 사진(2팀 대표 판 3장 기쁨 · 평균 0.57)은
+    // 파편 대부분이 기준을 넘어 아무것도 안 붙들리고 전부 가운데로 빨려 하얀 덩어리가 됐다. 어두운 사진은 0.5 그대로.
+    if (A.hold > 0.0005 && br < holdCut) {
+      const t = 1 - br / holdCut, h = A.hold * t * t * revPull;   // 기준 이상(그 사진에서 가장 밝은 빛)은 0 — 그 소용돌이는 건드리지 않는다
       pvx[i] += (hx[i] - px[i]) * h;
       pvy[i] += (hy[i] - py[i]) * h;
     }
