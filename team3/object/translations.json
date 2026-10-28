@@ -1,33 +1,430 @@
 {
-  "철판/선체": { "en": "iron plate/hull", "source": "auto", "provider": "mymemory" },
-  "새소리(울음)": { "en": "bird sounds (crying)", "source": "auto", "provider": "mymemory" },
-  "나무 틈새의 깃털": { "en": "wooden crevice feathers", "source": "auto", "provider": "mymemory" },
-  "소금 결정": { "en": "salt crystal", "source": "auto", "provider": "mymemory" },
-  "깃털": { "en": "feather", "source": "auto", "provider": "mymemory" },
-  "나무 널빤지 (갑판)": { "en": "wood plank (deck)", "source": "auto", "provider": "mymemory" },
-  "발소리": { "en": "footsteps", "source": "manual" },
-  "고양이": { "en": "cat", "source": "manual" },
-  "정비 드론": { "en": "maintenance drone", "source": "auto", "provider": "mymemory" },
-  "유리창": { "en": "window", "source": "auto", "provider": "mymemory" },
-  "종소리": { "en": "bells", "source": "auto", "provider": "mymemory" },
-  "흰 나방": { "en": "white moth", "source": "auto", "provider": "mymemory" },
-  "손바닥(손)": { "en": "abstract palm silhouette", "source": "manual" },
-  "유리 표면의 금과 푸른빛": { "en": "cracks and blue light on a glass surface", "source": "manual" },
-
-  "쇳덩이": { "en": "chunk of iron", "source": "auto", "provider": "mymemory" },
-  "손": { "en": "abstract hand silhouette", "source": "manual" },
-  "조종사의 목소리": { "en": "pilot's voice", "source": "auto", "provider": "mymemory" },
-  "물방울": { "en": "water drop", "source": "auto", "provider": "mymemory" },
-  "손(손가락/손바닥)": { "en": "abstract hand silhouette with fingers", "source": "manual" },
-  "손(손가락·손바닥)": { "en": "abstract hand silhouette with fingers", "source": "manual" },
-
-  "지붕의 구멍": { "en": "hole in roof", "source": "auto", "provider": "mymemory" },
-  "살색 막": { "en": "flesh-colored membrane", "source": "manual" },
-  "참새": { "en": "sparrow", "source": "auto", "provider": "mymemory" },
-  "막": { "en": "membrane", "source": "manual" },
-  "손끝": { "en": "abstract fingertip silhouette", "source": "manual" },
-  "먼지 알갱이": { "en": "dust grain", "source": "auto", "provider": "mymemory" },
-  "나무 상자": { "en": "crate", "source": "auto", "provider": "mymemory" },
-  "그림자": { "en": "shadow", "source": "manual" },
-  "얇은 막": { "en": "thin translucent membrane", "source": "manual" }
+  "철판/선체": {
+    "en": "iron plate/hull",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "새소리(울음)": {
+    "en": "bird sounds (crying)",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "나무 틈새의 깃털": {
+    "en": "wooden crevice feathers",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "소금 결정": {
+    "en": "salt crystal",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "깃털": {
+    "en": "feather",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "나무 널빤지 (갑판)": {
+    "en": "wood plank (deck)",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "발소리": {
+    "en": "footsteps",
+    "source": "manual"
+  },
+  "고양이": {
+    "en": "cat",
+    "source": "manual"
+  },
+  "정비 드론": {
+    "en": "maintenance drone",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "유리창": {
+    "en": "window",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "종소리": {
+    "en": "bells",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "흰 나방": {
+    "en": "white moth",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "손바닥(손)": {
+    "en": "abstract palm silhouette",
+    "source": "manual"
+  },
+  "유리 표면의 금과 푸른빛": {
+    "en": "cracks and blue light on a glass surface",
+    "source": "manual"
+  },
+  "쇳덩이": {
+    "en": "chunk of iron",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "손": {
+    "en": "abstract hand silhouette",
+    "source": "manual"
+  },
+  "조종사의 목소리": {
+    "en": "pilot's voice",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "물방울": {
+    "en": "water drop",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "손(손가락/손바닥)": {
+    "en": "abstract hand silhouette with fingers",
+    "source": "manual"
+  },
+  "손(손가락·손바닥)": {
+    "en": "abstract hand silhouette with fingers",
+    "source": "manual"
+  },
+  "지붕의 구멍": {
+    "en": "hole in roof",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "살색 막": {
+    "en": "flesh-colored membrane",
+    "source": "manual"
+  },
+  "참새": {
+    "en": "sparrow",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "막": {
+    "en": "membrane",
+    "source": "manual"
+  },
+  "손끝": {
+    "en": "abstract fingertip silhouette",
+    "source": "manual"
+  },
+  "먼지 알갱이": {
+    "en": "dust grain",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "나무 상자": {
+    "en": "crate",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "그림자": {
+    "en": "shadow",
+    "source": "manual"
+  },
+  "얇은 막": {
+    "en": "thin translucent membrane",
+    "source": "manual"
+  },
+  "성에 낀 유리벽": {
+    "en": "glass walls in the castle",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "냉동액": {
+    "en": "frozen liquids",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "말라붙은 얼룩(190년 자국)": {
+    "en": "dry stains (190)",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "끌려가는 몸": {
+    "en": "dragged body",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "캡슐(유리벽)": {
+    "en": "capsule (glass wall)",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "거무스름한 얼룩(손 자국)": {
+    "en": "dark stains (hand prints)",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "천장 배관과 거꾸로 솟는 물방울": {
+    "en": "ceiling piping and upside-down droplets",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "끌려가는 몸과 늘어진 팔": {
+    "en": "dragged body and outstretched arms",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "잠든 얼굴이 담긴 캡슐들": {
+    "en": "capsules with a sleeping face",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "메워지는 바닥 자국": {
+    "en": "floor marks to be filled in",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "거꾸로 솟는 물방울": {
+    "en": "droplets rising upside down",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "유리에 찍힌 다섯 손가락 자국": {
+    "en": "five fingerprints on glass",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "그림자 대신 깔리는 빛의 띠": {
+    "en": "bands of light in place of shadows",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "캡슐 유리벽": {
+    "en": "capsule glass wall",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "다섯 손가락 자국": {
+    "en": "five fingerprint",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "캡슐 속 잠든 얼굴들": {
+    "en": "sleeping faces in a capsule",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "형체 (190년 된 선원)": {
+    "en": "form (190-year-old sailor)",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "닳은 단추": {
+    "en": "worn buttons",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "물고기 떼": {
+    "en": "swarm of fish",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "금빛 빛 입자": {
+    "en": "golden grain",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "멀어지는 쇠붙이 난간": {
+    "en": "away from the iron handrail",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "방향을 거스르는 물고기 떼": {
+    "en": "swarm of fish going against direction",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "모자챙 아래 형체 (노래하는 존재)": {
+    "en": "beneath the hat visor (singing presence)",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "소매에서 흘러나온 금빛 실오라기": {
+    "en": "golden thread from the sleeve",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "아래에서 터지는 균열": {
+    "en": "cracks bursting from bottom",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "새들": {
+    "en": "saddle",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "금빛 입자": {
+    "en": "golden particle",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "모자챙 형체": {
+    "en": "hat visor shape",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "균열음": {
+    "en": "crackles",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "움직이지 않는 그림자": {
+    "en": "unmoving shadow",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "멈춰 있는 그림자": {
+    "en": "stagnant shadow",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "금빛 깃털": {
+    "en": "golden feathers",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "화로": {
+    "en": "furnators",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "타오르는 통나무/불꽃": {
+    "en": "blazing logs/flames",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "벽(울림의 근원)": {
+    "en": "wall (source of resonance)",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "작은 그림자(동물형 존재)": {
+    "en": "small shadow (beast)",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "벽의 금(틈)": {
+    "en": "gold on the wall (gap)",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "멈춘 물방울": {
+    "en": "stopped droplets",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "붉은 기운(빛)": {
+    "en": "red aura (light)",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "손바닥 모양 자국": {
+    "en": "palm prints",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "여우를 닮은 그림자": {
+    "en": "fox-like shadows",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "사람 누운 자리와 숨소리": {
+    "en": "people lying down and breathing",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "벽에 생겼다 아무는 금": {
+    "en": "it looks like a wall. anything is gold",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "가장자리의 금(균열)": {
+    "en": "gold at edges (cracks)",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "호박빛 기운": {
+    "en": "amber aura",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "날벌레 떼": {
+    "en": "swarm of flying bugs",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "풀": {
+    "en": "pool",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "푸른 액체": {
+    "en": "blue liquid",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "먼지": {
+    "en": "dust",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "새소리": {
+    "en": "bird sounds",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "캡슐 뚜껑 틈": {
+    "en": "capsule lid gap",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "푸른 얼룩": {
+    "en": "blue stains",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "공중의 먼지 줄": {
+    "en": "dust line in the air",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "문에서 새어 나오는 빛": {
+    "en": "light leaking from the door",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "한 자리에 고정된 새소리": {
+    "en": "birdsong fixed in one place",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "살갗 질감의 벽": {
+    "en": "skin textured walls",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "통로 끝 빛 틈과 날갯짓 그림자": {
+    "en": "light gaps and flapping shadows at the end of the aisle",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "살아있는 듯 떨리는 벽": {
+    "en": "living quivering walls",
+    "source": "auto",
+    "provider": "mymemory"
+  },
+  "틈 너머의 날개 달린 그림자": {
+    "en": "winged shadow beyond the gap",
+    "source": "auto",
+    "provider": "mymemory"
+  }
 }

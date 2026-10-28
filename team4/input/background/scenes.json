@@ -1,14 +1,15 @@
 {
- "run": "20261014-185259_storyboard",
+ "run": "20261023-212106_storyboard",
  "scenes": [
   {
    "stage": "기",
    "title": "캡슐 내부",
-   "emotion": "혐오",
+   "emotion": "중립",
    "emotion_src": "2팀 대표 감정(main_emotion)",
-   "intensity": 0.455,
+   "intensity": 0.207,
    "backgrounds": [
-    "캡슐 내부"
+    "캡슐 내부",
+    "캡슐 밖 통로"
    ],
    "reference_artists": "아피찻퐁 100%",
    "artist_weights": {},
@@ -20,7 +21,7 @@
    "width": 1920,
    "height": 1080,
    "captured_scene_frame": 2250,
-   "captured_at": "2026-10-14T09:54:09.110Z",
+   "captured_at": "2026-10-23T12:21:48.227Z",
    "engine": {
     "GLOW_SIZE": 0.7,
     "BASE_ALPHA": 0.01,
@@ -35,38 +36,31 @@
   },
   {
    "stage": "승",
-   "title": "끝없이 늘어나는 캡슐 복도",
-   "emotion": "혐오",
+   "title": "좁고 긴 통로",
+   "emotion": "놀람",
    "emotion_src": "2팀 대표 감정(main_emotion)",
-   "intensity": 0.424,
+   "intensity": 0.33,
    "backgrounds": [
-    "끝없이 늘어나는 캡슐 복도",
-    "성에 낀 캡슐 창들"
+    "좁고 긴 통로",
+    "열린 문 안쪽 공간"
    ],
-   "reference_artists": "아피찻퐁 93% · 디갈라카스 7%",
+   "reference_artists": "아피찻퐁 97% · 디갈라카스 3%",
    "artist_weights": {
-    "digalakis": 0.067
+    "digalakis": 0.033
    },
    "artist_basis": {
     "digalakis": [
-     "물결",
      "정적"
     ]
    },
    "dream_laws": [],
-   "dream_laws_total": 6,
-   "moisture": [
-    {
-     "kind": "frost",
-     "name": "서리",
-     "src": "성에 낀 캡슐 창들"
-    }
-   ],
+   "dream_laws_total": 3,
+   "moisture": [],
    "source_image": "/media/scene_02.png",
    "width": 1920,
    "height": 1080,
    "captured_scene_frame": 2250,
-   "captured_at": "2026-10-14T09:59:12.755Z",
+   "captured_at": "2026-10-23T12:23:14.137Z",
    "engine": {
     "GLOW_SIZE": 0.7,
     "BASE_ALPHA": 0.01,
@@ -81,17 +75,28 @@
   },
   {
    "stage": "전",
-   "title": "둥근 벽으로 둘러싸인 공간",
-   "emotion": "기쁨",
+   "title": "좁고 긴 통로(입구)",
+   "emotion": "놀람",
    "emotion_src": "2팀 대표 감정(main_emotion)",
-   "intensity": 0.414,
+   "intensity": 0.428,
    "backgrounds": [
-    "둥근 벽으로 둘러싸인 공간",
-    "틈 너머의 희고 매끄러운 안쪽 공간"
+    "좁고 긴 통로(입구)",
+    "노란 빛이 새어나오는 천장",
+    "정적이 두꺼워지는 내부 공간"
    ],
-   "reference_artists": "아피찻퐁 100%",
-   "artist_weights": {},
-   "artist_basis": {},
+   "reference_artists": "아피찻퐁 60% · 디갈라카스 23% · 폰타나 17%",
+   "artist_weights": {
+    "digalakis": 0.233,
+    "fontana": 0.167
+   },
+   "artist_basis": {
+    "digalakis": [
+     "정적"
+    ],
+    "fontana": [
+     "노란"
+    ]
+   },
    "dream_laws": [],
    "dream_laws_total": 4,
    "moisture": [],
@@ -99,7 +104,7 @@
    "width": 1920,
    "height": 1080,
    "captured_scene_frame": 2250,
-   "captured_at": "2026-10-14T10:07:18.079Z",
+   "captured_at": "2026-10-23T12:25:12.200Z",
    "engine": {
     "GLOW_SIZE": 0.7,
     "BASE_ALPHA": 0.01,
@@ -114,17 +119,27 @@
   },
   {
    "stage": "결",
-   "title": "둥근 벽으로 둘러싸인 공간",
-   "emotion": "중립",
+   "title": "노란빛이 번지는 무거운 실내 공간",
+   "emotion": "공포",
    "emotion_src": "2팀 대표 감정(main_emotion)",
-   "intensity": 0.285,
+   "intensity": 0.486,
    "backgrounds": [
-    "둥근 벽으로 둘러싸인 공간",
-    "희고 매끄러운 바닥"
+    "노란빛이 번지는 무거운 실내 공간",
+    "빛이 갈라지는 통로의 틈"
    ],
-   "reference_artists": "아피찻퐁 100%",
-   "artist_weights": {},
-   "artist_basis": {},
+   "reference_artists": "아피찻퐁 80% · 디갈라카스 3% · 폰타나 17%",
+   "artist_weights": {
+    "digalakis": 0.033,
+    "fontana": 0.167
+   },
+   "artist_basis": {
+    "digalakis": [
+     "정적"
+    ],
+    "fontana": [
+     "노란"
+    ]
+   },
    "dream_laws": [],
    "dream_laws_total": 3,
    "moisture": [],
@@ -132,7 +147,7 @@
    "width": 1920,
    "height": 1080,
    "captured_scene_frame": 2250,
-   "captured_at": "2026-10-14T10:11:06.802Z",
+   "captured_at": "2026-10-23T12:26:57.304Z",
    "engine": {
     "GLOW_SIZE": 0.7,
     "BASE_ALPHA": 0.01,

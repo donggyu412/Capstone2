@@ -1,27 +1,59 @@
 {
-  "source": "ComfyUI dreamshaper_8 + dream_object_lora (10 epoch), 512x512",
-  "background_removal": "rembg 4개 모델(u2net · isnet-general-use · birefnet-general · bria-rmbg) 결과를 비교해 장마다 손으로 고름",
+  "story": "dream_scenes.json",
+  "checkpoint": "dreamshaper_8.safetensors",
+  "lora": "dream_object_lora.safetensors",
+  "lora_strength": 0.6,
+  "style_prompt": "digital art style, abstract geometric shape, surreal, white background, standalone object",
+  "negative": "worst quality, low quality, blurry, distorted",
+  "background_removal": "rembg birefnet-general + 배경색이 아닌 안쪽 구멍만 메움",
   "scenes": [
     {
       "scene": 1,
       "objects": [
         {
           "index": 1,
-          "name_ko": "낡은 항해일지",
-          "file": "scene_01/obj_1_낡은_항해일지.png",
-          "mask": "수동 선택(4개 모델 비교)"
+          "name_ko": "푸른 액체",
+          "name_en": "blue liquid",
+          "translation": "auto",
+          "prompt": "dream_object, blue liquid, digital art style, abstract geometric shape, surreal, white background, standalone object",
+          "seed": 877,
+          "file": "scene_01/obj_1_푸른_액체.png"
         },
         {
           "index": 2,
-          "name_ko": "푸른빛 냉동액 웅덩이",
-          "file": "scene_01/obj_2_푸른빛_냉동액_웅덩이.png",
-          "mask": "수동 선택(4개 모델 비교)"
+          "name_ko": "정비 드론",
+          "name_en": "maintenance drone",
+          "translation": "auto",
+          "prompt": "dream_object, maintenance drone, digital art style, abstract geometric shape, surreal, white background, standalone object",
+          "seed": 1654,
+          "file": "scene_01/obj_2_정비_드론.png"
         },
         {
           "index": 3,
-          "name_ko": "팔이 긴 부유하는 그림자",
-          "file": "scene_01/obj_3_팔이_긴_부유하는_그림자.png",
-          "mask": "수동 선택(4개 모델 비교)"
+          "name_ko": "먼지",
+          "name_en": "dust",
+          "translation": "auto",
+          "prompt": "dream_object, dust, digital art style, abstract geometric shape, surreal, white background, standalone object",
+          "seed": 2431,
+          "file": "scene_01/obj_3_먼지.png"
+        },
+        {
+          "index": 4,
+          "name_ko": "새소리",
+          "name_en": "bird sounds",
+          "translation": "auto",
+          "prompt": "dream_object, bird sounds, digital art style, abstract geometric shape, surreal, white background, standalone object",
+          "seed": 3208,
+          "file": "scene_01/obj_4_새소리.png"
+        },
+        {
+          "index": 5,
+          "name_ko": "캡슐 뚜껑 틈",
+          "name_en": "capsule lid gap",
+          "translation": "auto",
+          "prompt": "dream_object, capsule lid gap, digital art style, abstract geometric shape, surreal, white background, standalone object",
+          "seed": 3985,
+          "file": "scene_01/obj_5_캡슐_뚜껑_틈.png"
         }
       ]
     },
@@ -30,21 +62,30 @@
       "objects": [
         {
           "index": 1,
-          "name_ko": "떨어지는 물방울",
-          "file": "scene_02/obj_1_떨어지는_물방울.png",
-          "mask": "수동 선택(4개 모델 비교)"
+          "name_ko": "푸른 얼룩",
+          "name_en": "blue stains",
+          "translation": "auto",
+          "prompt": "dream_object, blue stains, digital art style, abstract geometric shape, surreal, white background, standalone object",
+          "seed": 977,
+          "file": "scene_02/obj_1_푸른_얼룩.png"
         },
         {
           "index": 2,
-          "name_ko": "낡은 서류철과 종이",
-          "file": "scene_02/obj_2_낡은_서류철과_종이.png",
-          "mask": "수동 선택(4개 모델 비교)"
+          "name_ko": "공중의 먼지 줄",
+          "name_en": "dust line in the air",
+          "translation": "auto",
+          "prompt": "dream_object, dust line in the air, digital art style, abstract geometric shape, surreal, white background, standalone object",
+          "seed": 1754,
+          "file": "scene_02/obj_2_공중의_먼지_줄.png"
         },
         {
           "index": 3,
-          "name_ko": "팔이 길게 늘어진 그림자 형상",
-          "file": "scene_02/obj_3_팔이_길게_늘어진_그림자_형상.png",
-          "mask": "수동 선택(4개 모델 비교)"
+          "name_ko": "문에서 새어 나오는 빛",
+          "name_en": "light leaking from the door",
+          "translation": "auto",
+          "prompt": "dream_object, light leaking from the door, digital art style, abstract geometric shape, surreal, white background, standalone object",
+          "seed": 2531,
+          "file": "scene_02/obj_3_문에서_새어_나오는_빛.png"
         }
       ]
     },
@@ -53,27 +94,30 @@
       "objects": [
         {
           "index": 1,
-          "name_ko": "서류철",
-          "file": "scene_03/obj_1_서류철.png",
-          "mask": "수동 선택(4개 모델 비교)"
+          "name_ko": "한 자리에 고정된 새소리",
+          "name_en": "birdsong fixed in one place",
+          "translation": "auto",
+          "prompt": "dream_object, birdsong fixed in one place, digital art style, abstract geometric shape, surreal, white background, standalone object",
+          "seed": 1077,
+          "file": "scene_03/obj_1_한_자리에_고정된_새소리.png"
         },
         {
           "index": 2,
-          "name_ko": "무게가 변하는 종이",
-          "file": "scene_03/obj_2_무게가_변하는_종이.png",
-          "mask": "수동 선택(4개 모델 비교)"
+          "name_ko": "살갗 질감의 벽",
+          "name_en": "skin textured walls",
+          "translation": "auto",
+          "prompt": "dream_object, skin textured walls, digital art style, abstract geometric shape, surreal, white background, standalone object",
+          "seed": 1854,
+          "file": "scene_03/obj_2_살갗_질감의_벽.png"
         },
         {
           "index": 3,
-          "name_ko": "팔이 늘어진 형상",
-          "file": "scene_03/obj_3_팔이_늘어진_형상.png",
-          "mask": "수동 선택(4개 모델 비교)"
-        },
-        {
-          "index": 4,
-          "name_ko": "벌어지는 타일 금",
-          "file": "scene_03/obj_4_벌어지는_타일_금.png",
-          "mask": "수동 선택(4개 모델 비교)"
+          "name_ko": "통로 끝 빛 틈과 날갯짓 그림자",
+          "name_en": "light gaps and flapping shadows at the end of the aisle",
+          "translation": "auto",
+          "prompt": "dream_object, light gaps and flapping shadows at the end of the aisle, digital art style, abstract geometric shape, surreal, white background, standalone object",
+          "seed": 2631,
+          "file": "scene_03/obj_3_통로_끝_빛_틈과_날갯짓_그림자.png"
         }
       ]
     },
@@ -82,22 +126,21 @@
       "objects": [
         {
           "index": 1,
-          "name_ko": "밤색 서류철",
-          "file": "scene_04/obj_1_밤색_서류철.png",
-          "mask": "수동 선택(4개 모델 비교)",
-          "note": "프롬프트 수정 재생성(dark brown leather)"
+          "name_ko": "살아있는 듯 떨리는 벽",
+          "name_en": "living quivering walls",
+          "translation": "auto",
+          "prompt": "dream_object, living quivering walls, digital art style, abstract geometric shape, surreal, white background, standalone object",
+          "seed": 1177,
+          "file": "scene_04/obj_1_살아있는_듯_떨리는_벽.png"
         },
         {
           "index": 2,
-          "name_ko": "금이 간 타일 바닥",
-          "file": "scene_04/obj_2_금이_간_타일_바닥.png",
-          "mask": "수동 선택(4개 모델 비교)"
-        },
-        {
-          "index": 3,
-          "name_ko": "창백하고 얇은 손",
-          "file": "scene_04/obj_3_창백하고_얇은_손.png",
-          "mask": "수동 선택(4개 모델 비교)"
+          "name_ko": "틈 너머의 날개 달린 그림자",
+          "name_en": "winged shadow beyond the gap",
+          "translation": "auto",
+          "prompt": "dream_object, winged shadow beyond the gap, digital art style, abstract geometric shape, surreal, white background, standalone object",
+          "seed": 1954,
+          "file": "scene_04/obj_2_틈_너머의_날개_달린_그림자.png"
         }
       ]
     }
