@@ -857,8 +857,11 @@ def bang(sr, rng, dur=2.6):
     return thud + 0.6 * hit + 0.5 * panel
 
 
-def sound_sequence(clip, W, sr, rng):
-    """소리 시퀀스 — 기계음 한 토막을 리듬처럼 되풀이하며, 되풀이할 때마다 조금 낮고 먹먹하게."""
+def sound_sequence(clip, W, sr, rng, nat=None):
+    """소리 시퀀스 — 기계음 한 토막을 리듬처럼 되풀이하며, 되풀이할 때마다 조금 낮고 먹먹하게.
+    nat (스타일 '느리고 불규칙하게'): 박을 seq_slow 배 느리게 · 박마다 ±seq_jitter 흔들림 · 가끔(10%) 한 박 쉼 · 크기도 조금씩."""
+    nat = nat or {}
+    slow, jit = nat.get('seq_slow', 1.0), nat.get('seq_jitter', 0.0)
     n = int(W * sr)
     out = np.zeros(n)
     L = int(rng.uniform(0.5, 0.8) * sr)
@@ -870,8 +873,10 @@ def sound_sequence(clip, W, sr, rng):
         seg = synth.pitch(seg, -0.35 * k)[:L]
         cut = max(900.0, 6000.0 * (0.82 ** k))
         seg = synth.lowpass(seg, cut, sr) * np.hanning(len(seg))
-        out[t:t + len(seg)] += seg
-        t += int(L * pattern[k % len(pattern)])
+        if not (jit and rng.random() < 0.10):                      # 불규칙하게: 가끔 한 박을 쉰다
+            out[t:t + len(seg)] += seg * (10 ** (rng.normal(0, 2.0) / 20) if jit else 1.0)
+        step = L * pattern[k % len(pattern)] * slow
+        t += int(step * (1 + float(np.clip(jit * rng.standard_normal(), -2 * jit, 2 * jit))) if jit else step)
         k += 1
     return out * np.minimum(1, np.arange(n) / (0.5 * sr))
 
@@ -925,7 +930,7 @@ def _apichatpong(sc, P, mats, D, sr, rng, dry, add, note, sudden, d):
         ok = lambda u: all(abs(u * D - x) > 8.0 for x in taken) and free(float(np.clip(u * D, lo, hi - W)), W, 0.0)
         cand = [c for c in cand if ok(c[0])] or [(u, None) for u in (0.1, 0.78, 0.5) if ok(u)] or [(0.1, None)]
         u0, s = cand[0]
-        y = sound_sequence(clip, W, sr, rng)
+        y = sound_sequence(clip, W, sr, rng, sty.get('natural'))
         t0 = float(np.clip(u0 * D, lo, hi - W))
         add(dry, synth_pan(_norm(y, 0.3), float(rng.uniform(-0.5, 0.5))), int(t0 * sr))
         note(t0, W, '소리 시퀀스', '%s 소리가 리듬처럼 되풀이되며 조금씩 낮고 먹먹해짐' % mname,
