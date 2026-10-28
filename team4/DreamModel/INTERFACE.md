@@ -1,84 +1,51 @@
-# DreamModel · Collective Dreaming
+# DreamModel v12 — 움직임이 이어지는 N1 배경과 사운드
 
-DreamModel은 이야기·감정·사운드를 생성 조건으로 사용해 배경과 오브제가 서서히 형성·변형·소멸하는 꿈 애니메이션을 만든다. 배경과 오브제는 별도의 생성·진화 엔진을 사용하며, 장면 사이에 형태·색·이동 흔적(Relic / Trace)을 상속한다.
+수정 범위는 DreamModel 내부의 엔진, 장면 합성, CLI, 이 문서 네 파일이다. 오브제·인물·문구·자막·나레이션은 추가하지 않는다. `dream.mp4`의 네 배경과 최신 Team3 N1 이야기 순서를 보존한다.
 
-완성본 규격은 **1920×1080 / 30fps / 300초 / 9,000프레임**이다. 기 0–75초, 승 75–150초, 전 150–225초(클라이맥스 반전 `195.0초` / `3:15`), 결 225–300초로 구성한다. 전환에서는 앞 장면의 기억과 다음 장면의 형성이 겹친다.
+## 이번 피드백 반영
 
-## 설치
+- 사용자 재지시에 따라 생성·재구성 구간의 큰 불규칙 변형만 v10 방식으로 복원했다. GA의 연속적인 공간 변형과 CA의 계단식 변형을 다시 사용하며, v11의 미세한 카메라 이동을 더해 완성 시 움직임이 끊기지 않게 한다. 붕괴·잔상 전환·색과 명암·오디오 처리는 v11 그대로다.
+- GA는 방향성 있는 입자·획, CA는 이웃 활성화와 셀 모자이크로 재구성한다. 각각 하나의 새 점에서 목표 구조·색으로 수렴한다.
+- 완성 상태에도 카메라와 빛이 천천히 움직인다. 완성 검사는 화면을 고정하는 대신 생성된 RGB 상태에 대해 수행한다.
+- 붕괴는 국소 침식 → 작은 영역·입자의 이동 → 생성 색의 흐릿한 잔상으로 이어진다. 균일 낙하와 고무처럼 휘는 파쇄를 사용하지 않는다.
+- 다음 기법의 첫 점은 이전 생성물의 잔상 위에서 시작한다. 잔상은 3~10초에 걸쳐 새로운 생성물에 자리를 내준다. 새로운 목표 이미지를 미리 덮지 않는다. 장면 사이와 마지막에도 검게 비우는 단계를 두지 않는다.
 
-저장소 루트에서 Python 3.12 기준으로 실행한다.
+## 입력과 음원
 
-```powershell
-python -m venv team4/DreamModel/.venv
-.\team4\DreamModel\.venv\Scripts\python.exe -m pip install -r team4/DreamModel/requirements.txt
-```
+- 배경 목표: 사용자가 제공한 `C:\Users\carro\Downloads\dream.mp4`에서 각 장면 중앙 프레임을 순서대로 추출.
+- 이야기: `Capstone2-main (3).zip`의 `team3/background/input/storyboard/dream_scenes.json`.
+- 사운드: 같은 ZIP의 `team4/input/sound/dream_sound.wav` 원본 300초를 AAC 스테레오로 결합. 새 음악·음성 합성을 하지 않는다.
+- ZIP의 음원과 해시가 일치하는지 기록한다. 원본 음원 자체의 짧은 휴지는 유지한다. N1의 개별 사건에 맞춰 새로 작곡했다고 주장하지 않는다.
+- `--reference-video`와 `--story-zip`을 사용할 때 해당 음원을 자동 연결한다. `--sound`로 명시한 파일이 있으면 그것을 우선한다. 음원이 없으면 오류를 내므로 무음으로 조용히 완료되지 않는다.
 
-## 입력 및 배경 구현 전달 슬롯 (`team4/input/`)
+## 시간 구성과 감정의 시각적 대응
 
-| 입력 구분 | 위치 / 내용 |
-|---|---|
-| 이야기·장면 (공통) | `team4/input/storyboard/scenes.json`, `dream_scenes.json`, `scene_01~04.png` (원본 유지) |
-| 오브제 (공통) | `team4/input/objects/objects.json`과 장면별 RGBA 이미지 13개 (원본 유지) |
-| **배경 구현 전달 슬롯** | `team4/input/background/` — 오브제 합성 전달용 1·2·3번 시나리오 5분 배경 MP4 영상 3종(`1~3번_꿈재현_배경_사운드.mp4`) 및 시나리오별 원본 에셋·사운드(`scenarios/`) |
-| 구도 | `configs/assumed_layout.json`의 정규화 좌표 |
-| 집단 감응 | `--audience-arousal`, `--audience-tension`, `--audience-coherence` |
+300초 = 4장면 × 75초. 각 장면은 GA 37.5초 → CA 37.5초이며 각 생성은 약 31초에 완성하고 이어서 침식·재생으로 넘어간다. 이야기 제어 시간은 각 장면의 전체 75초를 따라가며 GA→CA 때 처음으로 돌아가지 않는다.
 
-## 1. 꿈 재현 — 배경 애니메이션(MemoryCA + Open-Ended Evolution) 실행
+| 영상 시간 | N1 근거 | 배경에서 보이는 표현 |
+|---|---|---|
+| 0:00~1:15 | 중계소 탐색, 벌레 떼, 좌표와 하은의 흔적 발견 | 자줏빛 배경의 입자·영역 재배열, 불안한 구간의 대비 증가, 약 0:28의 짧은 재배열 감소와 한 부분의 명암 집중 |
+| 1:15~2:30 | 끌어당기는 대기, 기록판, 산소 부족 | 차가운 통로, 불규칙한 영역 이동과 셀 반응, 2:10~2:19에 커지는 압박·대비·영역 재배열 강도 |
+| 2:30~3:45 | 숨은 문과 거대한 창, 경고, 하은을 찾겠다는 결심 | 2:48~2:57의 공간 개방과 금빛, 3:08~3:20의 차가운 색·망설임, 이후 밝기와 개방의 회복 |
+| 3:45~5:00 | 하은을 알아봄, 살아 있다는 안도, 데려가지 못하고 돌아섬 | 4:08~4:13의 움직임 감소와 국소 빛, 이후 낮아지는 명도·색온도, 4:36 이후 미세한 원근 후퇴와 느린 침식 |
 
-1·2·3번 시나리오별 원본 배경판 4계층 분해, 기억 셀룰러 오토마타(`MemoryCA`), 다중 스케일 점묘 격자(`Lattice`), 변형장 진화(`FieldEvolution`), 그리고 시나리오별 고유 사운드 동기화가 결합된 배경 애니메이션 렌더러를 실행한다.
+이는 원문 사건을 읽고 명시적으로 설정한 예술적 대응이다. 감정 라벨만 일괄 필터로 쓰지 않고 intensity와 4축 벡터를 생성과 렌더링에서 소비한다. intensity는 변화 크기·대비·붕괴, Pleasantness는 색온도, Attention은 수렴과 빛의 범위, Sensitivity는 활성 주기·국소 붕괴 저항, Aptitude는 변이·영역 이동의 안정성에 영향을 준다.
 
-```powershell
-# [빠른 프리뷰] 15개 핵심 시각 프레임 흐름 시트 및 원본 대비 비교 시트 생성
-python -m team4.DreamModel.tools.render_background_ca --film 1 --preview
-python -m team4.DreamModel.tools.render_background_ca --film 2 --preview
-python -m team4.DreamModel.tools.render_background_ca --film 3 --preview
+배경은 장소와 감정 흐름을 제시한다. 배경만으로 관객이 인물 이름과 정확한 사건까지 알아낸다고 주장하지 않으며 관객 대상 서사 인지 실험을 수행하지 않았다.
 
-# [본 렌더링] 5분(300초, 1920x1080, 30fps, 9,000프레임) 시나리오별 사운드 결합 배경 영상 생성
-python -m team4.DreamModel.tools.render_background_ca --film 1
-python -m team4.DreamModel.tools.render_background_ca --film 2
-python -m team4.DreamModel.tools.render_background_ca --film 3
+## 실행
 
-# 1·2·3번 시나리오 연속 일괄 렌더링
-python -m team4.DreamModel.tools.render_background_ca --films 1,2,3
-```
-
-## 2. 오브제·배경 통합 파이프라인 실행 (`main.py`)
+프로젝트 루트에서:
 
 ```powershell
-# 원래 시간축의 65–90초 전환을 1배속으로 검수
-.\team4\DreamModel\.venv\Scripts\python.exe -m team4.DreamModel.main --preview --preview-start 65 --preview-seconds 25 --audio "received_sound.wav" --output team4/DreamModel/output/transition_v1.mp4
-
-# 배경 단독 / 오브제 단독 / 통합 프리뷰
-.\team4\DreamModel\.venv\Scripts\python.exe -m team4.DreamModel.tools.preview_layers --audio "received_sound.wav" --output team4/DreamModel/output/review_v1
-
-# 기승전결 각 75초, 전체 300초 통합 렌더
-.\team4\DreamModel\.venv\Scripts\python.exe -m team4.DreamModel.main --final --audio "received_sound.wav" --output team4/DreamModel/output/Collective_Dreaming_Final_1080p_300s.mp4
+& 'C:\Users\carro\.gemini\antigravity\scratch\Capstone2\team4\DreamModel\.venv\Scripts\python.exe' -B -X utf8 team4\DreamModel\tools\render_background_ca.py --reference-video 'C:\Users\carro\Downloads\dream.mp4' --story-zip 'C:\Users\carro\Downloads\Capstone2-main (3).zip' --scene-sec 75 --scene-count 4 --out-dir team4\DreamModel\output_v12_restored_motion --tag n1_background_v12_300s_audio
 ```
 
-## 검증
+## 검증 항목
 
-```powershell
-.\team4\DreamModel\.venv\Scripts\python.exe -m unittest discover -s team4/DreamModel/tests -q
-.\team4\DreamModel\.venv\Scripts\python.exe -m team4.DreamModel.tools.validate_conditions --audio "received_sound.wav" --output team4/DreamModel/output/validation_v1
-```
-
-1·2·3번 시나리오 배경 완성본의 정량 검증 보고서(`1~3번_제작검증_v3.json`)와 15프레임 흐름 시트·원본 대비 비교 시트는 [`docs/verification/`](docs/verification/)에 수록되어 있다.
-
-## 활성 코드
-
-| 파일 | 책임 |
-|---|---|
-| [background_ca_engine.py](runtime/background_ca_engine.py) | 기억 셀룰러 오토마타(`MemoryCA`), 다중 스케일 점묘 격자(`Lattice`), 부유 입자계(`Particles`), 다대역 사운드 분석기(`analyze_sound`) |
-| [background_scene_decomposer.py](runtime/background_scene_decomposer.py) | 원본 배경판 4계층 분해(`extract_plate_layers`), Open-Ended 변형장 진화(`FieldEvolution`), 시나리오 1·2·3번 서사 물리 및 `3:15` 반전 합성 |
-| [render_background_ca.py](tools/render_background_ca.py) | 1·2·3번 시나리오 배경 애니메이션 단독 렌더링 및 프리뷰 시트 생성 CLI |
-| [main.py](main.py) | 통합 실행 옵션과 프리뷰 / 완성본 분기 |
-| [dream_pipeline.py](runtime/dream_pipeline.py) | 공통 입력·생성 상태 준비, 단일 시간창 프리뷰 |
-| [render_final.py](runtime/render_final.py) | 4구간 상태 전달, 전체 렌더와 음원 포함 |
-| [background_openended.py](runtime/background_openended.py) | 영역 그래프 기반 기억 조건 반응·확산, 파라미터 진화, 다중 규모 경쟁 |
-| [dream_world.py](runtime/dream_world.py) | 오브제 구조 진화·선택·기억 상속, 공통 세계 시계 |
-| [dream_surfaces.py](runtime/dream_surfaces.py) | 소스의 윤곽·색 통계 추출, 성장 표면과 소멸 렌더 |
-| [dream_score.py](runtime/dream_score.py) | 4장면의 이야기·physics_laws를 시각적 동작과 시간으로 연결 |
-| [input_loader.py](runtime/input_loader.py) / [semantic_conditioning.py](runtime/semantic_conditioning.py) | 공유 입력 계약과 감정·스토리 조건 |
-| [audio_analyzer.py](runtime/audio_analyzer.py) | 음원의 에너지와 변화량 분석 |
-
-전체 프로젝트에 대한 쉬운 포괄 설명과 배경·오브제 작동 원리는 [통합 가이드](docs/GUIDE.md)에, 세부 생성·진화 수식과 검증 결과는 [구현 명세](docs/IMPLEMENTATION.md)에 정리되어 있다.
+- 8회 단일 점 시작, 부모 없는 출생 0, 목표 상태 MAE < 0.007 및 PSNR > 38dB.
+- 목표 텐서를 렌더 직전 바꿔도 출력이 바뀌지 않는 검사.
+- 완성 구간의 카메라는 직선을 유지한다. 생성 구간의 불규칙 변형은 v10 움직임과 일치하는지 검사한다.
+- 7개 전환 경계의 프레임 차이·밝기, 완성 구간의 지속 움직임 검사.
+- 최종 MP4 9,000프레임과 오디오 전체 디코딩, AAC 스테레오·300초·비무음 확인.
+- 진행 시트는 실제 저장된 MP4에서 추출. 비교 시트는 원본과 각 기법 완성 화면을 나란히 보여 준다.
