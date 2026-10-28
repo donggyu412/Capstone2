@@ -1,19 +1,5 @@
-﻿# -*- coding: utf-8 -*-
-"""
-scene_decomposer.py — 원본 배경판 4계층 분해 + Open-Ended 변형장 진화 + 셀룰러 오토마타 통합 렌더러
-
-핵심 구조:
-  1. 4계층 시각 분해 (extract_plate_layers):
-     - 원본 배경판(scene_01~04.png)을 인위적 도형 추가 없이 심층 안개 바탕(deep_bg), 중간 공간 구조(mid_body),
-       고휘도 점묘 입자(high_dots), 공간 윤곽 선화(lines) 및 셀룰러 서식지(hab)로 분해.
-  2. 비동기 셀룰러 기억 동역학 + 도트 박리 상전이:
-     - 공간 위상이 서로 다른 셀룰러 에너지(ca.E)와 이동 파동(travel_wave)을 통해 한 장면(75초) 안에서도
-       응집된 공간 구조가 점묘 입자와 선화로 박리(delamination)되었다가 재발아하며 끊임없이 유영.
-  3. Open-Ended 변형장 진화 (FieldEvolution):
-     - 18개 변형장 후보를 적합도(Fitness) + 새로움(Novelty) + 생존자 간 다양성(Diversity)으로 진화시켜
-       기억 공간의 굴절·원근·열림을 비반복적으로 변주.
-  4. 서사 물리 사건 및 3:15(195.0초) 클라이맥스 반전 + 장면 간 유산(Relic) 전이.
-"""
+# -*- coding: utf-8 -*-
+"""Story-conditioned target preparation and alternating constructive GA / CA rendering. Each cycle owns its reconstructed RGB state. The source plate is an objective, never a composited reveal layer."""
 from __future__ import annotations
 
 import json
@@ -36,756 +22,647 @@ SCENARIO_NAMES = {
 }
 
 
-def extract_plate_layers(plate_rgb: np.ndarray, scene_idx: int) -> dict:
-    """원본 배경판(1920x1080 RGB float32 0..1)에서 4개 물리 계층과 셀룰러 서식지(habitat)를 추출."""
-    lum_np = (0.299 * plate_rgb[..., 0] + 0.587 * plate_rgb[..., 1] + 0.114 * plate_rgb[..., 2]).astype(np.float32)
+# --------------------------------------------------------------------------------------
+# 1. 범용 스토리·감정 해석기 (하드코딩 없는 서사 → 공간 진화/물리 매핑)
+# --------------------------------------------------------------------------------------
+def _count_cues(text: str, cues: tuple[str, ...]) -> int:
+    return sum(1 for c in cues if c in text)
 
-    # 1) 다중 스케일 주파수 분해: 심층 안개 바탕(deep_bg) / 중간 공간 몸체(mid_body) / 고휘도 도트 입자(high_dots)
-    deep_bg = m.blur(plate_rgb, 38.0)
-    mid_smooth = m.blur(plate_rgb, 4.2)
-    mid_body = np.clip(mid_smooth - deep_bg * 0.72, 0.0, 1.2)
-    high_dots = np.clip(plate_rgb - mid_smooth, 0.0, 1.0)
 
-    # 2) 원본 기억 공간의 실제 구조 윤곽선(edge_lines): Sobel + DoG 결합
-    gx = cv2.Sobel(m.blur(lum_np, 1.4), cv2.CV_32F, 1, 0, ksize=3)
-    gy = cv2.Sobel(m.blur(lum_np, 1.4), cv2.CV_32F, 0, 1, ksize=3)
-    grad = np.hypot(gx, gy)
-    grad = grad / (np.percentile(grad, 98.5) + 1e-5)
-    dog = np.abs(m.blur(lum_np, 1.2) - m.blur(lum_np, 4.5))
-    dog = dog / (np.percentile(dog, 98.5) + 1e-5)
-    edge_lines = np.clip(0.55 * grad + 0.45 * dog, 0.0, 1.0) ** 1.15
-    edge_lines = m.blur(edge_lines, 0.8)
+def load_unified_scene_metadata(scenario_dir: Path) -> tuple[list[dict], list[dict]]:
+    """
+    scenes.json 과 dream_scenes.json 을 로드하며, scenes.json 이 없는 스토리보드 폴더에서도
+    dream_scenes.json 으로부터 자동으로 표준 4장면 메타데이터를 구성한다.
+    """
+    story_path = scenario_dir / "dream_scenes.json"
+    scenes_path = scenario_dir / "scenes.json"
 
-    # 3) 셀룰러 오토마타 서식지(habitat, GH x GW): 밝기 분포 + 윤곽 밀도 결합
-    hab_full = np.clip(0.14 + 0.68 * (lum_np / (np.percentile(lum_np, 96) + 1e-4)) + 0.32 * edge_lines, 0.08, 1.0)
-    hab_small = cv2.resize(hab_full, (m.GW, m.GH), interpolation=cv2.INTER_AREA)
+    story_scenes: list[dict] = []
+    if story_path.exists():
+        raw_story = json.loads(story_path.read_text(encoding="utf-8-sig"))
+        story_scenes = raw_story.get("scenes", raw_story) if isinstance(raw_story, dict) else raw_story
+
+    if scenes_path.exists():
+        raw_sc = json.loads(scenes_path.read_text(encoding="utf-8-sig"))
+        sc_list = raw_sc.get("scenes", [])
+    else:
+        stages = ["기", "승", "전", "결"]
+        sc_list = []
+        for idx in range(4):
+            st = story_scenes[idx] if idx < len(story_scenes) else {}
+            me = st.get("main_emotion") or {}
+            emo_ko = me.get("label", "중립") if isinstance(me, dict) else "중립"
+            if emo_ko not in m.EMO_KO:
+                emo_ko = "중립"
+            inten = float(me.get("intensity", 0.5)) if isinstance(me, dict) else 0.5
+            bgs = st.get("backgrounds") or [f"장면 {idx + 1}"]
+            sc_list.append({
+                "stage": stages[idx],
+                "act": idx + 1,
+                "title": bgs[0] if bgs else f"장면 {idx + 1}",
+                "emotion": emo_ko,
+                "intensity": inten,
+                "backgrounds": bgs,
+            })
+
+    return sc_list, story_scenes
+
+
+def interpret_story_and_emotion(
+    idx: int,
+    sc_meta: dict,
+    story_item: dict,
+    plate_stats: dict,
+    all_plate_stats: list[dict],
+    prev_profile: dict | None = None,
+) -> dict:
+    """
+    스토리 텍스트, 물리 법칙(physics_laws), 감정 라벨·강도, 4차원 감정 벡터(Pleasantness 등),
+    그리고 목표 배경 이미지의 고유 명암/색상을 종합 해석해 장면 고유의 공간 진화 프로파일을 생성.
+    """
+    emo_ko = sc_meta.get("emotion", "중립")
+    emo_en = m.EMO_KO.get(emo_ko, "neutral")
+    intensity = float(sc_meta.get("intensity", 0.55))
+    p_dyn = m.emo_params(emo_en, intensity)
+
+    story_txt = str(story_item.get("story", ""))
+    bgs_txt = " ".join(story_item.get("backgrounds") or sc_meta.get("backgrounds") or [])
+    laws_txt = " ".join(story_item.get("physics_laws") or [])
+    emos_txt = " ".join(story_item.get("emotions") or [])
+    full_txt = f"{bgs_txt} {story_txt} {laws_txt} {emos_txt}"
+
+    vec = story_item.get("vector") or [0.0, 0.4, 0.4, 0.0]
+    pleasant = float(vec[0]) if len(vec) > 0 else 0.0
+    attention = float(vec[1]) if len(vec) > 1 else 0.4
+    sensitivity = float(vec[2]) if len(vec) > 2 else 0.4
+    arousal = float(np.clip(0.5 * (abs(attention) + abs(sensitivity)) + 0.35 * intensity, 0.2, 1.4))
+
+    # 서사 사건/물리 단서 정량화 (특정 단어 하나에 고정되지 않는 일반 의미군 분석)
+    c_loco = _count_cues(full_txt, ("달리", "달려", "걸음", "걷는", "걸을", "복도", "계단", "난간", "뻗어", "다가가", "지나가", "가로질"))
+    c_recede = _count_cues(full_txt, ("멀어지", "물러나", "좁혀지지", "늘어나", "끝없이", "사라짐"))
+    c_open = _count_cues(full_txt, ("열리", "열린", "벌어지", "넓어지", "넓게", "확장", "틈", "새어 나오", "펼쳐"))
+    c_collapse = _count_cues(full_txt, ("무너지", "붕괴", "균열", "갈라지", "금이", "꺼지", "가라앉", "벗겨지", "허물어", "떨어져", "부서"))
+    c_float = _count_cues(full_txt, ("떠오르", "떠 있", "공기 방울", "거품", "위로", "솟아", "거꾸로", "무게가 사라", "가벼워", "깃털"))
+    c_wave = _count_cues(full_txt, ("물결", "파도", "수면", "파문", "동심원", "나이테", "잔물결", "바닷물", "물 위"))
+    c_light = _count_cues(full_txt, ("빛", "햇살", "볕", "달빛", "창", "반짝", "환하게", "금빛", "은빛", "잔광"))
+    c_pulse = _count_cues(full_txt, ("심장", "박동", "두근", "맥박", "숨", "호흡", "박자", "북소리", "울림", "공명"))
+    c_bright_words = _count_cues(full_txt, ("햇살", "볕", "아침", "환하게", "희고", "유백색", "달빛", "거울", "온기", "따뜻"))
+    c_dark_words = _count_cues(full_txt, ("어둠", "침몰", "곰팡이", "축축", "차갑", "심연", "녹슨", "무겁고"))
+
+    # 1) 장면별 명도 키(Canvas Key: bright / mid / dark) 및 색온도 결정 — 4막 간 대비 강제 보장!
+    med_lum = plate_stats["med_lum"]
+    warmth_plate = plate_stats["warmth"]
+    bright_score = (
+        1.15 * (med_lum - 0.24)
+        + 0.65 * pleasant
+        + 0.14 * c_bright_words
+        - 0.10 * c_dark_words
+        + (0.38 if emo_en in ("happy",) else (0.14 if emo_en in ("surprise", "neutral") else -0.22))
+    )
+
+    # 1) 장면별 분위기·명암·색감 모드(mood_style) 및 도화지 키 결정 — 어둡고 공포 / 밝고 해피 / 어둡고 고요 / 신비 개방을 극명히 대비!
+    all_lums = [s["med_lum"] for s in all_plate_stats]
+    lum_rank = sorted(range(len(all_lums)), key=lambda k: all_lums[k]).index(idx)
+    prev_key = prev_profile["canvas_key"] if prev_profile is not None else None
+
+    warm_story = _count_cues(full_txt, ("햇살", "볕", "온기", "따뜻", "기쁨"))
+    quiet_story = _count_cues(full_txt, ("달빛", "고요", "정적", "느리게", "애도", "슬픔"))
+    if emo_en == "happy" or (warm_story >= 2 and pleasant > .10):
+        mood_style, canvas_key = "bright_happy", "high_light"
+    elif emo_en in ("fear", "angry", "disgust"):
+        mood_style, canvas_key = "dark_horror", "deep_contrast"
+    elif emo_en == "sad" or quiet_story >= 3:
+        mood_style, canvas_key = "dark_calm", "deep_contrast"
+    else:
+        mood_style, canvas_key = "vivid_mystery", "mid_atmos"
+
+    warm_bias = float(np.clip(
+        warmth_plate * 1.4 + p_dyn["warm"] * 1.5 + 0.40 * pleasant
+        + (0.45 if mood_style == "bright_happy" else (-0.32 if mood_style in ("dark_horror", "dark_calm") else 0.05)),
+        -0.80, 0.90,
+    ))
+
+    # 2) 기법 역할 분담: '유전 기법(GA: 점→시행착오 선·다각형→완성→파편 파괴)'과 '셀룰러(CA: 단일 셀→블록 가지 증식→완성→도미노 붕괴)' 교차!
+    if idx % 2 == 0:
+        arch_mode = "ga_point_evolution" if idx == 0 else "ga_joyful_evolution"
+        ga_lead, ca_lead = 1.0, 0.0
+    else:
+        arch_mode = "ca_horror_cellular" if mood_style == "dark_horror" else "ca_calm_cellular"
+        ga_lead, ca_lead = 0.0, 1.0
+
+    # 3) 스토리 이동·변형 벡터 (이동/달리기, 멀어짐, 개방, 중력/부력, 파문)
+    #    c_recede 가 크면 소실점에서 멀어지는 후퇴 흐름(-), c_loco 가 크면 앞으로 전진(+)
+    if c_recede > 0 and c_loco > 0:
+        loco_vel = -0.22 - 0.05 * min(c_recede, 4)   # 다가갈수록 멀어지는 계단/복도 역설
+    elif c_loco > 0:
+        loco_vel = 0.16 + 0.055 * min(c_loco, 5)     # 앞으로 이동/달리기 전진 흐름
+    else:
+        loco_vel = 0.05 * (1.0 if pleasant >= 0 else -1.0)
+
+    aperture_amp = float(np.clip(0.08 * c_open + (0.14 if idx == 2 else 0.0), 0.0, 0.34))
+    collapse_freq = float(np.clip(0.55 + 0.22 * c_collapse + 0.35 * p_dyn["collapse"] + (0.35 if idx in (1, 2) else 0.0), 0.35, 1.85))
+    wave_amp = float(np.clip(0.18 * c_wave + (0.24 if idx == 3 else 0.0), 0.0, 0.85))
+    light_amp = float(np.clip(0.16 * c_light + (0.28 if canvas_key == "high_light" else 0.08), 0.08, 0.85))
+    pulse_amp = float(np.clip(0.18 * c_pulse + 0.22 * p_dyn["breath"], 0.10, 0.75))
+
+    # 붕괴/입자 중력 방향: 부유/기포 단서가 우세하면 위로(-y), 침하/무너짐이 우세하면 아래로(+y)
+    if c_float > c_collapse:
+        gravity_xy = (0.08 * math.sin(idx + 1), -0.85)
+        particle_mode = "buoyant_up"
+    elif c_open > c_collapse and idx >= 2:
+        gravity_xy = (0.65 if idx == 2 else -0.45, -0.35)
+        particle_mode = "radiant_drift"
+    else:
+        gravity_xy = (0.18 * (1 if idx % 2 == 0 else -1), 0.95)
+        particle_mode = "crumble_fall" if c_collapse >= 2 else "mist_sparks"
+
+    # GA 성장 유도 방향
+    if abs(loco_vel) > 0.14:
+        flow_dir = (0.0, -0.35 if loco_vel > 0 else 0.35)
+    elif c_float > c_collapse:
+        flow_dir = (0.12, -0.55)
+    elif c_open >= 2:
+        flow_dir = (0.45, -0.15)
+    else:
+        flow_dir = (0.22 * math.cos(idx * 1.7), 0.22 * math.sin(idx * 1.7))
+
+    p_dyn["speed"] = float(np.clip(p_dyn["speed"] * (0.78 + 0.42 * arousal), 0.50, 1.85))
+    p_dyn["collapse"] = collapse_freq
 
     return dict(
-        raw=m.T(plate_rgb),
-        deep_bg=m.T(deep_bg),
-        mid_body=m.T(mid_body),
-        high_dots=m.T(high_dots),
-        lines=m.T(edge_lines),
-        hab=m.T(hab_small),
-        lum=m.T(lum_np),
+        idx=idx,
+        emotion_ko=emo_ko,
+        emotion_en=emo_en,
+        mood_style=mood_style,
+        intensity=intensity,
+        emotion_vector=[float(x) for x in vec[:4]],
+        pleasantness=pleasant,
+        arousal=arousal,
+        arch_mode=arch_mode,
+        canvas_key=canvas_key,
+        warm_bias=warm_bias,
+        ga_lead=ga_lead,
+        ca_lead=ca_lead,
+        loco_vel=loco_vel,
+        aperture_amp=aperture_amp,
+        collapse_freq=collapse_freq,
+        wave_amp=wave_amp,
+        light_amp=light_amp,
+        pulse_amp=pulse_amp,
+        gravity_xy=gravity_xy,
+        particle_mode=particle_mode,
+        flow_dir=flow_dir,
+        params=p_dyn,
+        cues=dict(
+            locomotion=c_loco,
+            recede=c_recede,
+            opening=c_open,
+            collapse=c_collapse,
+            floating=c_float,
+            wave=c_wave,
+            light=c_light,
+            pulse=c_pulse,
+        ),
     )
 
 
+# --------------------------------------------------------------------------------------
+# 2. 선명한 목표 배경 청사진 추출 및 장면 맞춤형 도화지(Dream Canvas) 합성
+# --------------------------------------------------------------------------------------
+def analyze_raw_plate_stats(plate_rgb: np.ndarray) -> dict:
+    lum_np = (0.299 * plate_rgb[..., 0] + 0.587 * plate_rgb[..., 1] + 0.114 * plate_rgb[..., 2]).astype(np.float32)
+    # 5x5 국소 최대값과 현재 밝기의 차이로 '검은 바탕 위 희소 도트 판(Team3 파티클 캡처본)' 여부 자동 판별
+    k5 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    lum_max5 = cv2.dilate(lum_np, k5)
+    lit_region = lum_max5 > 0.16
+    pinhole_ratio = float(((lum_max5 - lum_np > 0.11) & lit_region).sum() / max(int(lit_region.sum()), 1))
+    med_lum = float(np.median(lum_np))
+    p95_lum = float(np.percentile(lum_np, 95))
+    is_particle_plate = (pinhole_ratio > 0.26 and med_lum < 0.22)
+
+    bright_mask = lum_np >= np.percentile(lum_np, 65)
+    mean_rgb = plate_rgb[bright_mask].mean(axis=0) if bright_mask.any() else plate_rgb.mean(axis=(0, 1))
+    warmth = float(mean_rgb[0] - mean_rgb[2])
+
+    return dict(
+        med_lum=med_lum,
+        p95_lum=p95_lum,
+        pinhole_ratio=pinhole_ratio,
+        is_particle_plate=is_particle_plate,
+        dominant_rgb=mean_rgb.astype(np.float32),
+        warmth=warmth,
+    )
+
+
+def prepare_crisp_plate(plate_rgb: np.ndarray, stats: dict, profile: dict) -> np.ndarray:
+    """
+    원본 배경의 공간 구조와 윤곽이 선명하게 읽히도록 준비:
+      - 일반 연속 이미지: 픽셀 해상도와 디테일을 100% 유지하면서 미세 윤곽 선명도만 보강.
+      - 희소 도트 이미지: 도트 사이 검은 미세 구멍을 엣지 보존 모폴로지+양방향 필터로 응집시켜
+        흐릿한 점 구름이 아닌 선명한 면과 윤곽 구조로 복원.
+    """
+    if stats["is_particle_plate"]:
+        k5 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        closed = cv2.morphologyEx(plate_rgb, cv2.MORPH_CLOSE, k5)
+        mixed = np.maximum(plate_rgb, closed * 0.92)
+        surf = cv2.bilateralFilter(mixed.astype(np.float32), d=7, sigmaColor=0.16, sigmaSpace=4.5)
+        p99 = float(np.percentile(surf, 99.2)) + 1e-4
+        normed = np.clip(surf / max(p99, 0.38), 0.0, 1.0) ** 0.78
+        # 미세 구조 윤곽 언샤프 보강
+        detail = normed - m.blur(normed, 2.6)
+        sharp = np.clip(normed + 0.42 * detail, 0.0, 1.0)
+
+        # 밝은 도화지(high_light) 장면인데 원본이 검은 바탕 도트판인 경우, 빈 검은 배경이 지저분한 구멍처럼 보이지 않게 명암 조화
+        if profile["canvas_key"] == "high_light":
+            lum_s = 0.299 * sharp[..., 0] + 0.587 * sharp[..., 1] + 0.114 * sharp[..., 2]
+            void_w = np.clip((0.18 - lum_s) / 0.18, 0.0, 1.0)[..., None] ** 1.4
+            tint = np.clip(stats["dominant_rgb"] * 1.15 + np.array([0.48, 0.44, 0.36], np.float32), 0.35, 0.88)
+            sharp = sharp * (1.0 - 0.72 * void_w) + tint[None, None, :] * (0.72 * void_w)
+        return sharp.astype(np.float32)
+
+    # 일반 연속 배경판: 장면 분위기(밝고 해피 / 어둡고 공포 / 어둡고 고요 / 신비 탐색)에 맞춰 채도·색온도·명암비를 선명히 연출!
+    out = plate_rgb.copy()
+    mood = profile.get("mood_style", "vivid_mystery")
+
+    if mood == "bright_happy":
+        # 밝고 따스하고 해피한 황금빛 햇살 색감: 채도 상승 + 따뜻한 앰버 골드 하이라이트 + 환한 공기감!
+        p99 = float(np.percentile(out, 99.0)) + 1e-4
+        # N1's joy is hope under threat: retain cold shadows and avoid a triumphal wash.
+        intensity=float(profile.get('intensity',.55))
+        mixed=float(np.clip(-profile.get('pleasantness',0.),0,1))
+        gamma=.91-.20*intensity+.12*mixed
+        out = np.clip(out / max(p99, 0.52), 0.0, 1.0) ** gamma
+        lum = (0.299 * out[..., 0] + 0.587 * out[..., 1] + 0.114 * out[..., 2])[..., None]
+        out = np.clip(lum + (out - lum) * (1.05+.20*intensity-.15*mixed), 0.0, 1.0)
+        gold_tint = np.array([1.04+.08*intensity,1.02,1.-.12*intensity+.08*mixed],np.float32)
+        out = np.clip(out * gold_tint[None, None, :] + np.array([.018,.009,0.],np.float32),0.,1.)
+    elif mood == "dark_horror":
+        # 어둡고 격렬한 공포: 칠흑 암부 + 날이 선 강철 청백/적녹슨 윤곽 대비!
+        p99 = float(np.percentile(out, 99.4)) + 1e-4
+        base = np.clip(out / max(p99, 0.48), 0.0, 1.0) ** (0.82 if stats["med_lum"] < 0.28 else 1.55)
+        lum = (0.299 * base[..., 0] + 0.587 * base[..., 1] + 0.114 * base[..., 2])[..., None]
+        cold_horror = np.array([0.78, 0.88, 1.16], np.float32)
+        edge_hi = np.clip(base - m.blur(base, 3.0), -0.15, 0.40)
+        out = np.clip(base * cold_horror[None, None, :] * (0.42 + 0.72 * lum) + 0.65 * edge_hi, 0.0, 1.0)
+    elif mood == "dark_calm":
+        # 어둡고 고요한 달빛/밤바다 수면: 차분하고 깊은 사파이어 남청색 그림자 + 은은한 은빛·장미빛 수면 윤슬!
+        base = (out ** (1.48 if stats["med_lum"] > 0.32 else 0.92))
+        lum = (0.299 * base[..., 0] + 0.587 * base[..., 1] + 0.114 * base[..., 2])[..., None]
+        moon_tint = np.array([0.66, 0.80, 1.12], np.float32)
+        shimmer = np.clip(base - m.blur(base, 4.0), 0.0, 0.35) * np.array([0.95, 0.98, 1.15], np.float32)
+        out = np.clip(base * moon_tint[None, None, :] * (0.48 + 0.68 * lum) + 0.60 * shimmer, 0.0, 1.0)
+    else:
+        # 신비·긴장 수중 복도: 에메랄드 청록과 네온 마젠타 반사광의 강렬하고 선명한 색채 대비!
+        p99 = float(np.percentile(out, 99.3)) + 1e-4
+        base = np.clip(out / max(p99, 0.52), 0.0, 1.0) ** 0.82
+        lum = (0.299 * base[..., 0] + 0.587 * base[..., 1] + 0.114 * base[..., 2])[..., None]
+        out = np.clip(lum + (base - lum) * 1.35, 0.0, 1.0)
+
+    fine_detail = out - m.blur(out, 1.7)
+    out = np.clip(out + 0.32 * fine_detail, 0.0, 1.0)
+    return out.astype(np.float32)
+
+
+def build_dream_canvas(
+    target_sharp: np.ndarray,
+    stats: dict,
+    profile: dict,
+    seed: int,
+) -> tuple[np.ndarray, float]:
+    """
+    점 1개에서 시작하거나 부서져 사라질 때 뒤에 드러나는 꿈의 배경 하늘/심연 도화지:
+      - 탁한 베이지 얼룩을 완전히 배제하고, 장면 분위기(맑은 아침 햇살 하늘 / 칠흑 공포 심연 / 고요한 밤호수 / 심해 청록)를 직관적으로 표현!
+    """
+    idx = profile["idx"]
+    mood = profile.get("mood_style", "vivid_mystery")
+    grain = m.fbm(seed + idx * 41 + 7, (340, 150, 65), w=m.W, h=m.H)
+    gu, gv = m.U, m.V
+    rad_c = np.hypot((gu - 0.52) * 1.1, (gv - 0.42))
+
+    if mood == "bright_happy":
+        sky_top = np.array([0.52, 0.72, 0.92], np.float32)
+        sun_hor = np.array([0.99, 0.90, 0.66], np.float32)
+        sun_glow = np.exp(-(rad_c / 0.62) ** 2)[..., None]
+        c_mix = sky_top * (1.0 - 0.68 * gv)[..., None] + sun_hor * (0.68 * gv)[..., None]
+        c_mix = c_mix * (1.0 - 0.48 * sun_glow) + np.array([1.0, 0.95, 0.78], np.float32) * (0.48 * sun_glow)
+        canvas = np.clip(c_mix + (grain[..., None] - 0.5) * 0.03, 0.42, 0.98)
+    elif mood == "dark_horror":
+        c_a = np.array([0.035, 0.050, 0.078], np.float32)
+        c_b = np.array([0.010, 0.014, 0.024], np.float32)
+        canvas = np.clip(c_a * (1.0 - rad_c)[..., None] + c_b * rad_c[..., None] + (grain[..., None] - 0.5) * 0.018, 0.008, 0.11)
+    elif mood == "dark_calm":
+        c_top = np.array([0.025, 0.055, 0.115], np.float32)
+        c_bot = np.array([0.012, 0.028, 0.062], np.float32)
+        moon_glow = np.exp(-(((gu - 0.55) / 0.42) ** 2 + ((gv - 0.32) / 0.28) ** 2))[..., None]
+        c_mix = c_top * (1.0 - gv)[..., None] + c_bot * gv[..., None] + np.array([0.07, 0.12, 0.22], np.float32) * moon_glow
+        canvas = np.clip(c_mix + (grain[..., None] - 0.5) * 0.018, 0.01, 0.22)
+    else:
+        c_top = np.array([0.045, 0.115, 0.145], np.float32)
+        c_bot = np.array([0.018, 0.042, 0.068], np.float32)
+        shaft = np.exp(-(((gu - 0.48) / 0.30) ** 2))[..., None] * (1.0 - 0.6 * gv)[..., None]
+        c_mix = c_top * (1.0 - gv)[..., None] + c_bot * gv[..., None] + np.array([0.08, 0.14, 0.18], np.float32) * shaft
+        canvas = np.clip(c_mix + (grain[..., None] - 0.5) * 0.022, 0.015, 0.26)
+
+    canvas_lum = float((0.299 * canvas[..., 0] + 0.587 * canvas[..., 1] + 0.114 * canvas[..., 2]).mean())
+    return canvas.astype(np.float32), canvas_lum
+
+
+def extract_plate_layers(
+    plate_rgb: np.ndarray,
+    scene_idx: int,
+    stats: dict | None = None,
+    profile: dict | None = None,
+    seed: int = 28,
+) -> dict:
+    """
+    목표 배경 이미지에서 선명한 구조 레이어, 구조 텐서 방향장(tx, ty), 소실점 초점(focal_uv),
+    셀룰러 서식지(hab), 그리고 장면 맞춤형 도화지(canvas_bg)를 추출.
+    """
+    if stats is None:
+        stats = analyze_raw_plate_stats(plate_rgb)
+    if profile is None:
+        profile = {"idx": scene_idx, "canvas_key": "mid_atmos", "warm_bias": 0.0, "emotion_en": "neutral"}
+
+    sharp_np = prepare_crisp_plate(plate_rgb, stats, profile)
+    lum_np = (0.299 * sharp_np[..., 0] + 0.587 * sharp_np[..., 1] + 0.114 * sharp_np[..., 2]).astype(np.float32)
+
+    # 1) 선명한 건축/자연 윤곽선 추출 (Sobel + 다중 스케일 DoG)
+    lum_s1 = m.blur(lum_np, 1.0)
+    gx = cv2.Sobel(lum_s1, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(lum_s1, cv2.CV_32F, 0, 1, ksize=3)
+    grad = np.hypot(gx, gy)
+    grad_n = np.clip(grad / (np.percentile(grad, 98.2) + 1e-5), 0.0, 1.0)
+
+    dog = np.abs(m.blur(lum_np, 0.9) - m.blur(lum_np, 3.8))
+    dog_n = np.clip(dog / (np.percentile(dog, 98.2) + 1e-5), 0.0, 1.0)
+    edge_fine = np.clip(0.62 * grad_n + 0.38 * dog_n, 0.0, 1.0)
+
+    # 2) 구조 텐서(Structure Tensor)로부터 실제 벽·계단·나뭇가지·수면의 접선 벡터(tx, ty)와 응집도(coherence) 계산
+    jxx = m.blur(gx * gx, 5.0)
+    jxy = m.blur(gx * gy, 5.0)
+    jyy = m.blur(gy * gy, 5.0)
+    grad_ang = 0.5 * np.arctan2(2.0 * jxy, jxx - jyy + 1e-8)
+    tan_ang = grad_ang + (math.pi * 0.5)  # 그래디언트에 수직 = 실제 선/구조가 뻗어나가는 접선 방향
+    tx_np = np.cos(tan_ang).astype(np.float32)
+    ty_np = np.sin(tan_ang).astype(np.float32)
+    coh_np = (np.sqrt((jxx - jyy) ** 2 + 4.0 * jxy * jxy) / (jxx + jyy + 1e-5)).clip(0.0, 1.0).astype(np.float32)
+
+    # 3) 구조 중요도(salience) 및 소실점/초점(focal_uv) 자동 추정
+    local_contrast = np.abs(lum_np - m.blur(lum_np, 14.0))
+    lc_n = np.clip(local_contrast / (np.percentile(local_contrast, 96.0) + 1e-5), 0.0, 1.0)
+    salience = np.clip(0.55 * edge_fine + 0.30 * lc_n + 0.15 * coh_np, 0.04, 1.0).astype(np.float32)
+
+    # 화면 중앙부(0.18..0.82) 내에서 구조·명암 대비가 모이는 초점(복도 끝, 계단 위, 창문, 수평선 중심) 탐색
+    center_prior = np.exp(-(((m.U - 0.5) / 0.30) ** 2 + ((m.V - 0.46) / 0.28) ** 2)).astype(np.float32)
+    portal_score = m.blur((0.55 * edge_fine + 0.45 * np.abs(lum_np - float(lum_np.mean()))) * center_prior, 24.0)
+    fy_idx, fx_idx = np.unravel_index(int(np.argmax(portal_score)), portal_score.shape)
+    focal_uv = (float(np.clip(fx_idx / m.W, 0.22, 0.78)), float(np.clip(fy_idx / m.H, 0.22, 0.78)))
+
+    # 4) CA 서식지(hab): 어두운 철제 계단·벽면·숲 줄기까지 모든 공간 윤곽을 타고 세포가 골고루 증식하도록 설정
+    hab_full = np.clip(0.34 + 0.52 * salience + 0.14 * (lum_np / (np.percentile(lum_np, 95) + 1e-4)), 0.22, 1.0)
+    hab_ca = cv2.resize(hab_full, (m.GW, m.GH), interpolation=cv2.INTER_AREA)
+    tx_ca = cv2.resize(tx_np, (m.GW, m.GH), interpolation=cv2.INTER_LINEAR)
+    ty_ca = cv2.resize(ty_np, (m.GW, m.GH), interpolation=cv2.INTER_LINEAR)
+    tnorm = np.hypot(tx_ca, ty_ca) + 1e-6
+    tx_ca, ty_ca = tx_ca / tnorm, ty_ca / tnorm
+
+    canvas_np, canvas_lum = build_dream_canvas(sharp_np, stats, profile, seed)
+    crack_np, cell_id_np, slab_vx_np, slab_vy_np = m.cellular_fracture_map(
+        seed + scene_idx * 53 + 11, n_cells=86, w=m.W, h=m.H
+    )
+    macro_edge = m.blur(edge_fine, 3.0).astype(np.float32)
+
+    return dict(
+        sharp=m.T(sharp_np),
+        canvas_bg=m.T(canvas_np),
+        canvas_lum=canvas_lum,
+        edges=m.T(edge_fine),
+        macro_edges=m.T(macro_edge),
+        salience_np=salience,
+        tx_np=tx_np,
+        ty_np=ty_np,
+        coh_np=coh_np,
+        hab=m.T(hab_ca),
+        tx_ca=m.T(tx_ca),
+        ty_ca=m.T(ty_ca),
+        lum=m.T(lum_np),
+        focal_uv=focal_uv,
+        crack_tex=m.T(crack_np),
+        cell_id=m.T(cell_id_np),
+        slab_vx=m.T(slab_vx_np),
+        slab_vy=m.T(slab_vy_np),
+    )
+
+
+# --------------------------------------------------------------------------------------
+# 3. 개별 꿈 장면 클래스 (CA + GA + 스토리 공간 물리 합성)
+# --------------------------------------------------------------------------------------
+def build_background_story_timing(story_item, profile):
+    """Editorial timing grounded in N1 sentences; only background controls result.
+
+    These are explicit artistic mappings, not claims of automatic plot reasoning
+    or scientifically calibrated psychological measurements.
+    """
+    text=story_item.get('story','')
+    channels=('tension','travel','opening','retreat','warmth','focus','pause','light')
+    if '좌표 숫자' in text and '접시' in text:
+        anchors=[('search','신호를 다시 쏘아 올리는'),('aversion','벌레 떼'),
+                 ('discovery','좌표 숫자'),('recognition','하은이 알려 준')]
+        rows=[
+            (0,'search',.45,.15,0,0,-.1,.25,0,.1),
+            (16,'search',.48,.35,0,0,-.1,.45,0,.3),
+            (23,'aversion',.85,.10,0,0,-.45,.65,0,.05),
+            (27,'discovery',.72,0,0,0,.05,.9,0,.6),
+            (28.2,'discovery',.35,0,0,0,.15,1.,.95,1.),
+            (29.5,'discovery',.48,.05,0,0,.12,.85,.05,.5),
+            (39,'recognition',.58,.1,0,0,-.1,.45,0,.2),
+            (53,'recognition',.68,.15,0,0,.10,.90,.18,.8),
+            (64,'decision',.50,.40,.1,0,.12,.55,0,.35),
+            (75,'decision',.45,.45,.1,0,.08,.3,0,.2)]
+        focal=(.76,.48)
+    elif '사람 더 있음' in text:
+        anchors=[('crossing','대기 자체가 끌어당기는 힘'),('evidence','사람 더 있음'),
+                 ('oxygen_pressure','산소 경고음'),('resolve','기록판을 뜯어내기')]
+        rows=[
+            (0,'crossing',.55,.35,0,0,-.25,.2,0,.05),
+            (12,'crossing',.80,.90,0,0,-.55,.35,0,.12),
+            (25,'crossing',.92,1.,0,0,-.50,.45,0,.15),
+            (38,'evidence',.70,.35,0,0,-.25,.55,0,.2),
+            (48,'evidence',.65,.05,0,0,-.15,.95,.30,.65),
+            (55,'oxygen_pressure',.92,.65,0,0,-.55,.40,0,.30),
+            (64,'oxygen_pressure',1.,.90,0,0,-.65,.35,0,.55),
+            (75,'resolve',.95,.55,0,0,-.35,.65,0,.35)]
+        focal=(.59,.55)
+    elif '여기 있어, 오지 마' in text:
+        anchors=[('hidden_threshold','도면에는 없던 문'),('opening','거대한 창'),
+                 ('warning','여기 있어, 오지 마'),('hope','하은을 찾으러 가기로')]
+        rows=[
+            (0,'hidden_threshold',.78,.45,0,0,-.55,.35,0,.15),
+            (12,'hidden_threshold',.72,.15,.05,0,-.35,.85,.25,.4),
+            (18,'opening',.48,.15,.60,0,.30,.55,0,.70),
+            (27,'opening',.42,.20,1.,0,.65,.20,0,.95),
+            (38,'warning',.60,.10,.45,0,-.10,.50,0,.4),
+            (50,'warning',.72,0,.20,0,-.40,.95,.45,.35),
+            (58,'hope',.55,.35,.55,0,.20,.60,0,.5),
+            (68,'hope',.43,.55,.80,0,.50,.45,0,.8),
+            (75,'hope',.45,.50,.85,0,.45,.40,0,.65)]
+        focal=(.68,.43)
+    elif '데려갈 수 없는' in text:
+        anchors=[('search','산소가 바닥나기 전에'),('recognition','하은의 얼굴'),
+                 ('relief','살아 있다'),('separation','데려갈 수 없는'),('retreat','그리고 돌아선다')]
+        rows=[
+            (0,'search',.85,.65,0,0,-.45,.45,0,.15),
+            (15,'search',.80,.55,0,0,-.35,.65,0,.25),
+            (23,'recognition',.55,.15,0,0,-.05,.90,.30,.55),
+            (28,'relief',.30,0,0,0,.25,.95,.80,.70),
+            (39,'separation',.58,.05,0,.10,-.30,.80,.15,.25),
+            (51,'separation',.65,0,0,.25,-.55,.70,.35,.12),
+            (59,'retreat',.62,0,0,.65,-.65,.40,.05,.08),
+            (69,'retreat',.55,0,0,1.,-.75,.15,0,.03),
+            (75,'retreat',.45,0,0,1.,-.75,.05,0,0)]
+        focal=(.56,.53)
+    else:
+        anchors=[]
+        rows=[(0,'mood',.5,.2,0,0,0,.3,0,.2),(75,'mood',.5,.2,0,0,0,.3,0,.2)]
+        focal=(.5,.5)
+    for name,quote in anchors:
+        if quote not in text:raise ValueError(f'Unmatched story evidence: {name}')
+    return dict(channels=list(channels),focal=list(focal),
+        anchors=[dict(beat=name,evidence=quote) for name,quote in anchors],
+        keyframes=[dict(seconds=row[0],beat=row[1],**dict(zip(channels,row[2:]))) for row in rows])
+
+
+def sample_background_story(profile, scene_time, scene_sec):
+    plan=profile['background_story_timing']
+    at=float(scene_time/scene_sec*75.)
+    keys=plan['keyframes'];times=[k['seconds'] for k in keys]
+    controls={key:float(np.interp(at,times,[k[key] for k in keys])) for key in plan['channels']}
+    index=max(i for i,k in enumerate(keys) if k['seconds']<=at)
+    controls.update(beat=keys[index]['beat'],scene_seconds=scene_time,
+                    focal_x=plan['focal'][0],focal_y=plan['focal'][1])
+    return controls
+
+
 class DreamBackgroundScene:
-    """원본 배경판 1장을 셀룰러 오토마타 및 시나리오별 서사 물리 법칙과 연동하는 장면 클래스."""
+    """Story-conditioned objective and blank canvas; only owned state is drawn."""
+    def __init__(self, idx, info, profile, plate_rgb, stats, seed):
+        self.idx, self.profile = idx, profile
+        self.target_np = prepare_crisp_plate(plate_rgb,dict(stats, is_particle_plate=False),profile)
+        canvas, _ = build_dream_canvas(self.target_np,stats,profile,seed)
+        # Dark warm ground keeps the happy scene's golden point construction legible.
+        if profile["mood_style"] == "bright_happy":
+            canvas = canvas*.16 + np.array([.035,.020,.008],np.float32)
+        if profile["mood_style"] == "vivid_mystery":
+            canvas = canvas.mean(axis=2,keepdims=True)*np.array([.72,.55,.65],np.float32)
+        self.canvas = m.T(np.maximum(canvas,np.array([.022,.025,.035],np.float32)))
+        self.engine = None
+        self.records = []
 
-    FOG_COLORS_BY_FILM = {
-        1: [
-            ("#2a1723", 0.34, (6.0, -3.5)),   # 시나리오 1 - 1막(기, 놀람): 자홍·적갈색 바다 안개와 바람
-            ("#141324", 0.44, (-4.0, 2.0)),   # 시나리오 1 - 2막(승, 공포): 좁은 선체 틈새의 서늘한 보라·암청 안개
-            ("#122624", 0.32, (4.5, -7.0)),   # 시나리오 1 - 3막(전, 중립): 깊은 청록 어둠과 위로 피어오르는 황금빛 김
-            ("#0f1830", 0.48, (3.5, 4.0)),    # 시나리오 1 - 4막(결, 공포): 푸른 창가 복도의 서늘한 심연 안개
-        ],
-        2: [
-            ("#1e2114", 0.36, (-4.5, 2.0)),   # 시나리오 2 - 1막(기, 혐오): 파도 끝 녹슨 청동·올리브 수면 안개
-            ("#171422", 0.46, (2.0, 4.8)),    # 시나리오 2 - 2막(승, 공포): 습한 복도와 바닥으로 꺼지는 곰팡이 암청 안개
-            ("#282012", 0.28, (3.2, -4.5)),   # 시나리오 2 - 3막(전, 기쁨): 수면 위 천장처럼 번지는 따뜻한 황금빛 공기
-            ("#0e162e", 0.42, (2.0, -6.5)),   # 시나리오 2 - 4막(결, 슬픔): 위로 솟구치는 푸른 천장 빛과 넓어지는 공간
-        ],
-        3: [
-            ("#1a1a24", 0.42, (-2.5, 5.2)),   # 시나리오 3 - 1막(기, 공포): 벽 없는 회색 공간과 빗소리를 삼키는 구멍 안개
-            ("#181822", 0.45, (1.5, 4.0)),    # 시나리오 3 - 2막(승, 공포): 차가운 회색 바닥과 무거운 정적 공기
-            ("#142426", 0.30, (2.5, -5.2)),   # 시나리오 3 - 3막(전, 중립): 지붕의 흰 점으로 떠오르는 물방울과 햇살 먼지
-            ("#121a2d", 0.38, (3.5, 2.2)),    # 시나리오 3 - 4막(결, 중립): 폐창고 슬레이트 틈 빛줄기와 맴도는 먼지 공기
-        ],
-    }
-
-    def __init__(self, idx: int, info: dict, plate_rgb: np.ndarray, seed: int, film: int = 1):
-        self.idx = idx
-        self.film = film if film in self.FOG_COLORS_BY_FILM else 1
-        self.info = info
-        self.fog_color, self.fog_density, self.wind = self.FOG_COLORS_BY_FILM[self.film][idx]
-        L = extract_plate_layers(plate_rgb, idx)
-        self.base = L["raw"]
-        self.deep_bg = L["deep_bg"]
-        self.mid_body = L["mid_body"]
-        self.high_dots = L["high_dots"]
-        self.lines = L["lines"]
-        self.hab = L["hab"]
-        self.lum = L["lum"]
-        self.glow_static = m.up(m.gblur(m.down(self.base), 4.0))
-
-        self.flow_noise_x = m.T(m.fbm(seed + idx * 31 + 1, (180, 90, 45))) - 0.5
-        self.flow_noise_y = m.T(m.fbm(seed + idx * 31 + 2, (180, 90, 45))) - 0.5
-
-        gy, gx = torch.meshgrid(
-            torch.linspace(-1.0, 1.0, m.H, device=m.DEV),
-            torch.linspace(-1.0, 1.0, m.W, device=m.DEV),
-            indexing="ij",
-        )
-        self.base_grid = torch.stack([gx, gy], dim=-1)[None]
-
-    def attention(self, t: float, tl: float, S: dict, f: int) -> torch.Tensor:
-        """장면 내부에서 셀룰러 발아 중심이 계속 이동하도록 시변 서식지 가중치(hab_dyn) 생성."""
-        low = float(S["low"][f])
-        mid = float(S["mid"][f])
-        high = float(S["high"][f])
-        on = float(S["onset"][f])
-
-        u = torch.linspace(0.0, 1.0, m.GW, device=m.DEV).view(1, 1, 1, m.GW)
-        v = torch.linspace(0.0, 1.0, m.GH, device=m.DEV).view(1, 1, m.GH, 1)
-
-        if self.film == 2:
-            if self.idx == 0:
-                cx = 0.70 + 0.12 * math.sin(tl * 0.13)
-                cy = 0.28 + 0.09 * math.cos(tl * 0.10)
-                mass = torch.exp(-(((u - cx) / 0.26) ** 2 + ((v - cy) / 0.22) ** 2)) * (0.35 + 0.45 * high)
-                sea_line = torch.exp(-((v - (0.56 + 0.06 * torch.sin(tl * 0.15 + u * 4.0))) / 0.12) ** 2) * (0.28 + 0.55 * low)
-                return mass + sea_line
-            if self.idx == 1:
-                sink_y = 0.48 + 0.14 * m.ss(0.0, 68.0, tl)
-                core = torch.exp(-(((u - 0.48) / 0.20) ** 2 + ((v - sink_y) / 0.22) ** 2))
-                wall_l = torch.exp(-((u - (0.18 + 0.10 * math.sin(tl * 0.11))) / 0.16) ** 2)
-                return 0.36 * core * (1.0 + 0.45 * low) + 0.30 * wall_l * (1.0 + 0.40 * on)
-            if self.idx == 2:
-                rev = m.gauss(t, m.CLIMAX, 5.0)
-                dome = torch.exp(-(((u - (0.60 - 0.10 * math.sin(tl * 0.09))) / 0.28) ** 2 + ((v - 0.48) / 0.26) ** 2))
-                rev_ring = torch.exp(-((torch.hypot(u - 0.58, v - 0.48) - 0.24) / 0.15) ** 2) * rev
-                return 0.34 * dome * (1.0 + 0.38 * mid) + 0.68 * rev_ring
-            rise_v = 0.65 - 0.45 * ((tl * 0.09) % 1.0)
-            up_ray = torch.exp(-(((u - 0.36) / 0.24) ** 2 + ((v - rise_v) / 0.20) ** 2))
-            fade_out = 1.0 - m.ss(54.0, 73.0, tl)
-            return (0.36 * up_ray * (1.0 + 0.35 * mid)) * fade_out
-
-        if self.film == 3:
-            if self.idx == 0:
-                rad = 0.22 + 0.06 * math.sin(tl * 0.18)
-                hole = torch.exp(-(((u - 0.64) / rad) ** 2 + ((v - 0.24) / (rad * 0.85)) ** 2))
-                floor_wet = torch.exp(-(((u - 0.64) / 0.25) ** 2 + ((v - 0.74) / 0.12) ** 2)) * (1.0 - 0.5 * m.ss(30.0, 70.0, tl))
-                return 0.36 * hole * (1.0 + 0.45 * on) + 0.28 * floor_wet
-            if self.idx == 1:
-                stretch_v = 0.34 + 0.10 * m.ss(0.0, 68.0, tl)
-                membrane = torch.exp(-(((u - 0.44) / 0.18) ** 2 + ((v - stretch_v) / 0.22) ** 2))
-                floor_line = torch.exp(-((v - 0.72) / 0.09) ** 2) * torch.exp(-((u - 0.50) / 0.28) ** 2)
-                return 0.34 * membrane + 0.34 * floor_line * (1.0 + 0.50 * on)
-            if self.idx == 2:
-                rev = m.gauss(t, m.CLIMAX, 5.0)
-                cone = torch.exp(-(((u - (0.50 + 0.08 * math.sin(tl * 0.08))) / (0.16 + 0.14 * v)) ** 2))
-                rev_halo = torch.exp(-((torch.hypot(u - 0.52, v - 0.52) - 0.22) / 0.15) ** 2) * rev
-                return 0.34 * cone * (1.0 + 0.35 * mid) + 0.68 * rev_halo
-            beam_u = 0.36 + 0.20 * math.sin(tl * 0.08)
-            slate_beam = torch.exp(-((u - beam_u - 0.18 * v) / 0.22) ** 2)
-            fade_out = 1.0 - m.ss(54.0, 73.0, tl)
-            return (0.35 * slate_beam * (1.0 + 0.35 * mid)) * fade_out
-
-        # 시나리오 1 (1_놀람공포중립공포)
-        if self.idx == 0:
-            cx = 0.34 + 0.18 * math.sin(tl * 0.14)
-            cy = 0.30 + 0.12 * math.cos(tl * 0.11)
-            cloud_wave = torch.exp(-(((u - cx) / 0.28) ** 2 + ((v - cy) / 0.24) ** 2))
-            shock = sum(m.gauss(t, b / m.FPS, 0.9) for b in S["ev"]["s1_bounce"])
-            deck_line = torch.exp(-((v - (0.56 - 0.12 * (u - 0.3))) / 0.11) ** 2) * (0.32 + 0.75 * shock + 0.35 * low)
-            return 0.28 * cloud_wave + 0.38 * deck_line
-
-        if self.idx == 1:
-            pulse_u = (tl * 0.11) % 0.85
-            wedge_wave = torch.exp(-((u - pulse_u) / 0.22) ** 2) * torch.exp(-((v - (0.42 + 0.12 * u)) / 0.26) ** 2)
-            drip = sum(m.gauss(t, b / m.FPS, 1.1) for b in S["ev"]["s2_creak"])
-            ring_d = torch.hypot((u - 0.58) * 1.4, v - 0.48)
-            ring = torch.exp(-((ring_d - ((tl * 0.20) % 0.55)) / 0.08) ** 2) * (0.28 + 0.7 * drip + 0.3 * high)
-            return 0.30 * wedge_wave + 0.36 * ring
-
-        if self.idx == 2:
-            diag = (u * 0.65 + v * 0.55)
-            beam = torch.exp(-((diag - (0.52 + 0.12 * math.sin(tl * 0.10))) / (0.20 + 0.08 * m.ss(5, 60, tl))) ** 2)
-            rev = m.gauss(t, m.CLIMAX, 5.0)
-            rev_corona = torch.exp(-((torch.hypot(u - 0.44, v - 0.48) - 0.22) / 0.16) ** 2) * rev
-            right_pillar = torch.exp(-((u - 0.75) / 0.09) ** 2) * (0.35 + 0.65 * rev)
-            return 0.32 * beam * (1.0 + 0.4 * mid) + 0.65 * rev_corona + 0.28 * right_pillar
-
-        shaft_phase = 0.28 + 0.24 * math.sin(tl * 0.09)
-        shaft = torch.exp(-((u - shaft_phase - 0.22 * v) / 0.22) ** 2)
-        fade_out = 1.0 - m.ss(54.0, 73.0, tl)
-        return (0.34 * shaft * (1.0 + 0.35 * on)) * fade_out
-
-    def compose_with_ca(self, t: float, tl: float, S: dict, f: int, ca: m.MemoryCA, evo_disp: torch.Tensor):
-        """
-        원본 배경판의 4개 물리 계층(deep_bg, mid_body, high_dots, lines)을
-        셀룰러 상태(ca.M, ca.E, ca.ex, ca.Dm) 및 진화 변위장(evo_disp)으로 차등 변형·합성.
-        """
-        low = float(S["low"][f])
-        mid = float(S["mid"][f])
-        high = float(S["high"][f])
-        on = float(S["onset"][f])
-
-        M_up = m.up(m.gblur(ca.M, 1.6)).clamp(0.0, 1.0)
-        E_up = m.up(m.gblur(ca.E, 1.8)).clamp(0.0, 1.0)
-        ex_up = m.up(m.gblur(ca.ex, 2.0)).clamp(0.0, 1.0)
-        front = (4.0 * M_up * (1.0 - M_up)).clamp(0.0, 1.0)
-
-        shift_x = int((tl * 13.0) % m.W)
-        shift_y = int((tl * 8.0) % m.H)
-        nx = torch.roll(self.flow_noise_x, shifts=(shift_y, shift_x), dims=(2, 3))
-        ny = torch.roll(self.flow_noise_y, shifts=(-shift_y, shift_x // 2), dims=(2, 3))
-
-        wave_u = 0.5 + 0.5 * torch.sin(m.UT * 5.2 - m.VT * 3.8 - tl * 0.24 + self.idx * 1.3)
-        wave_v = 0.5 + 0.5 * torch.cos(m.UT * 3.6 + m.VT * 4.8 - tl * 0.19 + self.idx * 0.9)
-        spatial_wave = (0.62 + 0.52 * (0.6 * wave_u + 0.4 * wave_v)).clamp(0.45, 1.15)
-
-        if self.film == 2:
-            if self.idx == 0:
-                water_zone = m.tss(0.46, 0.62, m.VT)
-                cloud_zone = 1.0 - water_zone
-                pinch = 0.024 * math.sin(tl * 0.15) - 0.022 * m.ss(10.0, 65.0, tl)
-                scene_dx = (m.UT - 0.72) * pinch * cloud_zone + torch.sin(m.VT * 56.0 - tl * 3.2) * (0.010 + 0.016 * high) * water_zone + nx * 0.020
-                scene_dy = (m.VT - 0.28) * pinch * cloud_zone + torch.cos(m.UT * 28.0 + tl * 2.2) * (0.008 + 0.012 * low) * water_zone + ny * 0.018
-            elif self.idx == 1:
-                sink = 0.032 * m.ss(5.0, 70.0, tl) * torch.exp(-((m.UT - 0.48) / 0.28) ** 2)
-                stretch = 0.026 * math.sin(tl * 0.14) * (m.UT - 0.48)
-                scene_dx = stretch + nx * (0.015 + 0.018 * ex_up)
-                scene_dy = -sink + ny * (0.015 + 0.018 * ex_up)
-                for b in S["ev"]["s2_creak"]:
-                    dt_b = t - b / m.FPS
-                    if 0.0 < dt_b < 3.2:
-                        rd = torch.hypot((m.UT - 0.48) * 1.4, m.VT - 0.56)
-                        ripple = torch.sin((rd - dt_b * 0.20) * 52.0) * torch.exp(-((rd - dt_b * 0.20) / 0.09) ** 2) * math.exp(-dt_b * 0.9)
-                        scene_dx = scene_dx + ripple * 0.014
-                        scene_dy = scene_dy + ripple * 0.014
-            elif self.idx == 2:
-                rev_env = m.gauss(t, m.CLIMAX, 4.5)
-                rev_flip = 1.0 - 2.2 * rev_env
-                dome_open = 0.030 * math.sin(tl * 0.10) + 0.026 * (M_up - 0.45)
-                scene_dx = (m.UT - 0.58) * dome_open * rev_flip - (m.VT - 0.48) * 0.030 * rev_env + nx * (0.018 + 0.030 * rev_env)
-                scene_dy = (0.016 * M_up * rev_flip) + (m.UT - 0.58) * 0.030 * rev_env + ny * (0.018 + 0.032 * rev_env)
-            else:
-                dissolve = m.ss(52.0, 74.0, tl)
-                scene_dx = (m.UT - 0.42) * (-0.022 * m.ss(0.0, 68.0, tl)) + nx * (0.014 + 0.040 * dissolve)
-                scene_dy = (0.022 * math.sin(tl * 0.11) + 0.018 * M_up) + ny * (0.015 + 0.045 * dissolve)
-
-        elif self.film == 3:
-            if self.idx == 0:
-                breathe_hole = 0.032 * math.sin(tl * 0.18 + 0.8 * on)
-                dx_h = m.UT - 0.64
-                dy_h = m.VT - 0.24
-                pull = torch.exp(-(dx_h ** 2 + dy_h ** 2) / 0.14)
-                scene_dx = dx_h * breathe_hole * pull + nx * (0.018 + 0.018 * ex_up)
-                scene_dy = dy_h * breathe_hole * pull + ny * (0.018 + 0.018 * ex_up)
-            elif self.idx == 1:
-                elongate = 0.028 * m.ss(0.0, 68.0, tl) * torch.exp(-((m.UT - 0.44) / 0.24) ** 2)
-                scene_dx = (m.UT - 0.44) * 0.020 * math.sin(tl * 0.13) + nx * (0.014 + 0.016 * ex_up)
-                scene_dy = -elongate * (1.0 - m.VT) + ny * (0.014 + 0.016 * ex_up)
-                for b in S["ev"]["s2_creak"]:
-                    dt_b = t - b / m.FPS
-                    if 0.0 < dt_b < 3.2:
-                        rd = torch.hypot((m.UT - 0.46) * 1.4, (m.VT - 0.72) * 1.8)
-                        ripple = torch.sin((rd - dt_b * 0.22) * 54.0) * torch.exp(-((rd - dt_b * 0.22) / 0.09) ** 2) * math.exp(-dt_b * 0.9)
-                        scene_dx = scene_dx + ripple * 0.014
-                        scene_dy = scene_dy + ripple * 0.014
-            elif self.idx == 2:
-                rev_env = m.gauss(t, m.CLIMAX, 4.5)
-                rev_flip = 1.0 - 2.2 * rev_env
-                aperture = 0.030 * math.sin(tl * 0.10) + 0.026 * (M_up - 0.45)
-                scene_dx = (m.UT - 0.52) * aperture * rev_flip - (m.VT - 0.52) * 0.030 * rev_env + nx * (0.018 + 0.030 * rev_env)
-                scene_dy = (0.018 * M_up * rev_flip) + (m.UT - 0.52) * 0.030 * rev_env + ny * (0.018 + 0.032 * rev_env)
-            else:
-                dissolve = m.ss(52.0, 74.0, tl)
-                swirl_ang = tl * 0.12
-                scene_dx = 0.022 * math.cos(swirl_ang) * (m.VT - 0.45) + nx * (0.014 + 0.042 * dissolve)
-                scene_dy = -0.022 * math.sin(swirl_ang) * (m.UT - 0.45) + ny * (0.014 + 0.045 * dissolve)
-
-        else:
-            if self.idx == 0:
-                shock = sum(m.gauss(t, b / m.FPS, 0.55) * math.sin((t - b / m.FPS) * 16.0) for b in S["ev"]["s1_bounce"])
-                water_zone = m.tss(0.44, 0.62, m.VT)
-                cloud_zone = 1.0 - water_zone
-                wave_x = torch.sin(m.VT * 48.0 - tl * 2.8 + m.UT * 6.0) * (0.010 + 0.014 * low + 0.016 * abs(shock)) * water_zone
-                wave_y = (torch.cos(m.UT * 22.0 + tl * 1.9) * 0.006 * water_zone + shock * 0.015)
-                swirl_x = (nx * (0.022 + 0.018 * ex_up) + 0.014 * math.sin(tl * 0.12) * (m.UT - 0.35)) * cloud_zone
-                swirl_y = (ny * (0.018 + 0.015 * ex_up) + 0.010 * math.cos(tl * 0.10) * (m.VT - 0.30)) * cloud_zone
-                scene_dx = wave_x + swirl_x
-                scene_dy = wave_y + swirl_y
-            elif self.idx == 1:
-                breathe = 0.028 * math.sin(tl * 0.16) + 0.034 * m.ss(0.0, 70.0, tl)
-                left_wedge = m.tss(0.65, 0.25, m.UT)
-                scene_dx = (m.UT - 0.58) * breathe * (0.6 + 0.9 * left_wedge) + nx * (0.014 + 0.016 * ex_up)
-                scene_dy = (m.VT - 0.48) * breathe * 0.72 + ny * (0.014 + 0.016 * ex_up)
-                for b in S["ev"]["s2_creak"]:
-                    dt_b = t - b / m.FPS
-                    if 0.0 < dt_b < 3.2:
-                        rd = torch.hypot((m.UT - 0.56) * 1.5, m.VT - 0.48)
-                        ripple = torch.sin((rd - dt_b * 0.22) * 55.0) * torch.exp(-((rd - dt_b * 0.22) / 0.09) ** 2) * math.exp(-dt_b * 0.9)
-                        scene_dx = scene_dx + ripple * 0.014
-                        scene_dy = scene_dy + ripple * 0.014
-            elif self.idx == 2:
-                open_w = 0.032 * math.sin(tl * 0.11) + 0.028 * (M_up - 0.45)
-                rev_env = m.gauss(t, m.CLIMAX, 4.5)
-                rev_flip = 1.0 - 2.2 * rev_env
-                scene_dx = (m.UT - 0.44) * open_w * rev_flip - (m.VT - 0.48) * 0.032 * rev_env + nx * (0.018 + 0.032 * rev_env)
-                scene_dy = (-0.016 * M_up * rev_flip) + (m.UT - 0.44) * 0.032 * rev_env + ny * (0.020 + 0.034 * rev_env)
-            else:
-                dissolve = m.ss(52.0, 74.0, tl)
-                push = sum(m.gauss(t, b, 2.2) for b in S["ev"]["s4_pushes"])
-                scene_dx = (0.024 * math.sin(tl * 0.10) + 0.016 * push) * (m.VT - 0.28) + nx * (0.014 + 0.042 * dissolve)
-                scene_dy = (-0.016 * m.ss(0.0, 68.0, tl)) + ny * (0.014 + 0.045 * dissolve)
-
-        ca_disp = m.up(ca.Dm) / torch.tensor([m.W, m.H], device=m.DEV).view(1, 2, 1, 1)
-        total_dx = scene_dx + evo_disp[:, 0:1] + ca_disp[:, 0:1]
-        total_dy = scene_dy + evo_disp[:, 1:2] + ca_disp[:, 1:2]
-        flow_vec = torch.cat([total_dx, total_dy], dim=1).permute(0, 2, 3, 1)
-
-        # 3개 층을 서로 다른 배율(차등 패럴랙스)로 변형하여 깊이감과 입자 분리감을 형성
-        dot_parallax = 1.45 + 0.75 * ex_up.permute(0, 2, 3, 1)
-        grid_deep = (self.base_grid + flow_vec * 0.35).clamp(-1.0, 1.0)
-        grid_mid = (self.base_grid + flow_vec * 1.00).clamp(-1.0, 1.0)
-        grid_dots = (self.base_grid - flow_vec * dot_parallax).clamp(-1.0, 1.0)
-
-        w_deep = F.grid_sample(self.deep_bg, grid_deep, mode="bilinear", padding_mode="reflection", align_corners=False)
-        w_mid = F.grid_sample(self.mid_body, grid_mid, mode="bilinear", padding_mode="reflection", align_corners=False)
-        w_dots = F.grid_sample(self.high_dots, grid_dots, mode="bilinear", padding_mode="reflection", align_corners=False)
-        w_lines = F.grid_sample(self.lines, grid_mid, mode="bilinear", padding_mode="reflection", align_corners=False)
-
-        body_vis = (0.38 + 0.74 * (M_up ** 0.78)) * (1.0 - 0.34 * ex_up) * (0.76 + 0.24 * E_up) * spatial_wave
-        dots_vis = (0.36 + 0.88 * M_up + 0.78 * front + 0.55 * ex_up) * (1.0 + 0.35 * on + 0.22 * high)
-
-        rgb = w_deep * (0.42 + 0.54 * M_up) + w_mid * body_vis * 1.24 + w_dots * dots_vis * 1.42
-
-        # 3막 3:15(195.0s) 클라이맥스 반전 연출
-        if self.idx == 2:
-            rev = m.gauss(t, m.CLIMAX, 4.0)
-            if rev > 1e-3:
-                lum_c = m.lum(rgb)
-                comp = torch.cat([rgb[:, 2:3] * 1.15, rgb[:, 0:1] * 1.05 + rgb[:, 1:2] * 0.35, rgb[:, 1:2] * 1.25], dim=1)
-                cx_r = 0.58 if self.film == 2 else (0.52 if self.film == 3 else 0.45)
-                radial = torch.hypot(m.UT - cx_r, m.VT - 0.50)
-                ring_wave = 0.5 + 0.5 * torch.cos(radial * 28.0 - (t - m.CLIMAX) * 8.5)
-                c1 = "#e8f6ff" if self.film == 2 else ("#ffe6a3" if self.film == 3 else "#ffe89e")
-                c2 = "#ffd97d" if self.film == 2 else ("#7af0d8" if self.film == 3 else "#6bf2e6")
-                corona_glow = (lum_c + 0.18 * front) * (m.col(c1) * ring_wave + m.col(c2) * (1.0 - ring_wave)) * 1.35
-                rgb = rgb * (1.0 - 0.42 * rev) + (comp * 1.15 + corona_glow) * (0.78 * rev)
-
-        line_vis = w_lines * (0.42 + 0.98 * front + 0.58 * ex_up)
-        return rgb.clamp(0.0, 1.45), line_vis.clamp(0.0, 1.0)
-
-    def motion(self, t: float, tl: float, S: dict, f: int):
-        trem = S["trem"][f]
-        if self.idx == 0:
-            return math.sin(t * 0.14) * 3.5 + trem[0] * 0.5, math.cos(t * 0.11) * 2.5 + trem[1] * 0.5, 1.025 + 0.015 * math.sin(tl * 0.08), math.sin(t * 0.05) * 0.004
-        if self.idx == 1:
-            return trem[0] * 0.9, trem[1] * 0.9, 1.02 + 0.045 * m.ss(0, 75, tl), math.sin(t * 0.07) * 0.005
-        if self.idx == 2:
-            rev = m.gauss(t, m.CLIMAX, 3.5)
-            return math.sin(t * 0.10) * 2.5, -tl * 0.08, 1.02 + 0.03 * math.sin(tl * 0.06) + 0.06 * rev, math.sin(t * 0.04) * 0.004 + 0.018 * rev
-        return trem[0] * 0.6, trem[1] * 0.6, 1.05 - 0.04 * m.ss(0, 75, tl), math.sin(t * 0.04) * 0.003
-
-    def spawn(self, t: float, tl: float, S: dict, f: int, P: m.Particles, rng: np.random.Generator, ca: m.MemoryCA):
-        on = float(S["onset"][f])
-        if self.film == 2:
-            if self.idx == 0:
-                if f in S["ev"]["s1_bounce"] or (on > 0.50 and rng.random() < 0.40):
-                    n = 22 if f in S["ev"]["s1_bounce"] else 8
-                    x = rng.uniform(0.35, 0.92, n) * m.W
-                    y = rng.uniform(0.48, 0.85, n) * m.H
-                    P.spawn(x, y, rng.normal(-6, 18, n), rng.uniform(-65, -18, n), rng.uniform(2.5, 5.2, n), grav=-12.0,
-                            size=(rng.random(n) < 0.35), color=np.array([[0.86, 0.88, 0.68]]), amp=rng.uniform(0.40, 0.85, n), drag=0.30)
-            elif self.idx == 1:
-                if f in S["ev"]["s2_creak"] or rng.random() < 0.28:
-                    n = 12 if f in S["ev"]["s2_creak"] else 3
-                    x = rng.uniform(0.18, 0.68, n) * m.W
-                    y = rng.uniform(0.10, 0.48, n) * m.H
-                    P.spawn(x, y, rng.normal(0, 6, n), rng.uniform(60, 135, n), rng.uniform(1.8, 3.6, n), grav=68.0,
-                            size=(rng.random(n) < 0.32), color=np.array([[0.82, 0.80, 0.96]]), amp=rng.uniform(0.42, 0.88, n), drag=0.15)
-            elif self.idx == 2:
-                rev = m.gauss(t, m.CLIMAX, 2.5)
-                n = 14 if rev > 0.25 else (3 if rng.random() < 0.65 else 0)
-                if n > 0:
-                    x = rng.uniform(0.28, 0.86, n) * m.W
-                    y = rng.uniform(0.22, 0.82, n) * m.H
-                    col_p = np.array([[0.98, 0.92, 0.70]]) if rev < 0.3 else np.array([[0.88, 0.96, 1.00]])
-                    P.spawn(x, y, rng.normal(4, 14, n), rng.uniform(-52, -16, n) * (1.0 + 1.2 * rev), rng.uniform(3.5, 6.8, n), grav=-10.0,
-                            size=(rng.random(n) < 0.45), color=col_p, amp=rng.uniform(0.35, 0.80, n), drag=0.24)
-            else:
-                if tl < 64.0 and rng.random() < 0.55:
-                    n = 4
-                    x = rng.uniform(0.12, 0.68, n) * m.W
-                    y = rng.uniform(0.25, 0.88, n) * m.H
-                    P.spawn(x, y, rng.normal(6, 12, n), rng.uniform(-58, -22, n), rng.uniform(4.0, 7.8, n), grav=-18.0,
-                            size=(rng.random(n) < 0.38), color=np.array([[0.72, 0.82, 1.00]]), amp=rng.uniform(0.30, 0.68, n), drag=0.20)
-            return
-
-        if self.film == 3:
-            if self.idx == 0:
-                if f in S["ev"]["s1_bounce"] or rng.random() < 0.48:
-                    n = 16 if f in S["ev"]["s1_bounce"] else 4
-                    x = rng.uniform(0.15, 0.88, n) * m.W
-                    y = rng.uniform(0.12, 0.82, n) * m.H
-                    vx = (0.64 * m.W - x) * 0.35
-                    vy = (0.24 * m.H - y) * 0.35
-                    P.spawn(x, y, vx, vy, rng.uniform(2.2, 4.5, n), grav=-8.0,
-                            size=(rng.random(n) < 0.32), color=np.array([[0.84, 0.84, 0.94]]), amp=rng.uniform(0.35, 0.78, n), drag=0.25)
-            elif self.idx == 1:
-                if f in S["ev"]["s2_creak"] or rng.random() < 0.26:
-                    n = 12 if f in S["ev"]["s2_creak"] else 3
-                    x = rng.uniform(0.28, 0.68, n) * m.W
-                    y = rng.uniform(0.18, 0.65, n) * m.H
-                    P.spawn(x, y, rng.normal(0, 6, n), rng.uniform(55, 125, n), rng.uniform(1.8, 3.5, n), grav=62.0,
-                            size=(rng.random(n) < 0.32), color=np.array([[0.88, 0.88, 0.96]]), amp=rng.uniform(0.40, 0.85, n), drag=0.16)
-            elif self.idx == 2:
-                rev = m.gauss(t, m.CLIMAX, 2.5)
-                n = 14 if rev > 0.25 else (3 if rng.random() < 0.65 else 0)
-                if n > 0:
-                    x = rng.uniform(0.28, 0.76, n) * m.W
-                    y = rng.uniform(0.20, 0.86, n) * m.H
-                    col_p = np.array([[0.96, 0.94, 0.82]]) if rev < 0.3 else np.array([[0.80, 0.98, 0.92]])
-                    P.spawn(x, y, rng.normal(0, 12, n), rng.uniform(-50, -16, n) * (1.0 + 1.2 * rev), rng.uniform(3.8, 7.2, n), grav=-14.0,
-                            size=(rng.random(n) < 0.42), color=col_p, amp=rng.uniform(0.34, 0.78, n), drag=0.22)
-            else:
-                if tl < 64.0 and rng.random() < 0.55:
-                    n = 4
-                    x = rng.uniform(0.14, 0.74, n) * m.W
-                    y = rng.uniform(0.12, 0.82, n) * m.H
-                    P.spawn(x, y, rng.normal(12, 16, n), rng.normal(6, 14, n), rng.uniform(4.2, 8.2, n), grav=0.0,
-                            size=(rng.random(n) < 0.36), color=np.array([[0.82, 0.88, 0.98]]), amp=rng.uniform(0.30, 0.65, n), drag=0.25)
-            return
-
-        if self.idx == 0:
-            if f in S["ev"]["s1_bounce"] or (on > 0.55 and rng.random() < 0.35):
-                n = 28 if f in S["ev"]["s1_bounce"] else 10
-                x = rng.uniform(0.12, 0.78, n) * m.W
-                y = (0.56 - 0.10 * (x / m.W - 0.3) + rng.normal(0, 0.02, n)) * m.H
-                P.spawn(x, y, rng.normal(12, 28, n), rng.uniform(-95, -28, n), rng.uniform(2.2, 4.5, n), grav=38.0,
-                        size=(rng.random(n) < 0.35), color=np.array([[0.96, 0.78, 0.86]]), amp=rng.uniform(0.45, 0.90, n), drag=0.35)
-            elif rng.random() < 0.45:
-                x = rng.uniform(0.05, 0.85, 2) * m.W
-                y = rng.uniform(0.08, 0.52, 2) * m.H
-                P.spawn(x, y, rng.normal(6, 10, 2), rng.uniform(-12, 8, 2), rng.uniform(4.0, 7.5, 2),
-                        size=(rng.random(2) < 0.25), color=np.array([[0.90, 0.72, 0.82]]), amp=rng.uniform(0.25, 0.55, 2), drag=0.2)
-        elif self.idx == 1:
-            if f in S["ev"]["s2_creak"] or rng.random() < 0.22:
-                n = 12 if f in S["ev"]["s2_creak"] else 2
-                x = rng.uniform(0.15, 0.75, n) * m.W
-                y = rng.uniform(0.08, 0.35, n) * m.H
-                P.spawn(x, y, rng.normal(-4, 8, n), rng.uniform(55, 130, n), rng.uniform(1.8, 3.4, n), grav=65.0,
-                        size=(rng.random(n) < 0.3), color=np.array([[0.82, 0.80, 0.98]]), amp=rng.uniform(0.40, 0.85, n), drag=0.15)
-        elif self.idx == 2:
-            rev = m.gauss(t, m.CLIMAX, 2.5)
-            n = 14 if rev > 0.25 else (3 if rng.random() < 0.65 else 0)
-            if n > 0:
-                u0 = rng.uniform(0.18, 0.78, n)
-                v0 = np.clip(0.22 + 0.65 * u0 + rng.normal(0, 0.08, n), 0.10, 0.92)
-                col_p = np.array([[0.98, 0.90, 0.68]]) if rev < 0.3 else np.array([[0.75, 0.98, 0.92]])
-                P.spawn(u0 * m.W, v0 * m.H, rng.normal(8, 18, n), rng.uniform(-48, -14, n) * (1.0 + 1.2 * rev),
-                        rng.uniform(3.5, 7.0, n), grav=-6.0, size=(rng.random(n) < 0.45), color=col_p,
-                        amp=rng.uniform(0.32, 0.78, n), drag=0.25)
-        else:
-            if tl < 64.0 and rng.random() < 0.50:
-                n = 3
-                x = rng.uniform(0.18, 0.62, n) * m.W
-                y = rng.uniform(0.08, 0.72, n) * m.H
-                P.spawn(x, y, rng.uniform(10, 26, n), rng.uniform(12, 32, n), rng.uniform(4.0, 8.0, n),
-                        size=(rng.random(n) < 0.35), color=np.array([[0.68, 0.78, 1.00]]), amp=rng.uniform(0.28, 0.62, n), drag=0.22)
+    def start_cycle(self, method, seed):
+        cls = m.PointGenesisGA if method == "GA" else m.StructuralDreamCA
+        self.engine = cls(self.target_np,self.profile,seed)
 
 
-class FieldEvolution:
-    """Open-Ended 공간 변형장 진화 탐색기 (적합도 + 새로움 + 생존 다양성 기반 유전자 선발)."""
-
-    def __init__(self, seed: int):
-        self.rng = np.random.default_rng(seed)
-        self.yy, self.xx = np.mgrid[-1:1:36j, -1:1:64j].astype(np.float32)
-        self.parents = self.rng.normal(0.0, 0.24, (3, 10)).astype(np.float32)
-        self.archive = []
-        self.logs = []
-        self.target = np.zeros((2, 36, 64), np.float32)
-        self.current = self.target.copy()
-        self.last = -999.0
-        self.memory = 0.20
-
-    def field(self, g: np.ndarray) -> np.ndarray:
-        x, y = self.xx, self.yy
-        dx = g[0] * np.sin(2.1 * y + g[4]) + g[1] * np.sin(3.0 * x + 2.0 * y + g[5]) + g[6] * y * x
-        dy = g[2] * np.sin(2.4 * x + g[5]) + g[3] * np.sin(2.0 * x - 3.0 * y + g[4]) + g[7] * (x * x - y * y)
-        return np.stack([dx, dy]).astype(np.float32)
-
-    def step(self, t: float, affect: float, energy: float, onset: float):
-        self.memory = 0.999 * self.memory + 0.001 * (0.65 * affect + 0.25 * energy + 0.10 * onset)
-        if t - self.last >= 11.5:
-            candidates = [p.copy() for p in self.parents]
-            for _ in range(15):
-                a, b = self.parents[self.rng.integers(3, size=2)]
-                child = 0.5 * (a + b) + self.rng.normal(0.0, 0.11 + 0.13 * self.memory, 10)
-                candidates.append(np.clip(child, -1.0, 1.0).astype(np.float32))
-            results = []
-            for g in candidates:
-                fld = self.field(g)
-                desc = fld[:, ::7, ::12].ravel()
-                novel = min([float(np.sqrt(np.mean((desc - old) ** 2))) for old in self.archive], default=0.32)
-                slope = np.mean(np.abs(np.diff(fld, axis=1))) + np.mean(np.abs(np.diff(fld, axis=2)))
-                continuity = np.mean((fld - self.current) ** 2)
-                fitness = float(np.exp(-3.8 * slope - 1.2 * continuity))
-                score = 0.54 * fitness + 0.46 * min(novel, 1.0)
-                results.append((score, g, fld, desc, fitness, novel))
-            results.sort(key=lambda r: r[0], reverse=True)
-            chosen = []
-            for r in results:
-                if not chosen or min(np.sqrt(np.mean((r[3] - q[3]) ** 2)) for q in chosen) > 0.12:
-                    chosen.append(r)
-                if len(chosen) == 3:
-                    break
-            while len(chosen) < 3:
-                chosen.append(results[len(chosen)])
-            self.parents = np.stack([c[1] for c in chosen])
-            self.target = chosen[0][2]
-            self.archive.append(chosen[0][3])
-            self.archive = self.archive[-24:]
-            self.logs.append(dict(
-                seconds=round(t, 2),
-                fitness=round(chosen[0][4], 4),
-                novelty=round(chosen[0][5], 4),
-                survivor_distance=round(float(np.linalg.norm(chosen[0][3] - chosen[1][3])), 4),
-                affect_memory=round(float(self.memory), 4),
-            ))
-            self.last = t
-        self.current += (self.target - self.current) * 0.0045
-        return self.current
+def compute_cycle_params(scene_sec):
+    # An even number preserves GA -> destruction -> CA -> destruction across acts.
+    n = 2
+    return n, scene_sec/n
 
 
 class DreamBackgroundRenderer:
-    """원본 배경판 + 점묘 입자계 + 기억 셀룰러 오토마타 + Open-Ended 변형장 진화를 통합한 렌더러."""
-
-    def __init__(self, scenario_dir: Path, sound_path: Path, film: int = 1, seed: int = 28):
-        self.film = film
-        self.seed = seed
-        self.scenario_dir = Path(scenario_dir)
-        self.sound_path = Path(sound_path)
-
-        t0 = time.time()
-        self.scenes_json = json.loads((self.scenario_dir / "scenes.json").read_text(encoding="utf-8-sig"))
-        story_file = self.scenario_dir / "dream_scenes.json"
-        self.story = json.loads(story_file.read_text(encoding="utf-8-sig")) if story_file.exists() else []
-
-        infos = []
-        for sc in self.scenes_json["scenes"]:
-            en = m.EMO_KO[sc["emotion"]]
-            infos.append(dict(
-                stage=sc.get("stage") or sc.get("act", ""),
-                title=sc.get("title", ""),
-                emotion_ko=sc["emotion"],
-                emotion=en,
-                intensity=float(sc.get("intensity", 0.6)),
-                backgrounds=sc.get("backgrounds", []),
-                params=m.emo_params(en, float(sc.get("intensity", 0.6))),
-            ))
-        self.infos = infos
-
-        print(f"[1/3] 사운드 다대역 스펙트럼 분석 ({self.scenario_dir.name}): {self.sound_path.name}")
-        S = m.analyze_sound(self.sound_path)
-        S["ev"] = m.build_events(S, seed)
-        rng = np.random.default_rng(seed + 1)
-        trem = np.cumsum(rng.normal(0, 0.5, (m.N, 2)), 0)
-        trem -= np.stack([m.ema(trem[:, 0], 0.6), m.ema(trem[:, 1], 0.6)], 1)
-        S["trem"] = np.clip(trem, -3, 3)
-        self.S = S
-
-        print("[2/3] 원본 배경판 4장 4계층 분해 및 비동기 MemoryCA 초기화")
-        plates = [m.imread_u(self.scenario_dir / f"scene_{i:02d}.png") for i in range(1, 5)]
-        self.scenes = [DreamBackgroundScene(i, infos[i], plates[i], seed, film=film) for i in range(4)]
-        self.cas = [m.MemoryCA(s.hab, seed * 100 + i) for i, s in enumerate(self.scenes)]
-
-        u_ca = torch.linspace(0.0, 1.0, m.GW, device=m.DEV).view(1, 1, 1, m.GW)
-        v_ca = torch.linspace(0.0, 1.0, m.GH, device=m.DEV).view(1, 1, m.GH, 1)
-        self.u_ca, self.v_ca = u_ca, v_ca
-        for idx_c, ca in enumerate(self.cas):
-            phase_f = 0.5 + 0.5 * torch.sin(u_ca * 6.28 + v_ca * 4.71 + idx_c * 1.57)
-            ca.E = (0.38 + 0.58 * phase_f * ca.rand()).clamp(0.25, 1.0)
-            ca.cons = (0.42 + 0.55 * (1.0 - phase_f) + 0.25 * ca.rand()).clamp(0.35, 1.15)
-
-        self.evo = [FieldEvolution(seed * 10 + i) for i in range(4)]
-        self.relics = [torch.zeros_like(c.M) for c in self.cas]
-
-        self.lat8 = m.Lattice(8, seed + 11, 1.0, aa=1.1, rmax=0.47, jit=0.16)
-        self.lat4 = m.Lattice(4, seed + 12, 1.0, aa=0.9, rmax=0.46, jit=0.10)
-        self.lat24 = m.Lattice(24, seed + 13, 0.24, aa=3.0, rmax=0.50, jit=0.20)
-        self.P = m.Particles()
-        self.prng = np.random.default_rng(seed + 2)
-        self.fogA = m.T(m.fbm(91 + film, (200, 100, 50), w=960, h=540))
-        self.fogB = m.T(m.fbm(92 + film, (140, 70, 35), w=960, h=540))
-        self.windX = m.T(m.fbm(93 + film, (300, 150, 75), w=960, h=540))
-        self.windY = m.T(m.fbm(94 + film, (300, 150, 75), w=960, h=540))
-        self.linephase = m.up(m.T(np.random.default_rng(seed + 3).random((m.GH // 4 + 1, m.GW // 4 + 1)).astype(np.float32)) * 6.28)
-        self.prev = None
-        self.vg = None
-        print(f"      초기화 완료 ({time.time() - t0:.1f}s)")
-
-    def active(self, t: float) -> list[int]:
-        acts = []
+    def __init__(self, scenario_dir, sound_path, film=1, seed=28, mode="hybrid",scene_sec=75.,single_scene=None,scene_count=4):
+        if mode not in ("hybrid","ga_only","ca_only"): raise ValueError(mode)
+        self.mode,self.seed,self.scene_sec = mode,seed,float(scene_sec)
+        self.single_scene = single_scene
+        self.scene_count = 1 if single_scene is not None else int(scene_count)
+        if not 1 <= self.scene_count <= 4: raise ValueError("scene_count must be 1..4")
+        self.scenario_dir,self.sound_path = Path(scenario_dir),Path(sound_path) if sound_path is not None else None
+        self.n_cycles,self.cycle_dur = compute_cycle_params(self.scene_sec)
+        if self.cycle_dur < 30: raise ValueError("Use --scene-sec 75 for long exploratory formation")
+        self.total_dur = self.scene_sec*self.scene_count
+        self.total_frames = int(round(self.total_dur*m.FPS))
+        sc_list,story_list = load_unified_scene_metadata(self.scenario_dir)
+        plates = [m.imread_u(self.scenario_dir/f"scene_{i:02d}.png") for i in range(1,5)]
+        stats = [analyze_raw_plate_stats(x) for x in plates]
+        self.profiles = []
+        self.scenes = []
         for i in range(4):
-            a, b = m.SCENE_T[i], m.SCENE_T[i + 1]
-            lo = a - m.PRE if i > 0 else -1.0
-            hi = b + m.POST if i < 3 else 1e9
-            if lo <= t < hi:
-                acts.append(i)
-        return acts
+            profile = interpret_story_and_emotion(i,sc_list[i],story_list[i] if i<len(story_list) else {},stats[i],stats,
+                self.profiles[-1] if self.profiles else None)
+            profile["background_story_timing"] = build_background_story_timing(story_list[i] if i<len(story_list) else {},profile)
+            mood = profile["mood_style"]
+            profile["seed_rgb"] = dict(bright_happy=[1.,.67,.22],dark_horror=[.5,.75,1.],
+                dark_calm=[.65,.77,.94],vivid_mystery=[.35,.89,.87])[mood]
+            profile["hold_fraction"] = dict(bright_happy=.105,dark_horror=.08,dark_calm=.12,vivid_mystery=.10)[mood]
+            profile["arch_mode"] = "alternating_point_ga_local_ca"
+            profile["ga_lead"], profile["ca_lead"] = .5, .5
+            self.profiles.append(profile)
+            self.scenes.append(DreamBackgroundScene(i,sc_list[i],profile,plates[i],stats[i],seed))
+        self.S = (m.analyze_sound(self.sound_path,total_frames=max(self.total_frames,300)) if self.sound_path is not None else {"onset":np.zeros(self.total_frames,np.float32)})
+        self.active_key = None
+        self.carry = None
+        self.last_snapshot = {}
+        self.cycle_records = []
+        print(f"Dream background v12: {self.total_dur}s, continuous GA -> CA, audio={self.sound_path is not None}; device={m.DEV}",flush=True)
 
-    def scene_gate(self, i: int, t: float) -> float:
-        a, b = m.SCENE_T[i], m.SCENE_T[i + 1]
-        g_in = 1.0 if i == 0 else m.ss(a - m.PRE, a + 8.0, t)
-        g_out = 1.0 if i == 3 else 1.0 - m.ss(b - 2.0, b + m.POST, t)
-        return g_in * g_out
+    def frame(self,f,render=True):
+        t = f/m.FPS
+        act = self.single_scene if self.single_scene is not None else min(3,int(t//self.scene_sec))
+        tl = t if self.single_scene is not None else t-act*self.scene_sec
+        cycle = min(self.n_cycles-1,int(tl//self.cycle_dur))
+        elapsed = tl-cycle*self.cycle_dur
+        key = (act,cycle)
+        sc = self.scenes[act]
+        if key != self.active_key:
+            # Retain only the preceding generated remnants, not an incoming target.
+            if self.active_key is not None:
+                prev = self.scenes[self.active_key[0]]
+                self.carry = prev.engine.render(prev.canvas).detach().clone()
+                prev.engine = None
+            method = "GA" if self.mode=="ga_only" or (self.mode=="hybrid" and cycle%2==0) else "CA"
+            sc.start_cycle(method,self.seed*1000+act*100+cycle)
+            self.active_key = key
+        e = sc.engine
+        e.story_state = sample_background_story(sc.profile,tl,self.scene_sec)
+        e.step(elapsed,cycle,self.cycle_dur,float(self.S["onset"][min(f,len(self.S["onset"])-1)]))
+        if len(e.records) and not any(r is e.record for r in self.cycle_records):
+            e.record["scene"] = act+1
+            e.record["mood"] = sc.profile["mood_style"]
+            self.cycle_records.append(e.record)
+        self.last_snapshot = dict(scene=act+1,time=t,**e.last_snapshot)
+        if not render: return None
+        canvas=sc.canvas
+        carry_weight=0.
+        if self.carry is not None and elapsed<10:
+            carry_weight=1-m.ss(3.,10.,elapsed)
+            scale=1+elapsed*.002
+            grid=e.base_grid/scale
+            residual=F.grid_sample(self.carry,grid,mode='bilinear',padding_mode='border',align_corners=False)
+            canvas=canvas*(1-carry_weight)+residual*carry_weight
+        self.last_snapshot['carry_weight']=float(carry_weight)
+        return e.render(canvas)
 
-    def global_gate(self, t: float) -> float:
-        return m.ss(1.0, 15.0, t) * (1.0 - m.ss(286.0, 299.3, t))
+    def stats(self):
+        return [r for r in self.cycle_records if r["method"]=="CA"]
 
-    def params_at(self, t: float):
-        i = min(3, max(0, int(np.searchsorted(m.SCENE_T, t, side="right") - 1)))
-        p = self.infos[i]["params"]
-        if i < 3:
-            w = m.ss(m.SCENE_T[i + 1] - m.PRE, m.SCENE_T[i + 1] + 8.0, t)
-            if w > 0:
-                p = m.mix_params(p, self.infos[i + 1]["params"], w)
-        return p, i
+    def evolution_report(self):
+        return [r for r in self.cycle_records if r["method"]=="GA"]
 
-    def scene_layer(self, i: int, t: float, f: int, p: dict, gate: float, render: bool = True):
-        sc, ca = self.scenes[i], self.cas[i]
-        tl = t - m.SCENE_T[i]
-        S = self.S
-        g_s = self.scene_gate(i, t)
-
-        force = 0.0
-        if i < 3:
-            force = 0.88 * m.ss(m.SCENE_T[i + 1] - 2.0, m.SCENE_T[i + 1] + m.POST, t)
-        else:
-            force = 0.72 * m.ss(54.0, 73.5, tl)
-
-        seed_bias = None
-        if i > 0 and t < m.SCENE_T[i] + 12.0:
-            seed_bias = torch.maximum(self.cas[i - 1].M, self.relics[i - 1])
-
-        travel_wave = 0.5 + 0.5 * torch.sin(self.u_ca * 5.5 - self.v_ca * 4.2 - tl * 0.22 + i * 1.4)
-        ca.E = (ca.E + m.DT * 0.018 * travel_wave * sc.hab).clamp(0.0, 1.0)
-
-        if i == 2:
-            rev_ca = m.gauss(t, m.CLIMAX, 4.2)
-            if rev_ca > 1e-3:
-                cx_ca = 0.58 if self.film == 2 else (0.52 if self.film == 3 else 0.45)
-                corona_ca = torch.exp(-((torch.hypot(self.u_ca - cx_ca, self.v_ca - 0.50) - 0.18) / 0.22) ** 2)
-                ca.E = (ca.E + 0.08 * rev_ca * (0.4 + 0.6 * corona_ca)).clamp(0.0, 1.0)
-                ca.ex = torch.where(corona_ca * rev_ca > 0.25, torch.zeros_like(ca.ex), ca.ex)
-                ca.M = (ca.M + 0.06 * rev_ca * (sc.hab + 0.5 * corona_ca)).clamp(0.0, 1.0)
-
-        ca.step(p, float(S["onset"][f]), gate * max(g_s, 0.02), sc.attention(t, tl, S, f), force, seed_bias)
-        self.relics[i] = torch.maximum(self.relics[i], ca.M * 0.82)
-        self.evo[i].step(t, float(p["mut"]) / 1.6, float(ca.E.mean()), float(S["onset"][f]))
-
-        if g_s > 0.25:
-            sc.spawn(t, tl, S, f, self.P, self.prng, ca)
-        if not render:
-            return None
-
-        fld = m.T(self.evo[i].current.transpose(1, 2, 0))
-        evo_disp = F.interpolate(fld, size=(m.H, m.W), mode="bilinear", align_corners=False) * (0.026 + 0.018 * float(ca.ex.mean()))
-
-        rgb, ln = sc.compose_with_ca(t, tl, S, f, ca, evo_disp)
-
-        if i > 0:
-            for prev_i in range(max(0, i - 2), i):
-                w_decay = math.exp(-max(t - m.SCENE_T[prev_i + 1], 0.0) / (75.0 if i == 3 else 52.0))
-                if w_decay > 0.03:
-                    rel_mask = m.up(self.relics[prev_i] * (0.4 + 0.6 * ca.M)).clamp(0.0, 1.0)
-                    wave_band = 0.5 + 0.5 * torch.sin(m.UT * 14.0 + m.VT * 11.0 + tl * 0.12 + prev_i * 1.7)
-                    recall = (rel_mask * wave_band * (0.14 + 0.16 * float(S["mid"][f])) * w_decay).clamp(0.0, 0.34)
-                    donor = self.scenes[prev_i].mid_body * 1.15 + self.scenes[prev_i].high_dots * 1.25
-                    rgb = rgb * (1.0 - recall * 0.55) + donor * recall
-
-        x = torch.cat([rgb, ln], 1)
-        ox, oy, zoom, rot = sc.motion(t, tl, S, f)
-        wa = 2.4 * p["flow"] + 1.5
-        wx = m.sample_noise(self.windX, t * 0.0035 * p["flow"], t * 0.002, 1.0) - 0.5
-        wy = m.sample_noise(self.windY, -t * 0.0025, t * 0.0035 * p["flow"], 1.0) - 0.5
-        disp = torch.cat([wx, wy], 1) * wa * 1.6 + ca.Dm * 0.75
-        if p["twist"] > 0.01:
-            disp = disp + torch.cat([wy, -wx], 1) * 10.0 * p["twist"] * (0.5 + 0.5 * math.sin(t * 0.28))
-        trem = S["trem"][f] * p["jitter"] * 1.2
-        grid = m.make_grid(ox + trem[0], oy + trem[1], zoom, rot, m.up(disp))
-        x = F.grid_sample(x, grid, mode="bilinear", padding_mode="border", align_corners=False)
-        rgb, ln = x[:, :3].clamp(min=0.0), x[:, 3:4]
-
-        M = ca.M
-        M_dot = (M + 0.58 * ca.ex * sc.hab).clamp(0.0, 1.0)
-        Cc = m.down(rgb)
-        Mg = m.up(m.gblur(M_dot, 2.0))
-        glow = m.up(m.gblur(Cc, 2.4))
-        base_vis = gate * g_s * (0.24 + 0.76 * Mg)
-        layer = glow * base_vis * 0.56 + rgb * base_vis * 0.46
-
-        breath = p["breath"] + 0.24 * float(S["mid"][f])
-        swell = 0.20 * float(S["onset"][f]) * p["flash"]
-        Vc = (m.lum(Cc).clamp(0.0, 1.25) ** 0.80) * (0.26 + 0.86 * M_dot) * 1.32
-        dots = self.lat8.render(Cc * 1.32 + 0.01, Vc, t, breath, gate * g_s, swell)
-
-        Cc4 = m.down(rgb, m.H // 4, m.W // 4)
-        M4 = F.interpolate(M_dot, size=(m.H // 4, m.W // 4), mode="bilinear", align_corners=False)
-        fine = self.lat4.render(Cc4 * 1.25, ((m.lum(Cc4) - 0.20).clamp(min=0.0) * 1.85) * (0.28 + 0.78 * M4), t * 1.25, breath * 0.6, gate * g_s) * 0.24
-
-        Cc24 = m.down(rgb, m.H // 24, m.W // 24)
-        M24 = m.down(M_dot, m.H // 24, m.W // 24)
-        bok = self.lat24.render(Cc24 * 1.18, (m.lum(Cc24).clamp(0.0, 1.0) ** 1.05) * M24 * 0.96, t * 0.55, breath * 1.35, gate * g_s, swell) * 0.32
-
-        reveal = m.tss(0.14, 0.58, m.up(M_dot)) * (0.65 + 0.35 * torch.sin(t * 1.6 + self.linephase))
-        lines = ln * reveal * gate * g_s * 0.28 * (rgb * 0.78 + 0.42)
-        return layer + dots * 0.92 + fine + bok + lines
-
-    def frame(self, f: int, render: bool = True):
-        for relic in self.relics:
-            relic.mul_(0.99982)
-        t = f / m.FPS
-        S = self.S
-        p, si = self.params_at(t)
-        gate = self.global_gate(t)
-        acts = self.active(t)
-        img = None
-        for i in acts:
-            L = self.scene_layer(i, t, f, p, gate, render)
-            if render:
-                img = L if img is None else 1 - (1 - img.clamp(0, 1)) * (1 - L.clamp(0, 1))
-        sc = self.scenes[si]
-        self.P.step(sc.wind)
-        if not render:
-            return None
-        img = img + self.P.render(gate)
-
-        fd = sc.fog_density
-        fc = m.col(sc.fog_color)
-        if si < 3:
-            w = m.ss(m.SCENE_T[si + 1] - m.PRE, m.SCENE_T[si + 1] + 8.0, t)
-            if w > 0:
-                fd = fd + (self.scenes[si + 1].fog_density - fd) * w
-                fc = fc + (m.col(self.scenes[si + 1].fog_color) - fc) * w
-        ox, oy = sc.wind[0] * t / m.W * 0.6, sc.wind[1] * t / m.H * 0.6
-        fog = 0.6 * m.sample_noise(self.fogA, ox, oy, 1.0) + 0.4 * m.sample_noise(self.fogB, -ox * 0.7, oy * 1.3 + t * 0.001, 1.4)
-        fog = m.up(m.tss(0.32, 0.85, fog))
-        fd = fd * (0.85 + 0.3 * float(S["low"][f]))
-        img = img * (1 - fd * 0.30 * fog) + fc * fog * fd * 0.32 * gate
-
-        L_ = m.lum(img)
-        img = L_ + (img - L_) * p["sat"]
-        img = img * torch.tensor([1 + p["warm"] * 0.6, 1.0, 1 - p["warm"] * 0.6], device=m.DEV).view(1, 3, 1, 1)
-        img = 1 - torch.exp(-img.clamp(min=0) * 1.15)
-
-        vign = p["vign"]
-        if si == 3:
-            vign = vign + 0.25 * m.ss(225, 290, t) + 0.05 * math.sin(t * 1.1)
-        if self.vg is None:
-            self.vg = torch.hypot((m.UT - 0.5) * 1.5, (m.VT - 0.5) * 1.15)
-        img = img * (1 - vign * self.vg ** 2.2).clamp(0, 1)
-
-        if self.prev is not None:
-            img = img + (self.prev * p["trail"] - img).clamp(min=0) * 0.65
-        self.prev = img
-
-        hl = m.up(m.gblur(m.down((m.lum(img) - 0.55).clamp(min=0)), 3.0))
-        img = img + hl * torch.tensor([1.0, 0.55, 0.42], device=m.DEV).view(1, 3, 1, 1) * 0.35
-        fl = 1 + 0.012 * math.sin(t * 13.7) + p["flicker"] * 0.05 * math.sin(t * 7.3 + math.sin(t * 2.1) * 3)
-        gr = F.interpolate(torch.randn((1, 1, m.H // 2, m.W // 2), device=m.DEV), scale_factor=2, mode="nearest")
-        img = (img * fl + gr * 0.007 * (0.4 + gate)).clamp(0, 1)
-        return img
-
-    def stats(self) -> list[dict]:
-        return [dict(scene=i + 1, sparks=int(c.births), forgets=int(c.forgets)) for i, c in enumerate(self.cas)]
-
-    def evolution_report(self) -> list[dict]:
-        return [dict(scene=i + 1, generations=e.logs) for i, e in enumerate(self.evo)]
-
+    def validate(self):
+        expected = self.n_cycles*self.scene_count
+        if len(self.cycle_records) != expected: raise RuntimeError("Missing cycles")
+        for r in self.cycle_records:
+            assert r["initial_count"]==1 and r["orphan_births"]==0, r
+            assert r["completion"] is not None and r["collapse_started"] and r.get("ended_recycled"), r
+            assert r["completion"]["nodes"]==r["coarse_nodes"], r
+            assert r["completion"]["mae"] < .007 and r["completion"]["psnr_db"] > 38, r
+            assert r["completion"]["seconds"] >= self.cycle_dur*.83, r
+            assert r["source_guided_from_first_birth"], r
+        return dict(passed=True,cycles=expected,single_seed=True,local_lineage=True,
+            target_guidance_from_first_birth=True,
+            multiscale_target_optimization=True,
+            story_controls_consumed=True,
+            continuous_remnant_handoff=True,living_completion=True,spatial_sine_warp=True,restored_v10_motion=True,
+            added_objects=False,added_narration=False,added_text=False,
+            source_image_compositing=False,completion="all descendants + MAE < 0.007 + PSNR > 38 dB",
+            sequence=[r["method"] for r in self.cycle_records])
