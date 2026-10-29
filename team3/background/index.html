@@ -346,6 +346,47 @@ const EMO = Object.assign({}, EMO_NEUTRAL);          // 지금 실제로 걸려 
 let emoTarget = Object.assign({}, EMO_NEUTRAL);      // 이번 장면이 요구하는 가중치
 let emoName = '중립';                                // 패널 표기용
 
+/* ── 1-b''. 감정별 움직임 리듬 (10-29 교수님 피드백) ─────
+   "기승전결 배경의 움직임이 모두 같은 리듬 — 감정에 따라 천천히, 때로는 파도처럼 급격하게.
+    배경이 바뀌면 움직임도 확 바뀌어야 이전 장면과 달라 보인다."
+   위 EMOTIONS 는 막 위에 ±10~25% 만 곱하는 색·질감 층이라 리듬은 그대로였다. 이 층은 리듬 자체를 감정마다 다르게 준다.
+     spd    이동 속도 배율 (0.35 = 거의 멈춤 · 1.7 = 빠름)
+     pHz    박동 주기(Hz) — 속도가 이 리듬으로 커졌다 작아진다 · pAmp 박동 세기(0~1)
+     wave   파도 세기 — 화면을 가로질러 밀려오는 큰 물결 · wHz 파도 주기(Hz)
+     burst  돌발 폭발 — 초당 평균 횟수 · bS 세기(px/프레임 @1080) — 무작위 자리에서 파편이 사방으로 튄다
+   장면이 바뀌면 이 층만 약 1.5초 안에 새 감정으로 넘어간다(색·이미지는 예전처럼 천천히 섞인다).
+   시험: `?motion=0` 이 층 전체를 끈다(10-29 이전 화면) */
+const MOTION_ON = new URLSearchParams(location.search).get('motion') !== '0';
+const MOT_NEUTRAL = { spd: 1, pHz: 0.2, pAmp: 0, wave: 0, wHz: 0.1, burst: 0, bS: 0 };
+const EMO_MOTION = {
+  //          속도   박동Hz  박동세기  파도   파도Hz  폭발/초  폭발세기
+  '놀람': { spd: 1.55, pHz: 0.90, pAmp: 0.25, wave: 0.00, wHz: 0.10, burst: 0.50, bS: 24 },  // 빠르고, 갑자기 터진다
+  '공포': { spd: 1.30, pHz: 1.60, pAmp: 0.55, wave: 0.55, wHz: 0.22, burst: 0.06, bS: 8  },  // 빠른 심장 박동 + 밀려오는 파도
+  '기쁨': { spd: 1.20, pHz: 0.70, pAmp: 0.40, wave: 0.18, wHz: 0.12, burst: 0.00, bS: 0  },  // 경쾌하게 통통 튄다
+  '슬픔': { spd: 0.30, pHz: 0.07, pAmp: 0.30, wave: 0.00, wHz: 0.04, burst: 0.00, bS: 0  },  // 거의 멈춘 듯 긴 숨
+  '분노': { spd: 1.70, pHz: 1.20, pAmp: 0.45, wave: 0.40, wHz: 0.30, burst: 0.20, bS: 11 },  // 거친 돌풍
+  '혐오': { spd: 0.60, pHz: 0.25, pAmp: 0.50, wave: 0.10, wHz: 0.08, burst: 0.00, bS: 0  },  // 끈적하게 움츠렸다 풀린다
+  '중립': MOT_NEUTRAL,
+};
+const MOT = Object.assign({}, MOT_NEUTRAL);          // 지금 걸려 있는 움직임
+let motTarget = Object.assign({}, MOT_NEUTRAL);      // 이번 장면 감정의 움직임
+let motPhP = 0, motPhW = 0;                          // 박동·파도 위상 — 주기가 바뀌어도 튀지 않게 적분한다
+let mBX = 0, mBY = 0, mBF = 0;                       // 마지막 폭발 자리 · 번쩍임(1 → 0 으로 약 0.5초에 사그라든다)
+/* ★ 10-29 시험: 위치(속도)만 바꾸면 1만 4천 개 파편이 빽빽해 눈으로는 차이가 거의 안 보였다
+     (같은 8초 녹화 비교 — 프레임 차이 ±10% 안팎). 그래서 박동 · 파도 · 폭발을 밝기에도 함께 싣는다. */
+
+function setMotion(key, w) {
+  const t = (MOTION_ON && key && EMO_MOTION[key]) || MOT_NEUTRAL;
+  motTarget = {};
+  for (const k in MOT_NEUTRAL) motTarget[k] = MOT_NEUTRAL[k] + (t[k] - MOT_NEUTRAL[k]) * w;
+}
+/* 약 1.5초(90프레임) 안에 새 리듬으로 — 색·이미지(curXfade ≈ 3초)보다 빨라서 장면이 바뀌는 순간 움직임이 확 달라진다 */
+function driftMotion() {
+  for (const k in MOT) MOT[k] += (motTarget[k] - MOT[k]) * 0.05;
+  motPhP += 2 * Math.PI * MOT.pHz / 60;
+  motPhW += 2 * Math.PI * MOT.wHz / 60;
+}
+
 /* ── 1-b'. 감정 색조 (10-11) ─────
    10/8 발표 검토: "흑백 중심의 이미지 외에 … 감정 상태에 따라 다양한 색감 … 때로는 어둡게, 때로는 화려하게".
    위 EMOTIONS 는 전부 1.0 근처에 묶여 있고 DB 과녁도 허용편차 절반 안이라, 감정이 달라도 화면 색은
@@ -448,6 +489,7 @@ function setEmotion(label, intensity) {
   emoTarget = {};
   for (const k in EMO_NEUTRAL)          // intensity 만큼만 중립에서 밀어낸다
     emoTarget[k] = EMO_NEUTRAL[k] + (t[k] - EMO_NEUTRAL[k]) * w;
+  setMotion(key, w);                    // 움직임 리듬(10-29) — 같은 감정 · 같은 세기로
 
   // intensity 는 1.0 이어도 항상 적는다. 예전엔 1.0 일 때 숫자를 뺐는데,
   // 패널에 '불안 0.9' 와 '우울' 이 섞여 떠서 '우울은 왜 숫자가 없나'로 읽혔다(사용자 확인, 09-25).
@@ -1927,6 +1969,15 @@ function updateParticles() {
   }
   const revDir = 1 - 2 * REV;
 
+  /* 감정 움직임 리듬(10-29) — 박동은 이동 속도를, 파도는 화면을 가로지르는 힘을, 폭발은 한 프레임의 충격을 준다 */
+  const mPulse = MOTION_ON ? MOT.pAmp * Math.sin(motPhP) : 0;
+  const mSpd = MOTION_ON ? Math.max(0.05, MOT.spd * (1 + mPulse)) : 1;
+  const mWave = MOTION_ON ? MOT.wave : 0;
+  let bS = 0;
+  const bR = H * 0.38;
+  mBF *= 0.92;
+  if (MOTION_ON && MOT.burst > 0.001 && rnd() < MOT.burst / 60) { mBX = rnd() * W; mBY = rnd() * H; mBF = 1; bS = MOT.bS * H / 1080; }
+
   for (let i = 0; i < NP2; i++) {
     suck(px[i], py[i], jitter);
     const br = sbr;
@@ -2002,11 +2053,22 @@ function updateParticles() {
       pvy[i] += Math.sin(ang) * brth * 1.4;                   // '높이가 변함' — 세로를 조금 더
     }
 
+    /* ⑤-c 감정 파도 · 돌발 폭발 (10-29) — 파도는 화면 왼쪽에서 오른쪽으로 지나가며 파편을 밀었다 당긴다 */
+    if (mWave > 0.003) {
+      const ph = motPhW - px[i] / W * 7.5;
+      pvx[i] += Math.sin(ph) * mWave * 0.9 * pspd[i];
+      pvy[i] += Math.cos(ph) * mWave * 0.45 * pspd[i];
+    }
+    if (bS > 0) {
+      const dx = px[i] - mBX, dy = py[i] - mBY, d = Math.sqrt(dx*dx + dy*dy) + 1;
+      if (d < bR) { const f = bS * (1 - d / bR) * (1 - d / bR) * (0.6 + 0.4 * pspd[i]); pvx[i] += dx / d * f; pvy[i] += dy / d * f; }
+    }
+
     /* ⑥ 마찰 — 어두운 곳(여백)일수록 크게. 속도가 죽어 안개처럼 스며든다. */
     const fr = A.fric - (1 - br) * 0.06;
     pvx[i] *= fr; pvy[i] *= fr;
 
-    px[i] += pvx[i]; py[i] += pvy[i];
+    px[i] += pvx[i] * mSpd; py[i] += pvy[i] * mSpd;   // 감정 박동이 이동 속도를 바꾼다 (MOTION_ON 이 아니면 1)
     plife[i]--;
 
     if (plife[i] <= 0 || !isFinite(px[i]) || !isFinite(py[i]) ||
@@ -2026,7 +2088,17 @@ function updateParticles() {
        6가지 조합을 재봤지만 같은 설정에서 부호가 뒤집힐 만큼 불안정했다 —
        노출 제어(GLOW_CAP·dark 감쇠)와 서로 밀고 당기기 때문이다.
        구도는 파편을 건드리지 않고 화면 위 비네트로 건다(아래 drawCompVignette). */
-    const inten = (plife[i] / pmaxL[i]) * (0.16 + br * 0.90) * AG * (0.55 + sndLevel * 0.55);
+    let inten = (plife[i] / pmaxL[i]) * (0.16 + br * 0.90) * AG * (0.55 + sndLevel * 0.55);
+    /* 감정 리듬을 밝기에도 (10-29) — 박동은 화면 전체가 숨 쉬듯, 파도는 밝은 띠가 가로질러, 폭발은 그 자리가 번쩍 */
+    if (MOTION_ON) {
+      let L = 1 + 0.45 * mPulse;
+      if (mWave > 0.003) L += mWave * 0.9 * Math.sin(motPhW - px[i] / W * 7.5);
+      if (mBF > 0.02) {
+        const dx = px[i] - mBX, dy = py[i] - mBY, d = Math.sqrt(dx*dx + dy*dy);
+        if (d < bR) L += 1.6 * mBF * (1 - d / bR) * (1 - d / bR);
+      }
+      inten *= Math.max(0.2, L);
+    }
     /* hueRange 유전자가 색을 화면 위치에 따라 갈라놓는다 (GA 연결 ⑤).
        원본 색을 버리지 않고, 좌우로 갈수록 따뜻/차갑게 아주 살짝 민다. */
     const tilt = (px[i] / W - 0.5) * gene.hueRange * 0.0032;
@@ -2508,7 +2580,37 @@ function render() {
   /* 오버레이 — 파티클을 건드리지 않고 화면 위에 덮는다.
      구도 비네트가 먼저, 서사 표지가 그 위에(비네트에 묻히지 않게). */
   drawCompVignette();
+  drawMotionFx();  // 감정 리듬(10-29) — 비네트 층 위에 매 프레임 새로 그린다(쌓이지 않는다)
   drawStoryMark();
+}
+
+/* ── 감정 리듬을 화면 전체에 (10-29) ─────
+   파편은 화면의 3% 남짓만 덮어서, 파편의 속도·밝기만 바꿔서는 눈에 거의 안 보였다(같은 8초 녹화 비교).
+   비네트 층(매 프레임 지우고 다시 그림 · 녹화에도 담김)에 세 가지를 얹는다.
+     박동  화면 전체가 감정 리듬으로 어두워졌다 밝아진다 (공포 = 빠른 심장 박동 · 슬픔 = 아주 느린 숨)
+     파도  부드러운 빛의 띠가 화면을 가로질러 지나간다 (공포 · 분노가 가장 세다)
+     폭발  터진 자리에서 빛이 번쩍 퍼진다 (놀람 · 분노) */
+function drawMotionFx() {
+  if (!MOTION_ON) return;
+  const g = vctx2;
+  const pulse = MOT.pAmp * Math.sin(motPhP);
+  g.save();
+  if (pulse < 0) { g.fillStyle = 'rgba(2,3,6,' + (-pulse * 0.62).toFixed(3) + ')'; g.fillRect(0, 0, W, H); }
+  else if (pulse > 0) { g.fillStyle = 'rgba(235,238,245,' + (pulse * 0.30).toFixed(3) + ')'; g.fillRect(0, 0, W, H); }
+  if (MOT.wave > 0.01) {
+    const cx = (((motPhW / (2 * Math.PI)) % 1) * 1.6 - 0.3) * W, bw = W * 0.22;
+    const lg = g.createLinearGradient(cx - bw, 0, cx + bw, 0);
+    const a = Math.min(0.42, MOT.wave * 0.75);
+    lg.addColorStop(0, 'rgba(235,240,250,0)'); lg.addColorStop(0.5, 'rgba(235,240,250,' + a.toFixed(3) + ')'); lg.addColorStop(1, 'rgba(235,240,250,0)');
+    g.fillStyle = lg; g.fillRect(cx - bw, 0, bw * 2, H);
+  }
+  if (mBF > 0.02) {
+    const r = H * 0.38 * (1.25 - 0.55 * mBF);
+    const rg = g.createRadialGradient(mBX, mBY, 0, mBX, mBY, r);
+    rg.addColorStop(0, 'rgba(255,250,240,' + (0.75 * mBF).toFixed(3) + ')'); rg.addColorStop(1, 'rgba(255,250,240,0)');
+    g.fillStyle = rg; g.fillRect(mBX - r, mBY - r, r * 2, r * 2);
+  }
+  g.restore();
 }
 
 
@@ -2602,6 +2704,7 @@ function loop() {
     stepMorph();     // 제 자리도 같은 길이로 끌려간다 — 형체가 형체로 변해간다 (stepFade 가 올린 fadeT 를 쓴다)
     driftAct();
     driftEmo();      // 감정 가중치도 막과 같은 속도로 스며든다 (driftDreamMood 보다 먼저)
+    driftMotion();   // 감정 움직임 리듬은 더 빨리(약 1.5초) — 장면이 바뀌면 움직임이 확 달라진다 (10-29)
     driftLaws();     // 꿈의 물리 법칙도 같은 속도로
     driftMoist();    // 공기 중의 물기도
     driftAudio();    // 사운드 창발 변조 — 화면을 빚는 유전자가 소리도 빚는다
