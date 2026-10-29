@@ -370,6 +370,7 @@ def record(sec=None):
     if not chrome or not node:
         sys.exit('[중단] %s 가 없습니다 → --serve 로 브라우저에서 직접 기록하세요.' % ('크롬' if not chrome else 'node'))
     url = 'http://127.0.0.1:5055/?size=1920x1080' + ('&sec=%g' % sec if sec else '')
+    url += os.environ.get('TEAM3_REC_QUERY', '')   # 시험용 주소 인자 (예: &motion=0 = 10-29 이전 움직임)
     env = dict(os.environ, PYTHONUTF8='1', PYTHONIOENCODING='utf-8')
     srv = subprocess.Popen([sys.executable, '-B', '-c', 'import app; app.app.run(port=5055, debug=False)'],
                            cwd=str(BG), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
