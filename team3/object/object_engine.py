@@ -1341,6 +1341,27 @@ EVO_RINGS = 0.28      # 형상 둘레의 동심원 · 작은 원 · 점 (교수�
 #   세대마다: ① 변이(가우스) 후 적합도가 나아진 개체만 남김(선택) ② 적합도 하위 GA_REPLACE 를 도태시키고,
 #   상위 개체 둘(같은 선의 이웃 자리 · 순위 선택)을 교차(무작위 비율 섞기)해 자식으로 바꿔 넣음 ③ 상위 GA_ELITE 는 그대로(엘리트 보존)
 GA_REPLACE = 0.06     # 세대마다 도태 · 교체되는 비율
+# 11/10 교수님 피드백 — "궁극 목표 형상은 하나여도 좋으니, 창조 과정은 무작위로 변화무쌍하게, 창조된 뒤에는 다양한 변화 · 움직임 · 크기 변화"
+EVO_FIGURES = 3       # 장면마다 형상 수 (얼굴 있는 형상 하나 = 그 장면 감정 + 얼굴 없는 다른 갈래 형상들) · 나머지는 변형의 재료
+# 11/12 피드백 — 더 충격적으로: 화면 밖으로 나감 · 화면을 덮는 확대 · 점 하나로 줄어듦 · 순간 이동 · 회전 · 글리치 · 점 하나가 커져 화면을 덮음
+ACT_SHOCK = {'기': 0.35, '승': 0.65, '전': 1.0, '결': 0.7}   # 장면별 충격 세기 (질서 → 무질서)
+MOVES = {'glide': 3.0, 'cut': 1.6, 'exit': 1.2, 'zoom_in': 1.3, 'zoom_out': 0.6, 'spin': 0.9, 'freeze': 1.0}   # 통째로의 움직임 (가중치 · 충격 세기로 조절)
+# 펜으로 긋기 (10/24 피드백 '그렸다 지웠다 · 창작의 괴로운 과정' + 11/10 진화) — 펜이 흩어진 점(먼지)을 끌어모아 선을 긋는다
+PEN_MAX_STROKES = 0   # 펜이 직접 긋는 획 수 (0 = 펜 없이 점만 · 시험판은 12) — 나머지 그물망 · 장식은 점이 스스로 모인다
+PEN_SPEED = (0.35, 0.65)   # 펜 속도 (단위 상자/초) — 획마다 무작위
+PEN_WRONG = 0.3       # 잘못 긋는 확률 (엉뚱한 자리에 다 그은 뒤 지우개로 지우고 다시 긋는다 · 형상마다 최대 3번)
+LIFE_KINDS = {        # 창조된 뒤의 변화 (가중치)
+    'redraw': 2,      # 획 하나를 지우개로 지웠다가 펜으로 다시 긋는다
+    'dismember': 3,   # 몸의 일부 획들이 떨어져 나가 떠돌다 돌아옴
+    'morph': 3,       # 같은 장면의 다른 형상 쪽으로 반쯤 변했다가 돌아옴
+    'melt': 2,        # 아래로 녹아 흘러내림
+    'wave': 2,        # 물결처럼 일렁임
+    'twist': 2,       # 가운데를 축으로 비틀림
+    'explode': 2,     # 점으로 흩어졌다가 다시 모임
+    'split': 2,       # 두 쪽으로 갈라져 멀어졌다 붙음
+    'erase_chunk': 3, # 몸의 한 부분이 무작위로 뭉텅 지워져 점으로 흩어졌다가 다시 자람
+    'storm': 2,       # 모든 점이 소용돌이치며 화면으로 퍼졌다가 다시 형상으로
+}
 GA_ELITE = 0.10       # 변이 없이 보존되는 상위 비율
 ONE_ACT_SIZE = {'기': 0.90, '승': 1.0, '전': 1.10, '결': 0.95}   # 장면별 크기 (화면 높이의 0.46배 × 이 값)
 ONE_BUDGET = {'search': 0.30, 'create': 0.50}  # 장면 1: 탐색은 장면의 30% 안 · 첫 오브제 완성은 50% 안 (나머지는 변해 가는 시간)
@@ -1910,37 +1931,35 @@ class OneObjectScene:
                 continue
             beh = {k: (v[j] if j < len(v) else False) for k, v in S.beh_arr.items()}
             P, sid, role = self._target_points(e)
-            st_list.append(dict(P=P, sid=sid, role=role, beh=beh, name=e.get('name', ''),
+            st_list.append(dict(P=P, sid=sid, role=role, beh=beh, name=e.get('name', ''), has_face=bool(e.get('has_face')),
                                 category=e.get('subject', ''), reveal=float(e.get('reveal', 0.5)),
                                 col=self.pal[j % len(self.pal)], acc=self.pal[(j + 3) % len(self.pal)]))
         st_list.sort(key=lambda f: f['reveal'])
+        # 궁극 목표 형상: 얼굴 있는 대상 우선 · 이야기 순서 — 나머지는 변형의 재료
+        faces = [i for i, e in enumerate(st_list) if e.get('has_face')]
+        order = faces + [i for i in range(len(st_list)) if i not in faces]
+        keep_i = sorted(order[:max(1, EVO_FIGURES)], key=lambda i: st_list[i]['reveal'])
+        self.alts = [st_list[i] for i in range(len(st_list)) if i not in keep_i]
+        st_list = [st_list[i] for i in keep_i]
         self.stages = st_list
         n = len(st_list)
         end = T * (0.93 if self.is_last else 0.97)
         lo = (0.30 if prev_target is None else 0.18) * T
         margin = min(6.0, 0.08 * T)
         hi = max(lo + 0.5, end - margin)
-        rev = [lo + (hi - lo) * min(1.0, max(0.0, s_['reveal'])) for s_ in st_list]
         gap = min(14.0, (hi - lo) / max(n, 1))
-        for j in range(n):
-            rev[j] = max(rev[j], lo if j == 0 else rev[j - 1] + gap)
-        if rev[-1] > hi:
-            rev = [lo + (r - lo) * (hi - lo) / max(rev[-1] - lo, 1e-3) for r in rev]
-        if S.rev is not None:   # 반전(무리가 터지는 순간) 앞뒤 5초에는 형상이 드러나지 않게 — 반전 6초 뒤로 민다
+        # 창조에 장면의 40~50% · 나머지는 창조된 뒤의 변화 (형상이 여럿이면 고르게)
+        first = (0.5 if prev_target is None else 0.42) * T
+        if n == 1:
+            rev = [first]
+        else:
+            rev = [first * 0.75 + (0.8 * T - first * 0.75) * j / (n - 1) for j in range(n)]
+        if S.rev is not None:   # 반전(무리가 터지는 순간) 앞뒤 5초에는 형상이 드러나지 않게
             rt = S.rev * T
             for j in range(n):
                 if abs(rev[j] - rt) < 5.0:
-                    before = rt - 6.0
-                    prev_r = rev[j - 1] if j > 0 else lo - 99
-                    nxt = rev[j + 1] if j + 1 < n else hi + 99
-                    if before >= prev_r + 0.6 * gap:          # 앞 형상과 충분히 떨어지면 반전 앞으로
-                        rev[j] = before
-                    else:                                     # 아니면 반전 뒤로 · 뒤 형상들도 간격을 두고 밀어낸다
-                        rev[j] = min(hi, rt + 6.0)
-                        for k in range(j + 1, n):
-                            rev[k] = min(hi, max(rev[k], rev[k - 1] + 0.6 * gap))
-                if j > 0 and rev[j] < rev[j - 1] + 4.0:
-                    rev[j] = min(hi, rev[j - 1] + 4.0)
+                    ok_before = rt - 6.0 >= lo and (j == 0 or rt - 6.0 >= rev[j - 1] + 0.6 * gap)
+                    rev[j] = rt - 6.0 if ok_before else min(hi, rt + 6.0)
         self.reveal_t = rev
         # 한 형상을 향해 진화하기 시작하는 때 = 앞 형상이 드러난 뒤 조금 머문 다음
         self.evo_start = [0.0] + [rev[j - 1] + (rev[j] - rev[j - 1]) * 0.35 for j in range(1, n)]
@@ -1961,6 +1980,7 @@ class OneObjectScene:
         self.ev_stage = -1
         self.ga_log = []   # (시각, 목표 번호, 평균 적합도, 최고 적합도, 자리 잡은 비율)
         self._assign(0)
+        self._choreograph(end)
         self.burst_at = []
         for j in range(n):   # 형상이 드러난 뒤 — 몇 세대마다 일부 개체가 크게 변이했다가 다시 진화 (멈추지 않는 진화)
             t_ = rev[j] + rng.uniform(5, 9)
@@ -1976,18 +1996,461 @@ class OneObjectScene:
         self.tgt_idx = np.minimum((np.arange(self.N) * M / self.N).astype(int), M - 1)
         self.ev_stage = j
 
+    # ── 안무: 창조 과정의 무작위성 · 창조된 뒤의 다양한 변화 ──
+    def _choreograph(self, end):
+        """장면 하나의 움직임 계획 — 위치 · 크기 · 회전 · 늘어남 열쇠틀, 획이 깨어나는 순서, 창조된 뒤의 변화 사건들"""
+        rng, T = np.random.default_rng(self.ev_rng.integers(1 << 30)), self.scene_sec
+        S = self.S
+        # 화면 안에 머무는 범위 (단위 상자 기준 · 형상 반지름 약 0.64)
+        self.hx, self.hy = 0.5 * S.W / (0.46 * S.H * ONE_ACT_SIZE.get(S.act, 1.0)), 0.5 / (0.46 * ONE_ACT_SIZE.get(S.act, 1.0))
+
+        def bound(x, y, sc):
+            ex = 0.64 * sc
+            return (float(np.clip(x, -(self.hx - ex - 0.05), self.hx - ex - 0.05)),
+                    float(np.clip(y, -max(0.0, self.hy - ex - 0.04), max(0.0, self.hy - ex - 0.04))))
+
+        # 열쇠틀 — (시각, x, y, 크기, 회전, 가로 늘임, 세로 늘임, 들어오는 방식 smooth | lin | step)
+        w = ACT_SHOCK.get(S.act, 0.6)
+        reveals = list(self.reveal_t)
+        keys, self.cues = [], []      # cues: 사운드 팀 참고용 큰 사건 (시각, 종류)
+        hx, hy = self.hx, self.hy
+
+        def add(tk, x, y, sc, rot=0.0, ax=1.0, ay=1.0, mode='smooth'):
+            keys.append((float(tk), float(x), float(y), float(sc), float(rot), float(ax), float(ay), mode))
+
+        # 드러나는 순간 — 얼굴 형상은 화면 안에서 감정이 읽히게 잠깐 머물고, 다른 형상은 가장자리에서 잘린 채 스치듯
+        holds = []
+        for j, r in enumerate(reveals):
+            face = bool(self.stages[j].get('has_face'))
+            sc_r = rng.uniform(1.25, 1.55) if face else rng.uniform(0.9, 1.5)   # 감정이 읽히게 크게
+            if face:
+                xr, yr = bound(rng.uniform(-0.55, 0.55) * hx, rng.uniform(-0.3, 0.3) * hy, sc_r)
+            else:
+                xr, yr = rng.choice([-1, 1]) * (hx - 0.2 * sc_r), rng.uniform(-0.45, 0.45) * hy
+            holds.append([r - 0.2, r + (3.5 if face else 1.2), xr, yr, sc_r, face])
+        # 시작 — 형상의 한 부분이 화면을 가로지를 만큼 확대된 채로 (무엇인지 알 수 없게)
+        P0 = self.stages[0]['P']
+        p = P0[int(rng.integers(len(P0)))]
+        sc0 = rng.uniform(4.5, 7.5)
+        add(0.0, -p[0] * sc0, -p[1] * sc0, sc0, rng.uniform(-0.6, 0.6))
+        t = 0.0
+        names = list(MOVES)
+        while t < T + 6:
+            lx, ly, lsc, lrot = keys[-1][1], keys[-1][2], keys[-1][3], keys[-1][4]
+            nh = next((h for h in holds if h[0] > t + 1e-3), None)
+            if nh is not None and t + 1.4 >= nh[0]:
+                add(nh[0], nh[2], nh[3], nh[4], 0.0)
+                add(nh[1], nh[2], nh[3], nh[4], 0.0)
+                t = nh[1]
+                holds.remove(nh)
+                continue
+            avail = (nh[0] - 1.4 - t) if nh is not None else 1e9
+            wts = np.array([MOVES[k] * (1.0 if k in ('glide', 'freeze') else (0.25 + w)) for k in names])
+            mv = str(rng.choice(names, p=wts / wts.sum()))
+            st_ = self.stages[max([k for k, s0 in enumerate(self.evo_start) if s0 <= t] or [0])]
+            if mv == 'glide' or avail < 2.0:
+                d = min(rng.uniform(1.2, 4.5) * (1.25 - 0.5 * w), max(0.5, avail))
+                sc = float(rng.choice([0.5, 0.8, 1.1, 1.5, 2.0, 2.8], p=[.12, .22, .26, .2, .13, .07]))
+                add(t + d, rng.uniform(-1.05, 1.05) * hx, rng.uniform(-1.05, 1.05) * hy, sc, lrot + rng.uniform(-0.5, 0.5),
+                    *((rng.uniform(0.7, 1.4), rng.uniform(0.7, 1.4)) if rng.random() < 0.35 else (1.0, 1.0)))
+                t += d
+            elif mv == 'cut':      # 순간 이동 — 아무 전환 없이 다른 자리 · 크기로
+                sc = float(rng.choice([0.6, 1.0, 1.4, 2.0, 3.0]))
+                add(t + 0.03, rng.uniform(-1, 1) * hx, rng.uniform(-1, 1) * hy, sc, rng.uniform(-1.2, 1.2), mode='step')
+                hold = rng.uniform(0.4, 1.4)
+                add(t + 0.03 + hold, keys[-1][1], keys[-1][2], sc, keys[-1][4])
+                self.cues.append((round(t, 2), 'cut'))
+                t += 0.03 + hold
+            elif mv == 'exit':     # 화면 밖으로 날아갔다가 반대쪽에서 들어옴
+                side = float(rng.choice([-1, 1]))
+                d1 = rng.uniform(0.5, 1.3)
+                add(t + d1, side * (hx + 0.9 * lsc + 0.4), ly + rng.uniform(-0.3, 0.3), lsc, lrot + rng.uniform(-1, 1), mode='lin')
+                gap = rng.uniform(0.2, 0.7)
+                sc = rng.uniform(0.8, 1.9)
+                add(t + d1 + gap, -side * (hx + 0.9 * sc + 0.4), rng.uniform(-0.8, 0.8) * hy, sc, rng.uniform(-1, 1), mode='step')
+                d2 = rng.uniform(0.8, 2.0)
+                add(t + d1 + gap + d2, rng.uniform(-0.6, 0.6) * hx, rng.uniform(-0.6, 0.6) * hy, sc, rng.uniform(-0.4, 0.4))
+                self.cues += [(round(t + d1, 2), 'exit'), (round(t + d1 + gap, 2), 'enter')]
+                t += d1 + gap + d2
+            elif mv == 'zoom_in':  # 화면을 덮는 확대 — 선 몇 가닥이 화면을 가른다
+                q = st_['P'][int(rng.integers(len(st_['P'])))]
+                scz = rng.uniform(3.5, 8.0) * (0.6 + 0.4 * w)
+                d = rng.uniform(0.6, 1.8)
+                add(t + d, -q[0] * scz, -q[1] * scz, scz, lrot + rng.uniform(-0.8, 0.8), mode='lin')
+                hold = rng.uniform(0.6, 1.8)
+                add(t + d + hold, keys[-1][1] * 1.05, keys[-1][2] * 1.05, scz * rng.uniform(1.0, 1.3), keys[-1][4] + rng.uniform(-0.3, 0.3))
+                self.cues.append((round(t + d, 2), 'zoom_in'))
+                t += d + hold
+            elif mv == 'zoom_out': # 점 하나로 줄어듦
+                d = rng.uniform(0.5, 1.4)
+                add(t + d, lx + rng.uniform(-0.3, 0.3), ly + rng.uniform(-0.3, 0.3), rng.uniform(0.03, 0.08), lrot, mode='lin')
+                hold = rng.uniform(0.25, 0.6)
+                add(t + d + hold, keys[-1][1], keys[-1][2], keys[-1][3], lrot)
+                self.cues.append((round(t + d, 2), 'vanish'))
+                t += d + hold
+            elif mv == 'spin':     # 크게 돈다
+                d = rng.uniform(0.7, 1.6)
+                add(t + d, lx, ly, lsc * rng.uniform(0.8, 1.3), lrot + float(rng.choice([-1, 1])) * 2 * np.pi * float(rng.choice([1, 2])), mode='lin')
+                self.cues.append((round(t, 2), 'spin'))
+                t += d
+            else:                  # 멈춤 — 가만히 있다가 다음 움직임이 터진다
+                hold = rng.uniform(1.0, 2.5)
+                add(t + hold, lx, ly, lsc, lrot)
+                t += hold
+        keys.sort(key=lambda k: k[0])
+        self.keys = keys
+        # 펜이 긋는 획 — 몸통 윤곽 · 얼굴 세부 중 긴 것부터 최대 PEN_MAX_STROKES 개, 순서는 무작위
+        self.pen = []        # 형상마다 [사건 …] — dict(k, kind='draw'|'erase', t0, t1, xf, pause=(비율, 초))
+        self.pen_k = []      # 형상마다 펜이 긋는 획 번호 집합
+        self.stroke_rng = [] # 형상마다 {획: (점 번호 배열, 획 안의 비율 배열)}
+        for j, st in enumerate(self.stages):
+            sid_p = st['sid'][np.minimum((np.arange(self.N) * len(st['P']) / self.N).astype(int), len(st['P']) - 1)]
+            rngs = {}
+            for k in np.unique(sid_p):
+                idx = np.where(sid_p == k)[0]
+                rngs[int(k)] = (idx, np.linspace(0, 1, len(idx)).astype(np.float32))
+            self.stroke_rng.append(rngs)
+            lens = {}
+            for k in np.unique(st['sid']):
+                pk = st['P'][st['sid'] == k]
+                role = st['role'][st['sid'] == k][0]
+                if role in ('main', 'detail') and len(pk) > 1:
+                    lens[int(k)] = float(np.hypot(*(pk[1:] - pk[:-1]).T).sum())
+            keyk = sorted(lens, key=lambda k: -lens[k])[:PEN_MAX_STROKES]
+            self.pen_k.append(set(keyk))
+            order = sorted(keyk, key=lambda k: -lens[k] * rng.uniform(0.4, 1.6))   # 대체로 큰 획부터 · 무작위로 뒤섞임
+            t = self.evo_start[j] + (6.0 if j == 0 and not self.from_prev else 2.0)
+            t_end = max(t + 2.0, self.reveal_t[j] - 2.5)
+            plan, wrong_n = [], 0
+            for k in order:
+                d = max(0.4, lens[k] / rng.uniform(*PEN_SPEED))
+                pause = (rng.uniform(0.3, 0.7), rng.uniform(0.3, 0.9)) if rng.random() < CHILD_HESITATE + 0.15 else None
+                if wrong_n < 3 and rng.random() < PEN_WRONG:   # 잘못 긋기 → 지우기 → 다시
+                    xf = (rng.uniform(-0.5, 0.5), rng.uniform(-0.35, 0.35), rng.uniform(-0.9, 0.9), rng.uniform(0.6, 1.4))
+                    plan.append(dict(k=k, kind='draw', t0=t, t1=t + d, xf=xf, pause=None))
+                    t += d + rng.uniform(0.5, 1.2)                 # 멈칫 — 바라보다가
+                    e = max(0.5, d * 0.45)
+                    plan.append(dict(k=k, kind='erase', t0=t, t1=t + e, xf=xf, pause=None))
+                    t += e + rng.uniform(0.3, 0.7)
+                    wrong_n += 1
+                plan.append(dict(k=k, kind='draw', t0=t, t1=t + d + (pause[1] if pause else 0), xf=None, pause=pause))
+                t += d + (pause[1] if pause else 0) + rng.uniform(0.25, 0.8)
+            if plan and t > t_end:                                 # 드러나는 때 전에 다 긋도록 속도를 맞춘다
+                t0_ = plan[0]['t0']
+                kk = (t_end - t0_) / max(t - t0_, 1e-3)
+                for p in plan:
+                    p['t0'], p['t1'] = t0_ + (p['t0'] - t0_) * kk, t0_ + (p['t1'] - t0_) * kk
+                    if p['pause']:
+                        p['pause'] = (p['pause'][0], p['pause'][1] * kk)
+            self.pen.append(plan)
+        for j, plan in enumerate(self.pen):
+            if not plan:
+                continue
+            a_, b_ = plan[0]['t0'] - 1.0, self.reveal_t[j]
+            ks2 = []
+            for (tk, x, y, sc, rot, ax, ay, md) in self.keys:
+                if a_ <= tk <= b_ and sc < 0.95:
+                    sc = rng.uniform(0.95, 1.3)
+                    x, y = bound(x, y, sc * max(ax, ay))
+                ks2.append((tk, x, y, sc, rot, ax, ay, md))
+            self.keys = ks2
+        # 획이 깨어나는 순서 — 펜이 긋지 않는 획(그물망 · 장식)은 무작위 순서로 점이 스스로 모인다 (처음엔 엉뚱한 자리 → 제자리)
+        self.wake = []
+        for j, st in enumerate(self.stages):
+            ks = np.array([k for k in np.unique(st['sid']) if int(k) not in self.pen_k[j]])
+            t0 = self.evo_start[j] + (3.0 if j == 0 and not self.from_prev else 1.0)
+            t1 = max(t0 + 1.0, self.reveal_t[j] - 3.0)
+            times = np.sort(rng.uniform(t0, t1, len(ks))) if len(ks) else np.array([])
+            if len(ks):
+                rng.shuffle(ks)
+            w = {}
+            for k, tw in zip(ks, times):
+                w[int(k)] = dict(t=float(tw), d=rng.uniform(2.5, 6.0), dx=rng.uniform(-0.7, 0.7), dy=rng.uniform(-0.5, 0.5),
+                                 rot=rng.uniform(-1.4, 1.4), sc=rng.uniform(0.5, 1.6))
+            self.wake.append(w)
+        # 잠든 획의 점들이 떠도는 둥지 (창조 중의 점 무리)
+        self.nest_r = rng.uniform(0.15, 0.45, self.N).astype(np.float32)
+        self.nest_a = rng.uniform(0, 2 * np.pi, self.N).astype(np.float32)
+        self.nest_w = rng.uniform(0.2, 0.8, self.N).astype(np.float32) * rng.choice([-1, 1], self.N)
+        # 창조된 뒤의 변화 사건들
+        kinds = list(LIFE_KINDS)
+        wts = np.array([LIFE_KINDS[k] for k in kinds], float)
+        self.events = []
+        for j, r in enumerate(self.reveal_t):
+            t = r + rng.uniform(2.5, 4.0)
+            t_end = (self.evo_start[j + 1] if j + 1 < len(self.stages) else end) - 1.0
+            last = None
+            while t < t_end - 3.0:
+                p = wts / wts.sum()
+                kind = str(rng.choice(kinds, p=p))
+                if kind == last:
+                    kind = str(rng.choice(kinds, p=p))
+                if kind == 'morph' and not self.alts:
+                    kind = 'wave'
+                d = float(min(rng.uniform(3.5, 7.0), t_end - t))
+                ev = dict(kind=kind, t0=t, t1=t + d, stage=j)
+                ks = np.unique(self.stages[j]['sid'])
+                if kind == 'dismember':
+                    pick = rng.choice(ks, size=max(1, len(ks) // 3), replace=False)
+                    ev['off'] = {int(k): (rng.uniform(-0.8, 0.8), rng.uniform(-0.6, 0.6), rng.uniform(-1.5, 1.5)) for k in pick}
+                elif kind == 'morph':
+                    ev['alt'] = int(rng.integers(len(self.alts)))
+                    ev['amt'] = rng.uniform(0.45, 0.8)
+                elif kind == 'split':
+                    ev['half'] = set(int(k) for k in ks[rng.random(len(ks)) < 0.5])
+                    ev['dx'] = rng.choice([-1, 1]) * rng.uniform(0.35, 0.7)
+                elif kind == 'explode':
+                    ev['amt'] = rng.uniform(0.18, 0.35)
+                elif kind in ('melt', 'wave', 'twist'):
+                    ev['amt'] = rng.uniform(0.6, 1.0)
+                elif kind == 'redraw':
+                    if not self.pen_k[j]:
+                        ev['kind'] = 'erase_chunk'
+                        kind = 'erase_chunk'
+                    else:
+                        ev['k'] = int(rng.choice(sorted(self.pen_k[j])))
+                if kind == 'erase_chunk':   # 몸의 한 부분이 뭉텅 지워진다
+                    P_ = self.stages[j]['P']
+                    ev['c'] = P_[int(rng.integers(len(P_)))].copy()
+                    ev['r'] = rng.uniform(0.2, 0.45)
+                elif kind == 'storm':
+                    ev['spin'] = float(rng.choice([-1, 1])) * rng.uniform(1.5, 3.0)
+                    self.cues.append((round(t, 2), 'storm'))
+                self.events.append(ev)
+                last = kind
+                t += d + rng.uniform(0.5, 2.5) * (1.3 - 0.6 * ACT_SHOCK.get(S.act, 0.6))
+        # 가짜 정답 — 창조 초반엔 다른 갈래의 형상으로 모이는 듯하다가, 마지막에 진짜 형상으로 틀어진다
+        pool = self.alts + self.stages
+        self.decoy = []
+        for j, st in enumerate(self.stages):
+            others = [p for p in pool if p is not st]
+            if not others or rng.random() < 0.25:
+                self.decoy.append(None)
+                continue
+            s0, r = self.evo_start[j], self.reveal_t[j]
+            self.decoy.append(dict(P=others[int(rng.integers(len(others)))]['P'], t0=s0 + 0.25 * (r - s0), t1=s0 + 0.7 * (r - s0)))
+            self.cues.append((round(s0 + 0.7 * (r - s0), 2), 'decoy_turn'))
+        # 섬광(점 하나가 커져 화면을 덮음) · 글리치 — 장면이 거칠수록 많이 · 드러나는 순간은 피한다
+        w_ = ACT_SHOCK.get(S.act, 0.6)
+        avoid = [(r - 1.0, r + 3.5) for r in self.reveal_t]
+        free = lambda tt, d: all(not (a_ - d < tt < b_ + 0.3) for a_, b_ in avoid) and tt + d < end
+        self.shocks = []
+        for kind, n in (('bloom', int(round(0.5 + 2.0 * w_))), ('glitch', int(round(1 + 4.0 * w_)))):
+            tries = 0
+            while n > 0 and tries < 60 and end > 8.0:   # 아주 짧은 시험 장면에서는 건너뛴다
+                tries += 1
+                tt = rng.uniform(4.0, end - 2.0)
+                d = rng.uniform(1.0, 1.8) if kind == 'bloom' else rng.uniform(0.2, 0.9)
+                if free(tt, d) and all(abs(tt - x['t0']) > 2.0 for x in self.shocks):
+                    self.shocks.append(dict(kind=kind, t0=tt, t1=tt + d, seed=int(rng.integers(1 << 30))))
+                    self.cues.append((round(tt, 2), kind))
+                    n -= 1
+        if S.rev is not None:   # 반전 순간 — 가장 큰 섬광
+            rt = S.rev * T
+            self.shocks.append(dict(kind='bloom', t0=rt - 0.6, t1=rt + 0.9, seed=int(rng.integers(1 << 30)), big=True))
+            self.shocks.append(dict(kind='glitch', t0=rt + 0.4, t1=rt + 1.4, seed=int(rng.integers(1 << 30))))
+            self.cues.append((round(rt, 2), 'reversal_flash'))
+        self.cues.sort()
+        if not hasattr(self, 'life_log'):
+            self.life_log = [(round(e['t0'], 1), e['kind']) for e in self.events]
+
+    def _pen_frac(self, p, t):
+        """펜(또는 지우개)이 획의 어디까지 왔는지 — 멈칫 구간 포함"""
+        if t >= p['t1']:
+            return 1.0
+        d = p['t1'] - p['t0']
+        if p.get('pause'):
+            f1, pz = p['pause']
+            dd = max(d - pz, 1e-3)
+            tt = t - p['t0']
+            if tt < dd * f1:
+                return tt / dd
+            if tt < dd * f1 + pz:
+                return f1
+            return min(1.0, (tt - pz) / dd)
+        return float(np.clip((t - p['t0']) / max(d, 1e-3), 0, 1))
+
+    def _key_at(self, t):
+        """열쇠틀 사이 — smooth(부드럽게) · lin(곧장) · step(순간 이동)"""
+        K = self.keys
+        if t <= K[0][0]:
+            return K[0][1:7]
+        for a, b in zip(K[:-1], K[1:]):
+            if a[0] <= t <= b[0]:
+                if b[7] == 'step':
+                    return (a[1:7] if t < b[0] else b[1:7])
+                u = (t - a[0]) / max(b[0] - a[0], 1e-6)
+                if b[7] != 'lin':
+                    u = u * u * (3 - 2 * u)
+                return tuple(a[i] + (b[i] - a[i]) * u for i in range(1, 7))
+        return K[-1][1:7]
+
     def _goal(self, t, s_):
-        """지금의 목표 점들 — 드러난 뒤에는 꿈의 변형으로 목표 자체가 흐트러진다 (정적인 물체로 머물지 않게)"""
+        """지금의 목표 점들 — 창조 중엔 획이 무작위 순서로 깨어나 엉뚱한 곳에 붙었다 제자리를 찾고,
+        창조된 뒤엔 떨어져 나감 · 다른 형상으로 변함 · 녹아내림 · 일렁임 · 비틀림 · 흩어짐 · 갈라짐이 이어지며,
+        통째로 화면을 옮겨 다니고 커졌다 작아지고 돌고 늘어난다"""
         st = self.stages[self.ev_stage]
-        G = st['P'][self.tgt_idx]
-        if s_ > 0:
-            sid = st['sid'][self.tgt_idx]
+        j = self.ev_stage
+        G = st['P'][self.tgt_idx].copy()
+        dc = self.decoy[j] if j < len(getattr(self, 'decoy', [])) else None
+        if dc is not None and t < dc['t1']:   # 가짜 정답 — 처음엔 다른 형상으로 모이다가 틀어진다
+            A = dc['P'][np.minimum((np.arange(self.N) * len(dc['P']) / self.N).astype(int), len(dc['P']) - 1)]
+            u = float(smoothstep(dc['t0'] + 0.6 * (dc['t1'] - dc['t0']), dc['t1'], t))
+            G = A * (1 - u) + G * u
+        sid = st['sid'][self.tgt_idx]
+        awake = np.ones(self.N, bool)
+        bump = lambda e: math.sin(math.pi * min(1.0, max(0.0, (t - e['t0']) / (e['t1'] - e['t0'])))) ** 2
+        # 다른 형상 쪽으로 반쯤 변함 (점 순서대로 짝지어 섞는다)
+        for e in self.events:
+            if e['stage'] == j and e['t0'] <= t <= e['t1'] and e['kind'] == 'morph':
+                A = self.alts[e['alt']]['P']
+                idx = np.minimum((np.arange(self.N) * len(A) / self.N).astype(int), len(A) - 1)
+                G = G * (1 - e['amt'] * bump(e)) + A[idx] * (e['amt'] * bump(e))
+        # 펜이 긋는 획 — 펜이 지나간 자리까지만 선이 되고, 아직 안 지나간 점 · 지우개가 지나간 점은 무리(둥지)로
+        boost = np.zeros(self.N, bool)
+        self._pen_now = None
+        if j < len(self.pen):
+            rngs = self.stroke_rng[j]
+            last = {}
+            for p in self.pen[j]:
+                if p['t0'] <= t:
+                    last[p['k']] = p
+                    if p['t0'] <= t <= p['t1']:
+                        self._pen_now = p
+            redo = [e for e in self.events if e['stage'] == j and e['kind'] == 'redraw' and e['t0'] <= t <= e['t1']]
+            for k in self.pen_k[j]:
+                if k not in rngs:
+                    continue
+                idx, fr = rngs[k]
+                p = last.get(k)
+                if p is None:
+                    awake[idx] = False
+                    continue
+                prog_ = self._pen_frac(p, t)
+                if p['kind'] == 'draw':
+                    on = fr <= prog_
+                    t_pass = p['t0'] + fr * (p['t1'] - p['t0'])
+                else:   # 지우개 — 앞에서부터 지운다
+                    on = fr > prog_
+                    t_pass = p['t0'] + fr * (p['t1'] - p['t0'])
+                awake[idx[~on]] = False
+                boost[idx[(t - t_pass >= 0) & (t - t_pass < 1.4)]] = True
+                if p['xf'] is not None and on.any():          # 엉뚱한 자리에 그은 획
+                    dx, dy, rot, scl = p['xf']
+                    sub = idx[on]
+                    c = G[idx].mean(0)
+                    cr, sr = math.cos(rot), math.sin(rot)
+                    G[sub] = ((G[sub] - c) * scl) @ np.array([[cr, sr], [-sr, cr]], np.float32) + c + [dx, dy]
+                for e in redo:                                 # 창조 뒤 — 지웠다가 다시 긋기
+                    if e['k'] != k:
+                        continue
+                    u_ = (t - e['t0']) / (e['t1'] - e['t0'])
+                    if u_ < 0.4:
+                        on2 = fr > u_ / 0.4
+                    elif u_ < 0.55:
+                        on2 = np.zeros_like(fr, bool)
+                    else:
+                        on2 = fr <= (u_ - 0.55) / 0.45
+                    awake[idx[~on2]] = False
+                    boost[idx] = True
+                    pc = idx[min(len(idx) - 1, int(len(idx) * (u_ / 0.4 if u_ < 0.4 else (u_ - 0.55) / 0.45)))]
+                    if u_ < 0.4 or u_ >= 0.55:
+                        self._pen_now = dict(kind='erase' if u_ < 0.4 else 'draw', at=int(pc))
+        if self._pen_now is not None and 'k' in self._pen_now and self._pen_now['k'] in self.stroke_rng[j]:
+            idx, fr = self.stroke_rng[j][self._pen_now['k']]
+            f = self._pen_frac(self._pen_now, t)
+            self._pen_now = dict(kind=self._pen_now['kind'], at=int(idx[min(len(idx) - 1, int(f * (len(idx) - 1)))]))
+        self._boost = boost
+        # 획 하나하나 — 깨어나기 전 / 깨어난 직후의 엉뚱한 자리 / 떨어져 나감 / 갈라짐
+        wk = self.wake[j] if j < len(self.wake) else {}
+        for k in np.unique(sid):
+            m = sid == k
+            c = G[m].mean(0)
+            dx = dy = rot = 0.0
+            scl = 1.0
+            w = wk.get(int(k))
+            if w is not None:
+                if t < w['t']:
+                    awake[m] = False
+                else:
+                    f = 1.0 - float(smoothstep(w['t'], w['t'] + w['d'], t))   # 엉뚱한 자리에서 제자리로
+                    dx, dy, rot, scl = w['dx'] * f, w['dy'] * f, w['rot'] * f, 1 + (w['sc'] - 1) * f
+            for e in self.events:
+                if e['stage'] != j or not (e['t0'] <= t <= e['t1']):
+                    continue
+                b = bump(e)
+                if e['kind'] == 'dismember' and int(k) in e['off']:
+                    ox, oy, orot = e['off'][int(k)]
+                    dx, dy, rot = dx + ox * b, dy + oy * b, rot + orot * b
+                elif e['kind'] == 'split':
+                    dx += (e['dx'] if int(k) in e['half'] else -e['dx']) * b
+            if dx or dy or rot or scl != 1.0:
+                cr, sr = math.cos(rot), math.sin(rot)
+                G[m] = ((G[m] - c) * scl) @ np.array([[cr, sr], [-sr, cr]], np.float32) + c + [dx, dy]
+        # 뭉텅 지워짐 · 폭풍
+        for e in self.events:
+            if e['stage'] != j or not (e['t0'] <= t <= e['t1']):
+                continue
+            b = bump(e)
+            if e['kind'] == 'erase_chunk' and b > 0.15:
+                gone = np.hypot(*(G - e['c']).T) < e['r'] * min(1.0, b * 1.6)
+                awake[gone] = False
+            elif e['kind'] == 'storm' and b > 0.05:
+                ang = self.nest_a + t * e['spin'] * (0.5 + self.nest_r)
+                rad = 0.3 + 3.5 * self.nest_r
+                sw = np.stack([np.cos(ang) * rad * 1.5, np.sin(ang) * rad], 1)
+                G = G * (1 - b) + sw * b
+                if b > 0.45:
+                    awake[:] = False
+        # 점 단위 변형 — 녹아내림 · 일렁임 · 비틀림
+        for e in self.events:
+            if e['stage'] != j or not (e['t0'] <= t <= e['t1']):
+                continue
+            b = bump(e) * e.get('amt', 1.0)
+            if e['kind'] == 'melt':
+                yy = G[:, 1] - G[:, 1].min()
+                G[:, 1] += b * 0.32 * yy ** 2 + b * 0.04 * np.sin(G[:, 0] * 9 + t * 2)
+            elif e['kind'] == 'wave':
+                G[:, 0] += b * 0.08 * np.sin(G[:, 1] * 7 + t * 3)
+                G[:, 1] += b * 0.05 * np.sin(G[:, 0] * 6 + t * 2.3)
+            elif e['kind'] == 'twist':
+                c = G.mean(0)
+                rr = np.hypot(*(G - c).T)
+                ang = b * 1.6 * rr
+                ca, sa = np.cos(ang), np.sin(ang)
+                d = G - c
+                G = np.stack([d[:, 0] * ca - d[:, 1] * sa, d[:, 0] * sa + d[:, 1] * ca], 1) + c
+        if s_ > 0:   # 꿈의 변형 (획마다)
             out = G.copy()
             for k in np.unique(sid):
                 m = sid == k
-                out[m] = self._dream(G[m], {'uid': int(k) * 7 + self.ev_stage * 131}, t, s_, st['beh'])
+                out[m] = self._dream(G[m], {'uid': int(k) * 7 + j * 131}, t, s_ * 0.6, st['beh'])
             G = out
-        return G
+        # 깨어나지 않은 획의 점들 = 떠도는 무리
+        storming = any(e['kind'] == 'storm' and e['stage'] == j and e['t0'] <= t <= e['t1'] and bump(e) > 0.45 for e in self.events)
+        if not awake.all() and not storming:
+            idx = np.where(~awake)[0]
+            a = self.nest_a[idx] + self.nest_w[idx] * t * 0.6
+            rr = self.nest_r[idx] * (1 + 0.35 * np.sin(t * 0.7 + idx * 0.37)) * 1.6
+            pen0 = self.pen[j][0]['t0'] if (j < len(self.pen) and self.pen[j]) else 1e9
+            ring = float(smoothstep(pen0 - 2.5, pen0 + 1.0, t))
+            if ring > 0:   # 고리 반지름 0.62~1.0 — 형상(반지름 약 0.64) 바깥
+                rr = rr * (1 - ring) + (0.78 + 0.4 * (self.nest_r[idx] - 0.15) / 0.3) * ring
+            G[idx] = np.stack([np.cos(a) * rr * 1.25, np.sin(a) * rr], 1)
+        # 통째로의 움직임(위치 · 크기 · 회전 · 늘임)은 무리 전체가 함께 타고 간다 — 그릴 때 _xform 으로 얹는다
+        #   (진화는 형상 자체의 변화만 맡는다 · 움직일 때마다 다시 모여야 하는 일이 없게)
+        x, y, sc, rot, ax, ay = self._key_at(t)
+        self._xf = (x, y, sc, rot, ax, ay)
+        self._awake = awake
+        self._center = (x, y, sc)
+        return G.astype(np.float32)
+
+    def _xform(self, P, keep=None):
+        """무리 좌표 → 화면 쪽 단위 좌표 (위치 · 크기 · 회전 · 늘임) · 형상(keep)은 화면 밖으로 나가지 않게 (떠도는 점은 그대로)"""
+        x, y, sc, rot, ax, ay = getattr(self, '_xf', (0.0, 0.0, 1.0, 0.0, 1.0, 1.0))
+        cr, sr = math.cos(rot), math.sin(rot)
+        Q = (P * [sc * ax, sc * ay]) @ np.array([[cr, sr], [-sr, cr]], np.float32) + [x, y]
+        return Q.astype(np.float32)   # 화면 밖으로 나가는 것도 움직임의 하나 (자르지 않는다)
 
     def _evolve_to(self, t):
         """세대를 t 까지 진행 — 변이(돌연변이) → 목표에 더 가까우면 살아남음(선택) + 목표 쪽으로 이끌림"""
@@ -2038,9 +2501,15 @@ class OneObjectScene:
                                     round(float(np.mean(d_old < 0.035)), 3)))
             pull = (0.0005 + 0.08 * prog ** 3) if first else (0.0008 + 0.08 * prog ** 3)   # 드러나는 때가 가까워질수록 목표에 끌림
             self.pos += (G - self.pos) * pull
+            bst = getattr(self, '_boost', None)
+            if bst is not None and bst.any():                               # 펜에 이끌린 점 — 펜 뒤로 빠르게 모여 선이 된다
+                self.pos[bst] += (G[bst] - self.pos[bst]) * 0.28
             rr_ = np.hypot(*self.pos.T)
             far_ = rr_ > 0.95                                                # 화면 밖으로 흩어지지 않게
             self.pos[far_] *= (0.95 / rr_[far_])[:, None]
+            for e in getattr(self, 'events', []):
+                if e['kind'] == 'explode' and self.ev_t < e['t0'] <= tg:   # 흩어짐 — 무리 전체가 점으로 흩어졌다가 다시 모인다
+                    self.pos += rng.normal(0, e['amt'], self.pos.shape).astype(np.float32)
             for b in self.burst_at:
                 if self.ev_t < b <= tg:   # 큰 변이 — 일부 개체가 흩어졌다가 다시 진화
                     m = rng.random(self.N) < 0.22
@@ -2054,12 +2523,18 @@ class OneObjectScene:
         st = self.stages[self.ev_stage]
         G = self._goal(t, self.dream_strength(t))
         d = np.hypot(*(self.pos - G).T)
-        P = place(self.pos)
+        P = place(self._xform(self.pos, getattr(self, '_awake', None)))
         sid = st['sid'][self.tgt_idx]
         role = st['role'][self.tgt_idx]
         w_role = {'main': 1.0, 'detail': 0.85, 'accent': 0.55, 'grid': 0.4}
+        if getattr(self, '_dark_lines', False):   # 밝은 배경 위 짙은 선 — 굵게 (반짝이는 배경에 묻히지 않게)
+            w_role = {k: v * 1.4 for k, v in w_role.items()}
+        # 확대될수록 선 · 점도 굵어진다 — 화면을 덮는 확대가 '빈 화면'이 아니라 굵은 빛줄기 · 큰 빛 방울로 보이게
+        zf = float(np.clip(getattr(self, '_xf', (0, 0, 1.0))[2], 1.0, 8.0)) ** 0.85
+        w_role = {k: v * zf for k, v in w_role.items()}
+        self._zf = zf
         a_role = {'main': 1.0, 'detail': 1.0, 'accent': 0.7, 'grid': 0.45}
-        near = d < 0.035
+        near = (d < 0.035) & getattr(self, '_awake', np.ones(self.N, bool))
         # 같은 선의 이웃 개체가 둘 다 목표 가까이 오면 그 사이를 잇는다 → 선이 조각조각 생겨나 형상이 된다
         brk = np.where((sid[1:] != sid[:-1]) | ~near[1:] | ~near[:-1])[0] + 1
         for seg in np.split(np.arange(self.N), brk):
@@ -2071,14 +2546,46 @@ class OneObjectScene:
             stroke(P[seg], col, w_role.get(r_, 0.6), a_role.get(r_, 0.6) * fade, raw=True)
             if r_ == 'main':   # 어긋난 색 그림자 선 (예시 선화처럼) — 반대색은 덧그림에만
                 stroke(P[seg] + [thick * 0.9, thick * 0.6], C['comp'], 0.4, 0.35 * fade, raw=True)
+        # 섬광 — 점 하나가 부풀어 화면 전체를 덮었다가 줄어든다
+        for sh in getattr(self, 'shocks', []):
+            if sh['kind'] == 'bloom' and sh['t0'] <= t <= sh['t1']:
+                u = (t - sh['t0']) / (sh['t1'] - sh['t0'])
+                rs = np.random.default_rng(sh['seed'])
+                i0 = int(rs.integers(self.N))
+                cx_, cy_ = P[i0].astype(int)
+                diag = math.hypot(W, H)
+                rad = diag * 1.2 * (math.sin(math.pi * u) ** 0.6)
+                base_ = self._cols['same'] / max(float(self._cols['same'].max()), 1e-3)   # 배경 색상의 가장 밝은 빛
+                col = np.clip(base_ * 0.45 + 0.55, 0, 1) if not sh.get('big') else np.array([0.97, 0.97, 0.95], np.float32)
+                if rad > 1:
+                    cv2.circle(layer, (int(cx_), int(cy_)), int(rad), (col * 0.95).tolist(), -1, cv2.LINE_AA)
+                    cv2.circle(mask, (int(cx_), int(cy_)), int(rad), 1.0, -1, cv2.LINE_AA)
+                    self._bloom_cov = (int(cx_), int(cy_), int(rad))
+        # 펜 끝(밝은 점) · 지우개(빈 동그라미) — 지금 긋거나 지우는 자리
+        pn = getattr(self, '_pen_now', None)
+        if pn is not None and 'at' in pn and fade > 0.05:
+            gp = self._xform(G[pn['at']:pn['at'] + 1])
+            x_, y_ = place(gp)[0].astype(int)
+            jit = (int(2 * math.sin(t * 9)), int(2 * math.cos(t * 7)))   # 손 떨림
+            x_, y_ = x_ + jit[0], y_ + jit[1]
+            r_ = max(4, int(thick * 1.3))
+            if 0 <= x_ < W and 0 <= y_ < H:
+                if pn['kind'] == 'erase':
+                    cv2.circle(layer, (x_, y_), int(r_ * 2.2), (0.9, 0.9, 0.95), max(1, thick // 3), cv2.LINE_AA)
+                    cv2.circle(mask, (x_, y_), int(r_ * 2.5), 0.8, -1, cv2.LINE_AA)
+                else:
+                    cv2.circle(layer, (x_, y_), r_, (1.0, 1.0, 0.96), -1, cv2.LINE_AA)
+                    cv2.circle(layer, (x_, y_), int(r_ * 2.3), (0.4, 0.4, 0.36), max(1, thick // 4), cv2.LINE_AA)
+                    cv2.circle(mask, (x_, y_), int(r_ * 2.4), 0.9, -1, cv2.LINE_AA)
         # 형상 둘레의 동심원 · 작은 원 · 점 — 형상이 갖춰질수록 또렷해지고 천천히 돈다 (교수님 예시 선화처럼 · 은은하게)
         if EVO_RINGS > 0:
             j = self.ev_stage
             r_ = self.reveal_t[j]
             show = float(smoothstep(r_ - 4.0, r_ + 2.0, t)) * EVO_RINGS * fade
             if show > 0.01:
-                c0 = place(np.zeros((1, 2), np.float32))[0]
-                unit = float(np.hypot(*(place(np.array([[0.5, 0.0]], np.float32))[0] - c0))) * 2
+                cx_, cy_, sc_ = getattr(self, '_center', (0.0, 0.0, 1.0))
+                c0 = place(np.array([[cx_, cy_]], np.float32))[0]
+                unit = float(np.hypot(*(place(np.array([[cx_ + 0.5, cy_]], np.float32))[0] - c0))) * 2 * sc_
                 grng = np.random.default_rng(1000 + j)
                 for k, rad in enumerate((0.42, 0.58, 0.74)):
                     R = rad * unit
@@ -2102,8 +2609,12 @@ class OneObjectScene:
         far = ~near
         # 맨 처음 랜덤 점 단계 — 점을 더 크고 밝게, 실도 더 길게 (교수님 제안의 출발점이 또렷이 보이게)
         early = 0.0
+        plan = self.pen[self.ev_stage] if self.ev_stage < len(getattr(self, 'pen', [])) else []
+        pen0 = plan[0]['t0'] if plan else self.reveal_t[self.ev_stage] - 8.0
         if self.ev_stage == 0 and not self.from_prev:
-            early = 1.0 - float(smoothstep(self.reveal_t[0] - 8.0, self.reveal_t[0], t))
+            early = 1.0 - float(smoothstep(pen0 - 3.0, pen0, t))
+        drawing = bool(plan) and pen0 - 1.0 <= t <= self.reveal_t[self.ev_stage] + 1.0
+        dot_a = 0.5 if drawing else 1.0
         gap = np.hypot(*(self.pos[1:] - self.pos[:-1]).T)
         web = (sid[1:] == sid[:-1]) & (gap < 0.06 + 0.04 * early) & (far[1:] | far[:-1])
         brk2 = np.where(~web)[0] + 1
@@ -2111,8 +2622,12 @@ class OneObjectScene:
             if len(seg) >= 3 and web[min(seg[0], len(web) - 1)]:
                 stroke(P[seg], self._cols['near'], 0.3, (0.5 + 0.2 * early) * fade, raw=True)
         if dots is not None:
-            px = H * 0.0045 * (1 + 0.7 * early)   # 점 지름(화소) — 1080p 에서 약 5px, 처음엔 약 8px
-            dots(P[far], self._cols['same'], px / max(thick, 1), min(1.0, 0.85 + 0.15 * early) * fade, raw=True)
+            px = H * 0.0045 * (1 + 0.7 * early) * getattr(self, '_zf', 1.0)   # 점 지름(화소) — 1080p 에서 약 5px · 처음엔 약 8px · 확대되면 큰 빛 방울
+            if getattr(self, '_dark_lines', False):
+                px *= 1.6   # 밝은 배경 위 짙은 점은 반짝이는 배경 점에 묻히기 쉬워 더 크게
+            if drawing:
+                px *= 0.8
+            dots(P[far], self._cols['same'], px / max(thick, 1), min(1.0, 0.85 + 0.15 * early) * fade * dot_a, raw=True)
 
     def dream_strength(self, t):
         """지금 꿈의 변형 세기 (0 = 그 물체 그대로)"""
@@ -2199,8 +2714,10 @@ class OneObjectScene:
             rot += 0.06 * math.sin(2 * math.pi * t / 1.3)
         per = 8.0
         m = 1 + SIZE_BREATH.get(S.act, 0.12) * math.sin(2 * math.pi * t / per)
-        if getattr(self, 'finale_t', None) is not None:
+        if getattr(self, 'finale_t', None) is not None and self.mode != 'evolve':
             m *= 1 + (0.3 if self.is_last else 0.12) * float(smoothstep(self.finale_t, self.scene_sec * 0.9, t))
+        if self.mode == 'evolve':
+            m = 1 + 0.5 * (m - 1)   # 크기 변화는 열쇠틀이 크게 맡으니 숨쉬기는 절반만
         if S.rev is not None:
             lead = 6.0 / self.scene_sec
             if S.rev - lead <= u < S.rev:
@@ -2319,6 +2836,7 @@ class OneObjectScene:
 
         pen = None
         ds = self.dream_strength(t)
+        self._bloom_cov = None
         if self.mode == 'evolve':
             import colorsys
             if bgc is not None:
@@ -2327,7 +2845,9 @@ class OneObjectScene:
             else:   # 오브제만 렌더 — 색표의 장면 주색
                 base_h = EMO_BG_HUE.get(S.emo_label, 220) / 360.0
                 bright_bg = False
-            y_ = COLOR_Y_ON_BRIGHT if bright_bg else COLOR_Y_ON_DARK
+            bb_ = getattr(self, '_bright', 0.2) if bgc is not None else 0.15
+            # 밝기 차이를 배경 밝기에 맞춰 벌린다 — 어두운 배경 위 밝은 선은 배경보다 0.5 이상 밝게 (같은 색상이어도 묻히지 않게)
+            y_ = COLOR_Y_ON_BRIGHT if bright_bg else float(np.clip(bb_ + 0.45, COLOR_Y_ON_DARK, 0.74))   # 0.74 위로는 흰빛이 돼 색이 빠진다
             near_h = (base_h + 30 / 360) % 1.0
             if 60 / 360 <= near_h <= 150 / 360:   # 누런 초록으로 가면 반대쪽으로
                 near_h = (base_h - 30 / 360) % 1.0
@@ -2337,6 +2857,9 @@ class OneObjectScene:
                                          y_ + (0.08 if bright_bg else -0.12))}   # 반대색도 밝기는 같은 쪽 — 덧그림이 윤곽보다 튀지 않게
             self._dark_lines = bright_bg
             self._render_evolve(t, place, stroke, layer, mask, fade, thick, dots)
+            if self._bloom_cov is not None:
+                bx, by, br = self._bloom_cov
+                cv2.circle(cov, (bx, by), br, 1.0, -1, cv2.LINE_AA)
         for it in self.inst:
             if t < it['d0']:
                 continue
@@ -2433,6 +2956,8 @@ class OneObjectScene:
         else:
             calm = np.zeros((H, W), np.float32)
         k_halo = (0.55 + 0.3 * np.clip((bright - 0.25) / 0.4, 0, 1)) * (1 - 0.55 * calm)  # 받침이 있는 자리는 덜 어둡게 (검은 얼룩처럼 보이지 않게)
+        if self.mode == 'evolve' and not dark_lines:
+            k_halo = np.minimum(0.85, k_halo + 0.15)   # 같은 색상의 밝은 선이 배경에 묻히지 않게 둘레를 조금 더 받친다
         if dark_lines:
             k_halo = k_halo * 0.15
         frame = frame * (1 - k_halo[..., None] * halo[..., None])
@@ -2444,7 +2969,27 @@ class OneObjectScene:
         lum = np.clip(np.maximum(layer.max(2), cov)[..., None], 0, 1)
         frame = frame * (1 - lum) + layer
         glow = cv2.resize(cv2.GaussianBlur(cv2.resize(layer, q, interpolation=cv2.INTER_AREA), (0, 0), 3 * H / 1080 + 1), (W, H))
-        return frame + glow * 0.35
+        out = frame + glow * 0.35
+        for sh in getattr(self, 'shocks', []):
+            if sh['kind'] == 'glitch' and sh['t0'] <= t <= sh['t1']:
+                out = self._glitch(out, sh, t)
+        return out
+
+    def _glitch(self, img, sh, t):
+        """글리치 — 가로 띠가 어긋나고 색이 갈라진다 (프레임마다 다르게 · 같은 시각이면 같게)"""
+        H, W = img.shape[:2]
+        rs = np.random.default_rng(sh['seed'] + int(t * 30))
+        out = img.copy()
+        for _ in range(int(rs.integers(3, 9))):
+            y0 = int(rs.integers(0, H - 4))
+            hgt = int(rs.integers(max(2, H // 60), max(4, H // 8)))
+            out[y0:y0 + hgt] = np.roll(out[y0:y0 + hgt], int(rs.uniform(-0.15, 0.15) * W), axis=1)
+        k = int(rs.integers(2, max(3, W // 120)))
+        out[..., 0] = np.roll(out[..., 0], k, axis=1)
+        out[..., 2] = np.roll(out[..., 2], -k, axis=1)
+        if rs.random() < 0.3:   # 잠깐 반전
+            out = 1.0 - np.clip(out, 0, 1)
+        return out
 
 
 def label_overlay(sc_obj, W, H):
@@ -2476,6 +3021,19 @@ def attach_bg_audio(out, bg):
         print(f'  배경 소리 붙임 → {out.name}')
     else:
         print('  ! 배경 소리를 붙이지 못했습니다 (배경 영상에 소리가 없을 수 있음)')
+
+
+def _placeholder_png():
+    """ComfyUI PNG 가 없을 때 쓰는 자리표시 그림 (진화 방식에서는 화면에 쓰이지 않는다)"""
+    import tempfile
+    p = Path(tempfile.gettempdir()) / 'dream_obj_placeholder.png'
+    if not p.exists():   # 병렬 작업이 동시에 만들어도 깨지지 않게 — 따로 쓴 뒤 한 번에 바꿔 넣는다
+        img = np.zeros((512, 512, 4), np.uint8)
+        cv2.circle(img, (256, 256), 150, (230, 230, 230, 255), -1, cv2.LINE_AA)
+        tmp = p.with_name(f'dream_obj_placeholder_{os.getpid()}.png')
+        cv2.imencode('.png', img)[1].tofile(str(tmp))
+        os.replace(tmp, p)
+    return str(p)
 
 
 def _story_hash(path):
@@ -2558,6 +3116,9 @@ def run_parallel(args, jobs):
             mk2 = dict(mk, start_frame=mk['start_frame'] + off, start_sec=round((mk['start_frame'] + off) / args.fps, 2))
             if mk.get('figures'):
                 mk2['figures'] = [dict(f, global_sec=round(mk2['start_sec'] + f['local_sec'], 1)) for f in mk['figures']]
+            for key_ in ('life', 'cues'):
+                if mk.get(key_):
+                    mk2[key_] = [dict(f, global_sec=round(mk2['start_sec'] + f['local_sec'], 1)) for f in mk[key_]]
             meta['scenes'].append(mk2)
         meta['law_map'] += m['law_map']
         for r in m.get('reversal', []):
@@ -2619,7 +3180,8 @@ def main():
     if digital and args.out == 'object_emergence.mp4':
         args.out = 'object_emergence_digital.mp4'
     doodle_path = Path(args.objects) / 'doodles.json'
-    if args.style == 'line' and not args.multi_objects and not args.no_doodles and not args.worker:
+    if (args.style == 'line' and not args.multi_objects and not args.no_doodles and not args.worker
+            and (args.no_targets or not (Path(args.objects) / 'targets.json').exists())):   # 목표 선화가 있으면 손그림은 준비하지 않는다
         # 손그림 형상 준비 (처음 한 번 · 대본이 바뀌면 다시) — 병렬 작업이 나뉘기 전에
         stale = True
         if doodle_path.exists():
@@ -2712,6 +3274,9 @@ def main():
     for si in range(last + 1):
         sc = scenes[si]
         files = load_objects_index(args.objects, sc.get('scene', si + 1), sc.get('objects') or [])
+        if args.style == 'line' and targets_by_scene.get(sc.get('scene', si + 1)) and any(f is None for f in files):
+            # 진화 방식은 목표 선화(targets.json)로 그리므로 ComfyUI PNG 가 없어도 된다 — 빈 자리는 자리표시 그림으로 채운다
+            files = [f if f is not None else _placeholder_png() for f in files]
         if si not in order and args.style == 'line':
             # 선화는 앞 장면 상태를 이어받지 않는다 — 난수 순서만 맞추려고 만들고 넘긴다
             Scene(sc, si, n_all, files, W, H, prev_cloud, rng, args.style, cell, args.emerge, reversal, quiet=True,
@@ -2771,6 +3336,10 @@ def main():
                                     doodle_scene=dd, prev_doodle=prev_dd, target_scene=tg, prev_target=prev_tg)
                 if LS.mode == 'evolve':
                     marks[-1]['ga'] = LS.ga_log   # 렌더가 끝난 뒤 채워진다 (같은 리스트)
+                    marks[-1]['life'] = [{'local_sec': a, 'global_sec': round(done / args.fps + a, 1), 'change': k}
+                                         for a, k in getattr(LS, 'life_log', [])]   # 창조된 뒤의 변화 (발표 설명용)
+                    marks[-1]['cues'] = [{'local_sec': a, 'global_sec': round(done / args.fps + a, 1), 'event': k}
+                                         for a, k in getattr(LS, 'cues', [])]       # 큰 사건 (사운드 팀 참고용)
                 if LS.mode in ('doodle', 'evolve'):   # 무엇을 언제 그렸는지 (설명용)
                     marks[-1]['figures'] = [{'object': st['name'], 'figure': st['category'], 'local_sec': round(r, 1),
                                              'global_sec': round(done / args.fps + r, 1)}
