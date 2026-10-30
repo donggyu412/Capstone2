@@ -368,6 +368,8 @@ def annotate(scenes, log=print, require=False):
                 v['boxes'] = desc['boxes']
                 v['sources'] = find_sources(desc, near)
         for o in s.get('objects', []):
+            if o.get('target'):                                    # 오브제 선화(targets.json) — 무엇인지 이미 안다 (선화 그림은 재질 분류에 맞지 않음)
+                continue
             m = seer.classify(o['path'], MATERIALS, MAT_TEMPLATE, 'objmat')
             if m and not o['features'].get('empty'):
                 o['features']['material'] = m[0][0]

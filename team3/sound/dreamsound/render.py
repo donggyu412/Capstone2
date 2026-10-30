@@ -188,7 +188,8 @@ def _vary(y, g, pan, sr, rng, nat):
     sd = nat.get('pitch_sd', 0)
     if sd:
         y = synth.pitch(y, float(np.clip(rng.normal(0, sd), -2.5 * sd, 2.5 * sd)))
-    g = g * 10 ** (float(np.clip(rng.normal(0, nat.get('gain_db', 0)), -9, 6)) / 20)
+    gdb = nat.get('gain_db', 0)
+    g = g * 10 ** (float(np.clip(rng.normal(0, gdb), -max(9.0, 2 * gdb), max(6.0, 1.5 * gdb))) / 20)
     if rng.random() < nat.get('far_p', 0):                           # 멀리서 — 고역이 먹먹하고 작게
         y = synth.lowpass(y, float(rng.uniform(1500, 5000)), sr, 1)
         g *= 0.7
@@ -245,7 +246,8 @@ def arrange(sc, P, mats, D, sr, rng, note):
             y, g, p1 = _vary(y, g, pan, sr, rng, nat)
             _add(st['object'], _pan(y * g, p1), int(t * sr))
             note(t, len(y) / sr, 'object', o['name'], '%s 울림' % o['name'], o.get('sentences'),
-                 '매번 다른 크기(작게)' if soft else None, src='오브제 실루엣%s → 모달 합성' % (
+                 '매번 다른 크기(작게)' if soft else None, src='%s%s → 모달 합성' % (
+                     ('오브제 선화 "%s"' % o['target'].get('subject')) if o.get('target') else '오브제 실루엣',
                      ' + 재질 ' + o['features']['material'] if o['features'].get('material') else ''))
         dr = mats['drone'].get(o['idx'])
         if dr is not None and P['obj_drone'] > 0.2:
@@ -392,7 +394,9 @@ def shape(y, sc, D, note):
     u = np.arange(n) / max(1, n)
     sp = sc['stage_p']
     A = arc(u, sc['stage'], sp['arc_peak'], sp['arc_depth'])
-    if style.get(sc)['flat_arc']:
+    if style.get(sc).get('dyn'):                     # 넓은 다이내믹스 — 큰 흐름은 render 의 음량 곡선(style.dyn_curve)이 맡는다
+        A = np.ones(n)
+    elif style.get(sc)['flat_arc']:
         A = style.flat_arc(A, u, sc['stage'])
     if 'sink' in sc['law_keys']:
         A = A * (1 - 0.3 * u)
@@ -408,8 +412,11 @@ def master_gain(y, sc):
     return 0.08 * (0.71 if sc['stage'] == '결' else 1.0) / rms      # 결만 −3dB (배경 엔진과 같은 방향)
 
 
-def master(y, sc, g=None):
+def master(y, sc, g=None, G=None):
+    """G = 표본마다의 음량 곡선(넓은 다이내믹스) — 기준 음량을 맞춘 '뒤에' 곱해, 큰 곳은 tanh 로 포화(최고점 −0.9dBFS 아래)·작은 곳은 그대로 작게."""
     y = y * (master_gain(y, sc) if g is None else g)
+    if G is not None:
+        y = y * G[:, None]
     return (np.tanh(y / 0.9) * 0.9).astype(np.float32)
 
 
@@ -418,7 +425,7 @@ def _amb_shape(amb, sc, D, off, gaps, sr):
     n = len(amb)
     t = np.arange(n) / sr - off                                     # 본 소리(렌더 구간) 기준 시각
     u = np.clip(t / max(D, 1e-9), 0, 1)
-    A = style.flat_arc(np.full(n, 0.9), u, sc['stage']) / 0.9
+    A = style.flat_arc(np.full(n, 0.9), u, sc['stage']) / 0.9 if style.get(sc)['flat_arc'] else np.ones(n)
     for g0, gd in gaps or []:
         A[(t >= g0) & (t < g0 + gd)] = 0.0
         back = (t >= g0 + gd) & (t < g0 + gd + 0.9)
@@ -521,6 +528,13 @@ def render(sc, P, mats, D, sr, seed=0, cues=None, amb_out=None, amb_len=None, am
             env[b:e] *= np.linspace(0, 1, fi)[:e - b] ** 2
         y = y * env[:, None]
         A = A * env
+    G = Gf = None
+    if sty.get('dyn'):                               # 넓은 다이내믹스 — 이야기에서 읽은 음량 곡선 (거의 안 들림 ~ 포화 직전)
+        Gf, marks = style.dyn_curve(sc, D, synth.rng_for(sc['num'], seed, 'dyn'), Q.get('bang_at'))
+        G = (10 ** (Gf(np.arange(len(y)) / sr) / 20)).astype(np.float32)
+        A = A * G
+        for t0, dur, name, why_d, reason in marks:
+            note(max(0.0, t0), dur, 'dyn', '음량', name, why=why_d, reason=reason, src='음량 곡선 (style.dyn_curve)')
     if sty['amb']:                                   # 주변 소리 층 — 공간·막의 먹먹함을 거치지 않는다
         La = amb_len or D
         off = amb_off if amb_len else 0.0
@@ -536,12 +550,13 @@ def render(sc, P, mats, D, sr, seed=0, cues=None, amb_out=None, amb_len=None, am
             core = np.pad(core, ((0, len(y) - len(core)), (0, 0)))
         g = master_gain(y + core, sc)
         if amb_out is not None and amb_len:
-            amb_out.append((amb * g).astype(np.float32))
-            out = master(y, sc, g)
+            Ga = 1.0 if Gf is None else (10 ** (Gf(np.arange(len(amb)) / sr - off) / 20))[:, None]
+            amb_out.append((amb * g * Ga).astype(np.float32))
+            out = master(y, sc, g, G)
         else:
-            out = master(y + core, sc, g)
+            out = master(y + core, sc, g, G)
     else:
-        out = master(y, sc)
+        out = master(y, sc, None, G)
     if cues is not None:
         cues.append({'arc': [round(float(x), 3) for x in A[::max(1, len(A) // 300)]], 'D': D})
     return out
@@ -560,7 +575,7 @@ def scene_view(scene, acts):
         'law_keys': [l['key'] for l in scene['laws']], 'law_src': {l['key']: l['src'] for l in scene['laws']},
         'backgrounds': scene.get('backgrounds'),
         'story_sents': [[round(u, 3), st] for st, u in split_sentences(scene.get('story') or '')],
-        'objects': [{k: o.get(k) for k in ('idx', 'name', 'positions', 'sentences', 'features', 'pitch_offset', 'identity')}
+        'objects': [{k: o.get(k) for k in ('idx', 'name', 'positions', 'sentences', 'features', 'pitch_offset', 'identity', 'target')}
                     for o in scene['objects']],
         'bg': (scene.get('background') or {}).get('features') or {},
         'seen': scene.get('seen') or [],

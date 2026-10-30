@@ -14,7 +14,7 @@ from .read import EVENT_NAME, WORD_NAME
 
 LAYER_KO = {'bed': '바닥(룸톤)', 'drone': '배경 지속음', 'space': '공간(잔향)', 'object': '오브제', 'event': '사건',
             'dream': '꿈의 변형', 'music': '음악(화성·동기)', 'silence': '정적', 'seen': '그림 인식 소리', 'word': '낱말 소리',
-            'amb': '주변 소리', 'style': '스타일 규칙'}
+            'amb': '주변 소리', 'style': '스타일 규칙', 'dyn': '음량 변화'}
 DREAM_KO = {   # 꿈의 변형 4가지 — dreamfx.py
     '이질적 침입': '장면 분위기와 맞지 않는 소리가 갑자기 지나간다 (공포 장면의 오르골·새소리·풍경 소리)',
     '음색 치환': '이야기에 없는 생물의 몸짓을 장면 재질의 음색으로 연주한다 (녹슨 철판으로 우는 새)',
@@ -67,7 +67,7 @@ def _lanes(cues):
         if key not in order:
             order.append(key)
     rank = {'music': -1, 'bed': 0, 'amb': 0.5, 'drone': 1, 'space': 2, 'object': 3, 'event': 4, 'word': 4.2, 'seen': 4.5,
-            'dream': 5, 'style': 5.5, 'silence': 6}
+            'dream': 5, 'style': 5.5, 'dyn': 5.8, 'silence': 6}
     return sorted(order, key=lambda k: (rank.get(k[0], 9), order.index(k)))
 
 

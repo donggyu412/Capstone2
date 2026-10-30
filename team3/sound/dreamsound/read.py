@@ -459,6 +459,115 @@ def find_objects(rows, folder=None):
     return out, notes
 
 
+# ── 오브제 선화 (targets.json · 오브제 엔진의 진화 목표) — 10-30 ─────────────────────────
+# 오브제 엔진은 targets.json 이 있으면 PNG 대신 Claude 가 그린 기하학적 선화(사람 · 동물 · 탈것 · 사물)를 화면에 그린다.
+# 소리도 화면에 보이는 그 형상을 따라야 하므로, 대본과 같은 판의 targets.json 이 있으면 PNG 보다 먼저 쓴다.
+#   형상의 선 → 실루엣(선을 굵게 그리고 안을 메움) → object_features (면적 · 각짐 · 대칭) → 모달 합성 음색
+#   형상 이름(달팽이 · 등대 · 사이렌 …) → 재질 · 정체 소리 (아래 표) · 드러나는 때(reveal) → 그 자리에 소리를 고정
+TARGET_MATERIAL = [   # (낱말들, 재질) — 형상 이름과 오브제 이름에서 찾는다 (앞에 있는 것이 먼저)
+    (('병', '유리', '전구'), 'glass'),
+    (('안테나', '사다리', '드릴', '공구', '스위치', '로봇', '난간', '손전등', '사이렌', '스피커', '경보', '벨',
+      '등대', '호흡기', '방독면', '헬멧', '금속', '파이프'), 'metal'),
+    (('풍선', '주머니', '부력', '작업복'), 'fabric'),
+    (('기록판', '클립보드', '종이', '서류', '문구', '쪽지', '일지'), 'paper'),
+    (('나무', '상자', '선반'), 'wood'),
+    (('달팽이', '벌레', '점액', '고양이', '강아지', '물고기', '사람', '아이'), 'organic'),
+]
+TARGET_SOURCE = [     # (낱말들, 정체 소리 사건 키) — 그 형상이 내는 소리
+    (('사이렌', '경보', '경고음', '벨', '종'), 'alarm'),
+    (('드릴', '공구', '모터', '기계'), 'machine'),
+    (('호흡기', '방독면', '공기계', '풍선', '부력', '주머니'), 'breath'),
+    (('스위치', '로봇', '손전등', '등대', '전구', '안테나'), 'electric'),
+    (('달팽이', '점액', '벌레'), 'liquid'),
+    (('병', '유리'), 'glass'),
+    (('기록판', '클립보드', '문구', '종이'), 'pen'),
+    (('사다리', '난간', '철', '쇠'), 'metal'),
+]
+
+
+def _target_lookup(table, *texts):
+    s = ' '.join(t for t in texts if t)
+    for words, val in table:
+        for w in words:
+            if w in s:
+                return val, w
+    return None, None
+
+
+def target_file(folder=None):
+    """targets.json 후보 — 주어진 폴더(…/object 또는 …/output_objects) → 기본 오브제 폴더 순서.
+    run_team3.py 는 PNG 가 다른 판이면 빈 폴더를 넘기므로, 기본 자리도 본다 (판은 story_hash 로 따로 확인)."""
+    cands = []
+    for base in [folder, paths.OBJECT_DIR]:
+        if base:
+            cands += [os.path.join(base, 'output_objects', 'targets.json'), os.path.join(base, 'targets.json')]
+    return [p for p in dict.fromkeys(cands) if os.path.exists(p)]
+
+
+def find_targets(rows, folder, story_path):
+    """→ ({장면번호: [선화 항목]}, 메모) — 대본과 같은 판(story_hash 또는 장면별 오브제 이름)일 때만."""
+    import hashlib
+    try:
+        h = hashlib.sha1(open(story_path, 'rb').read()).hexdigest()[:12]
+    except OSError:
+        h = None
+    names = {r['_num']: set(o for o in (r.get('objects') or []) if isinstance(o, str)) for r in rows}
+    for p in target_file(folder):
+        try:
+            tj = json.load(open(p, encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        by = {int(e['scene']): [o for o in e.get('objects') or [] if o.get('strokes')] for e in tj.get('scenes') or []}
+        same = tj.get('story_hash') == h or (by and all(
+            o['name'] in names.get(n, set()) for n, objs in by.items() for o in objs))
+        if not same:
+            continue
+        n = sum(len(v) for v in by.values())
+        if n:
+            return by, '오브제: %s (오브제 엔진이 그리는 진화 목표 선화 %d개 — 형상 이름 · 선 · 드러나는 때를 읽음)' % (paths.rel(p), n)
+    return {}, None
+
+
+def target_features(entry):
+    """선화의 선들 → 실루엣 PNG(캐시) → object_features. 선 그림에는 색이 없어 밝기는 중간 · 채도는 낮게 둔다."""
+    import hashlib
+    import tempfile
+    from PIL import ImageDraw
+    from scipy import ndimage
+    strokes = [st for st in entry.get('strokes') or [] if st.get('role') in ('main', 'detail')]
+    key = hashlib.sha1(json.dumps(strokes, sort_keys=True).encode()).hexdigest()[:16]
+    d = os.path.join(tempfile.gettempdir(), 'dreamsound_targets')
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, key + '.png')
+    if not os.path.exists(p):
+        S = 256
+        im = Image.new('L', (S, S), 0)
+        dr = ImageDraw.Draw(im)
+        for st in strokes:
+            pts = [(x * S / 1000.0, y * S / 1000.0) for x, y in st['points']]
+            if len(pts) >= 2:
+                dr.line(pts, fill=255, width=6 if st['role'] == 'main' else 3)
+        m = ndimage.binary_fill_holes(np.asarray(im) > 0)
+        rgba = np.zeros((S, S, 4), np.uint8)
+        rgba[..., :3] = 140                                        # 중간 회색 (밝기 0.55)
+        rgba[..., 3] = (m * 255).astype(np.uint8)
+        Image.fromarray(rgba, 'RGBA').save(p)
+    f = object_features(p)
+    if not f.get('empty'):
+        f['saturation'] = 0.15
+        mat, word = _target_lookup(TARGET_MATERIAL, entry.get('subject'), entry.get('name'))
+        if mat:
+            f['material'], f['material_p'], f['material_from'] = mat, 0.5, '형상 이름 "%s"' % word
+    return p, f
+
+
+def target_identity(entry):
+    k, word = _target_lookup(TARGET_SOURCE, entry.get('subject'), entry.get('name'))
+    if not k:
+        return None
+    return {'event': k, 'word': word, 'src': '오브제 선화의 형상 "%s"' % (entry.get('subject') or entry.get('name'))}
+
+
 def object_positions(name, story):
     """오브제가 글의 어디서 나오나 — 머리 명사('얼음을 쪼는 검은 새' → 새)가 들어간 문장들의 위치."""
     words = re.sub(r'\(.*?\)', '', name).split()
@@ -514,7 +623,7 @@ def read(scenes_path=None, bg_folder=None, obj_folder=None, vision_mode='auto', 
         s['objects'] = [o for o in s['objects'] if not o['features'].get('empty')]
         for i, o in enumerate(s['objects']):
             o['idx'] = i
-            o['name_en'] = en.get(o['name'])
+            o['name_en'] = (o.get('target') or {}).get('subject_en') or en.get(o['name'])
             o['pitch_offset'] = round(float(synth.rng_for(o['name']).uniform(-1, 1)), 3)   # 같은 이름 = 같은 음높이 결
     vis = None
     if vision_mode != 'off':
@@ -545,7 +654,11 @@ def analyze(scenes_path=None, bg_folder=None, obj_folder=None):
     path = pick_storyboard(scenes_path)
     rows = load_scenes(path)
     bg_folder = bg_folder or os.path.dirname(path)
-    objs, notes = find_objects(rows, obj_folder)
+    tgs, tnote = find_targets(rows, obj_folder, path)
+    if tgs:                                         # 화면에 그려지는 선화가 있으면 그것을 따른다 (PNG 는 쓰지 않음)
+        objs, notes = {}, [tnote]
+    else:
+        objs, notes = find_objects(rows, obj_folder)
     notes.insert(0, '스토리보드: %s (%d장면)' % (paths.rel(path), len(rows)))
     scenes = []
     n = len(rows)
@@ -562,6 +675,15 @@ def analyze(scenes_path=None, bg_folder=None, obj_folder=None):
             hit = object_positions(ko, story)
             obj_list.append({'name': ko, 'path': p, 'features': object_features(p),
                              'positions': [u for u, _ in hit], 'sentences': hit})
+        for e in tgs.get(num, []):                  # 오브제 선화 — 형상이 드러나는 자리(reveal)도 닻으로
+            p, f = target_features(e)
+            hit = object_positions(e['name'], story)
+            rv = float(e.get('reveal', 0.5))
+            if not any(abs(u - rv) < 0.02 for u, _ in hit):
+                hit = sorted(hit + [[round(rv, 3), e.get('sentence') or None]], key=lambda x: x[0])
+            obj_list.append({'name': e['name'], 'path': p, 'features': f, 'positions': [u for u, _ in hit], 'sentences': hit,
+                             'target': {k: e.get(k) for k in ('subject', 'subject_en', 'has_face', 'expression', 'reveal')},
+                             'identity': target_identity(e)})
         scenes.append({
             'num': num, 'stage': stage,
             'title': (r.get('backgrounds') or [None])[0] or r.get('title') or '장면 %d' % num,

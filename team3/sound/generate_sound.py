@@ -75,6 +75,15 @@ OLD_RUN_RE = re.compile(r'^\d{6}_\d{6}$')          # 예전 방식의 output/<�
 BUILD = '_building'
 
 
+def _render_job(j):
+    """장면 하나 렌더 (프로세스 병렬용) → (소리, 해설 큐, 주변 소리 층 또는 None)."""
+    mats = pieces.load_all(j['sc'], j['run_dir'], FINAL_SR)
+    cues, amb = [], ([] if j['amb_len'] else None)
+    y = render.render(j['sc'], j['P'], mats, j['L'], FINAL_SR, j['seed'], cues=cues,
+                      amb_out=amb, amb_len=j['amb_len'], amb_off=j['amb_off'])
+    return y, cues, (amb[0] if amb else None)
+
+
 def latest_run():
     d = paths.OUTPUT_DIR
     return d if os.path.exists(os.path.join(d, 'dream_sound.wav')) else None
@@ -144,6 +153,8 @@ def main():
     workers = args.workers or max(1, min(len(scenes), os.cpu_count() or 1))
     rounds = -(-len(scenes) // workers)
     reserve = 30 + (15 if sty['amb'] else 0)       # 4단계 렌더·해설 몫 (주변 소리 층을 짜는 스타일은 조금 더)
+    if workers == 1:                               # 렌더를 한 줄로 돌리면 오브제(선화 16개)가 많을수록 렌더가 길어진다
+        reserve += 2 * max(0, sum(len(s['objects']) for s in scenes) - 8)
     limit = max(15.0, (budget - (time.time() - T0) - reserve - 3 * rounds) / rounds) if budget else None
     log('[2] 재료 · [3] 진화 — 장면 %d개를 %d개 프로세스로%s' % (
         len(scenes), workers, (' · 장면당 최대 %.0f초' % limit) if limit else ''))
@@ -186,13 +197,21 @@ def main():
     starts = np.cumsum([0] + durs[:-1])
     axf = sty.get('amb_xfade') if sty['amb'] else None
     amb_plan = timing.plan(durs, axf) if axf else [None] * len(durs)
-    for s, r, p, (st, L, pre, post), s0, ap in zip(scenes, results, picks, timing.plan(durs), starts, amb_plan):
+    rjobs = [{'sc': r['view'], 'P': p['params'], 'run_dir': run_dir, 'L': L, 'seed': args.seed,
+              'amb_len': ap[1] if ap else None, 'amb_off': (ap[2] - pre) if ap else 0.0}
+             for r, p, (st, L, pre, post), ap in zip(results, picks, timing.plan(durs), amb_plan)]
+    if workers > 1:                                # 10-30: 장면 렌더도 프로세스 병렬 (장면마다 시드가 따로라 결과는 같다)
+        from concurrent.futures import ProcessPoolExecutor
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            rendered = list(ex.map(_render_job, rjobs))
+    else:
+        rendered = [_render_job(j) for j in rjobs]
+    for s, r, p, (st, L, pre, post), s0, ap, (y_r, cues, amb_r) in zip(scenes, results, picks, timing.plan(durs), starts,
+                                                                       amb_plan, rendered):
         sc = r['view']
-        mats = pieces.load_all(sc, run_dir, FINAL_SR)
-        cues = []
-        parts.append(render.render(sc, p['params'], mats, L, FINAL_SR, args.seed, cues=cues,
-                                   amb_out=amb_parts if ap else None, amb_len=ap[1] if ap else None,
-                                   amb_off=(ap[2] - pre) if ap else 0.0))
+        parts.append(y_r)
+        if amb_r is not None:
+            amb_parts.append(amb_r)
         arcinfo = cues.pop() if cues and 'arc' in cues[-1] else {}
         loc = []
         for cu in cues:
@@ -215,7 +234,8 @@ def main():
                            'evals': r['evals'], 'quality': p['quality'], 'listen': p['listen'],
                            'vision': s.get('vision'),
                            'object_materials': {o['name']: o.get('material_rank') for o in s['objects']}})
-    full = timing.assemble(parts, durs, FINAL_SR, bus=(amb_parts, axf) if amb_parts else None)
+    full = timing.assemble(parts, durs, FINAL_SR, bus=(amb_parts, axf) if amb_parts else None,
+                           level_match=style.get(args.style).get('level_match', True))
     files = []
     for s, s0, D in zip(scenes, starts, durs):
         a, b = int(round(s0 * FINAL_SR)), int(round((s0 + D) * FINAL_SR))

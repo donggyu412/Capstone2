@@ -118,6 +118,114 @@ STYLES['apichatpong_synth'] = dict(STYLES['apichatpong'], name='아피찻퐁 위
                                    [r for r in STYLES['apichatpong']['rules'] if r[0] != '주변 소리 층'])
 
 
+# 10-30 교수님 피드백 — "귀가 찢어질 정도로 클 수도, 거의 안 들릴 수도 있게 · 변화의 폭을 훨씬 크게"
+#   아피찻퐁 스타일(주변 소리 중심 · 침묵의 틈 · 저주파 충격음 · 느리고 불규칙하게)은 그대로 두고,
+#   '평평한 음량'(음량 고름 점수 · 평평한 곡선 · 장면 사이 음량 맞추기)만 걷어내고 이야기에서 읽은 큰 음량 곡선을 얹는다 (dyn_curve).
+STYLES['apichatpong_wide'] = dict(
+    STYLES['apichatpong'], name='아피찻퐁 위라세타꾼 스타일 (넓은 다이내믹스)',
+    summary=STYLES['apichatpong']['summary'].replace('평평하게 깔고', '깔고') + ' · 거의 안 들리는 순간부터 귀를 때리는 순간까지 음량 폭을 크게 (10-30 피드백)',
+    flat_arc=False, dyn=True, level_match=False,
+    listen=dict(STYLES['apichatpong']['listen'], even_weight=0.0),     # '음량 고름' 점수를 뺀다 — 큰 흐름은 렌더의 음량 곡선이 만든다
+    natural=dict(STYLES['apichatpong']['natural'], gain_db=10.0),      # 소리마다 크기 편차 4dB → 10dB (속삭임 ~ 바로 앞)
+    rules=[r for r in STYLES['apichatpong']['rules'] if r[0] != '평평한 곡선'] + [
+        ('넓은 다이내믹스', '이야기에서 읽은 음량 곡선 — 기는 거의 들리지 않게 시작해 차오르고, 결은 끝에서 거의 사라진다 · '
+                         '"울린다 · 날카롭게 · 크게 · 솟구친다" 문장은 10여 초에 걸쳐 귀를 때릴 만큼 차올랐다가 순간 뚝 끊기고, '
+                         '"숨을 참 · 멎 · 속삭" 문장은 거의 들리지 않게 가라앉는다 · 오브제 반전(전 장면 45초)과 저주파 충격음이 가장 크다 · '
+                         '장면 사이 음량을 맞추지 않는다 (최고점은 −1dBFS 아래로 제한)'),
+        ('소리마다 크기 편차', '같은 소리도 속삭임처럼 작거나 바로 앞에서 난 듯 크게 (편차 10dB)'),
+    ],
+    guide_render='고른 구성으로 75초를 놓고, 주변 소리 층 · 먼 라디오 · 침묵의 틈을 얹은 뒤, 이야기에서 읽은 큰 음량 곡선(거의 안 들림 ~ 아주 큼)을 입힙니다.')
+
+# 10-30: 기본 아피찻퐁 = 넓은 다이내믹스 (`--style apichatpong` 그대로 쓰면 된다)
+#   예전의 평평한 판은 apichatpong_flat 으로 비교용 · apichatpong_wide 는 같은 것의 다른 이름(예전 명령 호환)
+STYLES['apichatpong_flat'] = dict(STYLES['apichatpong'], name='아피찻퐁 위라세타꾼 스타일 (평평한 음량 · 10-26 판)')
+STYLES['apichatpong'] = STYLES['apichatpong_wide']
+
+LOUD_WORDS = ('울린다', '울리', '날카롭', '날카로워', '크게', '솟구', '터져', '터지', '비명', '쾅', '파열', '귀를 찌', '다급')
+HUSH_WORDS = ('숨을 참', '숨이 턱', '멎', '고요', '정적', '속삭', '조용히', '가만히', '거의 들리지', '소리 없이', '눈을 감', '잠잠')
+DYN_FLOOR, DYN_CEIL = -34.0, 14.0          # 기준 음량에서 −34dB(거의 안 들림) ~ +14dB(포화 직전) — 마스터가 −1dBFS 아래로 묶는다
+
+
+def dyn_curve(sc, D, rng, bang_at=None, pad=10.0):
+    """이야기 → 음량 곡선 (dB, 장면 기준 시각의 함수) + 그 근거 목록.
+    → (f, marks) — f(t초 배열) = dB 배열 · marks = [(시작초, 길이, 이름, 근거 문장 (문장, 위치) 또는 None, 이유)]"""
+    step = 0.05
+    tg = np.arange(-pad, D + pad + step, step)
+    u = np.clip(tg / D, 0, 1)
+    stg = sc.get('stage', '승')
+    inten = float((sc.get('emotion') or {}).get('intensity', 0.6) or 0.6)
+    base = {'기': -18 + 12 * u ** 1.2,                       # 거의 들리지 않게 시작해 차오름
+            '승': -9 + 3 * np.sin(np.pi * u),
+            '전': -8 + 4 * u,
+            '결': -6 - 28 * u ** 1.4}.get(stg, -8 + 0 * u)      # 끝에서 거의 사라짐
+    db = base + 6 * (inten - 0.6) + 3.0 * wander(len(tg), 1 / step, rng, 0.03, 3)
+    marks = [(0.0, D, '바탕 곡선 (%s)' % {'기': '거의 안 들리게 시작해 차오름', '승': '머묾', '전': '정점을 향해', '결': '끝에서 거의 사라짐'}.get(stg, ''),
+              None, '막 %s · 감정 세기 %.2f' % (stg, inten))]
+    taken = []
+
+    def free(t0, t1, gap=6.0):
+        return all(t1 < a - gap or t0 > b + gap for a, b in taken)
+
+    def surge(tp, rise, up, hold, cut, cut_len, back):
+        """tp 에서 정점 — rise 초 동안 up dB 까지 차올랐다(제곱 곡선), hold 초 머문 뒤 0.15초 만에 cut dB 로 뚝 떨어지고 cut_len 초 뒤 back 초에 걸쳐 돌아옴."""
+        add = np.zeros_like(tg)
+        a = (tg >= tp - rise) & (tg < tp)
+        add[a] = up * ((tg[a] - (tp - rise)) / rise) ** 2
+        add[(tg >= tp) & (tg < tp + hold)] = up
+        e = tp + hold
+        c = (tg >= e) & (tg < e + 0.15)
+        add[c] = up + (cut - up) * (tg[c] - e) / 0.15
+        add[(tg >= e + 0.15) & (tg < e + 0.15 + cut_len)] = cut
+        r0 = e + 0.15 + cut_len
+        r = (tg >= r0) & (tg < r0 + back)
+        add[r] = cut * (1 - (tg[r] - r0) / back) ** 2
+        taken.append((tp - rise, r0 + back))
+        return add
+
+    # ① 오브제 반전 (오브제 엔진 기본: 전 장면 시작 후 60% = 45초) — 꿈 전체에서 가장 크게
+    if stg == '전':
+        tp = 0.6 * D
+        db = db + surge(tp, float(rng.uniform(12, 15)), 24.0, 3.0, -26.0, 2.5, 4.0)
+        marks.append((tp - 12, 16, '가장 크게 차올랐다가 뚝 끊김', None, '오브제 영상의 반전 시각(전 장면 45초)과 같은 순간'))
+    # ② 저주파 충격음 (꿈 전체에 한 번) — 그 순간을 깎지 않게 크게
+    if bang_at is not None and free(bang_at - 1, bang_at + 4, 1.0):
+        add = np.zeros_like(tg)
+        k = (tg >= bang_at - 0.2) & (tg < bang_at + 5)
+        add[k] = 14.0 * np.exp(-np.clip(tg[k] - bang_at - 1.5, 0, None) / 1.5)
+        db = np.maximum(db, db + add)
+        taken.append((bang_at - 0.2, bang_at + 5))
+        marks.append((bang_at, 5.0, '저주파 충격음을 크게', None, '꿈 전체에서 한 번'))
+    sents = sc.get('story_sents') or []
+    # ③ 큰 소리 문장 — 10여 초에 걸쳐 귀를 때릴 만큼 차올랐다가 순간 뚝 (최대 3번 · 서로 겹치지 않게)
+    n = 0
+    for uu, st in sents:
+        if n >= 3 or not any(w in st for w in LOUD_WORDS):
+            continue
+        tp = uu * D + float(rng.uniform(0.3, 1.5))
+        rise = float(rng.uniform(6, 13))
+        if not (tp - rise > 0.5 and tp < D - 3) or not free(tp - rise, tp + 9):   # 차오를 자리가 있을 때만 (장면 첫머리는 조용히)
+            continue
+        db = db + surge(tp, rise, float(rng.uniform(13, 16)), float(rng.uniform(0.8, 2.2)), float(rng.uniform(-22, -16)),
+                        float(rng.uniform(2.0, 4.5)), float(rng.uniform(3, 5)))
+        marks.append((tp - rise, rise + 8, '차올랐다가 뚝 끊김', (st, uu), '큰 소리 문장 — "%s"' % next(w for w in LOUD_WORDS if w in st)))
+        n += 1
+    # ④ 고요한 문장 — 거의 들리지 않게 가라앉음 (최대 3번)
+    n = 0
+    for uu, st in sents:
+        if n >= 3 or not any(w in st for w in HUSH_WORDS):
+            continue
+        tc = uu * D + 1.0
+        w = float(rng.uniform(3.0, 6.0))
+        if not (1 < tc < D - 1) or not free(tc - w, tc + w, 2.0):
+            continue
+        db = db - 22.0 * np.exp(-0.5 * ((tg - tc) / (w / 2)) ** 2)
+        taken.append((tc - w, tc + w))
+        marks.append((tc - w, 2 * w, '거의 들리지 않게 가라앉음', (st, uu), '고요한 문장 — "%s"' % next(x for x in HUSH_WORDS if x in st)))
+        n += 1
+    db = np.clip(db, DYN_FLOOR, DYN_CEIL)
+    return (lambda t: np.interp(t, tg, db)), marks
+
+
 def clamp(P, sty):
     """유전자가 쓰는 값을 스타일의 범위 안으로 (진화는 그대로 돌고, 실제로 쓰는 값만 좁힌다)."""
     P = dict(P)

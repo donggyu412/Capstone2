@@ -899,6 +899,7 @@ def _apichatpong(sc, P, mats, D, sr, rng, dry, add, note, sudden, d):
         u0, s = next(((u, s) for u, s in opts if free(float(np.clip(u * D, lo, hi - L)), L)), opts[0])
         t0 = float(np.clip(u0 * D, lo, hi - L))
         busy.append((t0, L))
+        P['bang_at'] = t0                                        # 넓은 다이내믹스의 음량 곡선이 이 순간을 크게 둔다
         add(dry, synth_pan(_norm(y, 0.9), 0.0), int(t0 * sr))
         taken.append(t0)
         note(t0, len(y) / sr, '깊은 쿵', '머릿속에서 울리는 듯한 깊은 쿵 (꿈 전체에 한 번)',

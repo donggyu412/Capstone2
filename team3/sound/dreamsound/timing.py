@@ -87,12 +87,13 @@ def match_levels(parts, durs, sr, xfade=XFADE):
     return parts
 
 
-def assemble(parts, durs, sr, xfade=XFADE, bus=None):
+def assemble(parts, durs, sr, xfade=XFADE, bus=None, level_match=True):
     """겹쳐 섞기 — 렌더한 장면들(parts, 각자 앞뒤 겹침 포함)을 한 줄로. 길이 = sum(durs)*sr 정확히.
     bus = (주변 소리 장면들, 겹침 초) — 스타일의 주변 소리 층을 본 소리보다 길게 겹쳐(예: 8초) 따로 이은 뒤 더한다."""
     total = int(round(sum(durs) * sr))
     out = np.zeros((total, 2), dtype=np.float32)
-    parts = match_levels(parts, durs, sr, xfade)
+    if level_match:                                                # 넓은 다이내믹스 스타일은 장면 사이 음량 차이를 그대로 둔다
+        parts = match_levels(parts, durs, sr, xfade)
     layers = [(plan(durs, xfade), parts)]
     if bus:
         layers.append((plan(durs, bus[1]), bus[0]))
