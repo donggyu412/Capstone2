@@ -3024,15 +3024,14 @@ def attach_bg_audio(out, bg):
 
 
 def _placeholder_png():
-    """ComfyUI PNG 가 없을 때 쓰는 자리표시 그림 (진화 방식에서는 화면에 쓰이지 않는다)"""
+    """ComfyUI PNG 가 없을 때 쓰는 자리표시 그림 (진화 방식에서는 화면에 쓰이지 않는다)
+    작업(프로세스)마다 자기 파일을 쓴다 — Windows 는 다른 작업이 열어 둔 파일을 바꿔 넣지 못해 병렬 렌더가 멈췄다"""
     import tempfile
-    p = Path(tempfile.gettempdir()) / 'dream_obj_placeholder.png'
-    if not p.exists():   # 병렬 작업이 동시에 만들어도 깨지지 않게 — 따로 쓴 뒤 한 번에 바꿔 넣는다
+    p = Path(tempfile.gettempdir()) / f'dream_obj_placeholder_{os.getpid()}.png'
+    if not p.exists():
         img = np.zeros((512, 512, 4), np.uint8)
         cv2.circle(img, (256, 256), 150, (230, 230, 230, 255), -1, cv2.LINE_AA)
-        tmp = p.with_name(f'dream_obj_placeholder_{os.getpid()}.png')
-        cv2.imencode('.png', img)[1].tofile(str(tmp))
-        os.replace(tmp, p)
+        cv2.imencode('.png', img)[1].tofile(str(p))
     return str(p)
 
 
