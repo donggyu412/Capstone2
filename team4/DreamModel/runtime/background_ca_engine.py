@@ -769,6 +769,8 @@ class DreamConstructiveField(ConstructiveField):
         self.elapsed=0.
         self.last_onset=0.
         self.record['emotion_controls']=self._emotion_controls()
+        self.activity_credit=0.
+        self.activity_updates=0
 
     def _update_detail(self,p):
         if self.detail is None:
@@ -823,14 +825,17 @@ class DreamConstructiveField(ConstructiveField):
                     self._birth_step(elapsed,p)
                 self.work_credit%=1
                 self._colour_generation()
-                if self.method=='CA' and self.generation%3==0:
+                self.activity_credit+=DT*(.4+6.*getattr(self,'motion',{}).get('speed',1.))
+                if self.method=='CA' and self.activity_credit>=1.:
+                    self.activity_credit%=1.
+                    self.activity_updates+=1
                     firing=(self.activity>.32).astype(np.float32)
                     neighbour=cv2.filter2D(firing,-1,np.ones((3,3),np.float32),borderType=cv2.BORDER_CONSTANT)-firing
                     excited=(neighbour>=1)&(self.refractory<=0)&self.alive
                     self.activity=np.where(excited,1.,self.activity*.74).astype(np.float32)
                     self.refractory=np.maximum(self.refractory-1,0)
                     self.refractory[excited]=int(round(24-10*emo['sensitivity']))
-                    if self.generation%90==0:
+                    if self.activity_updates%30==0:
                         candidates=np.flatnonzero(self.alive & (self.structural_edge>.4))
                         if len(candidates):
                             point=int(self.rng.choice(candidates));self.activity.ravel()[point]=1.
@@ -863,7 +868,8 @@ class DreamConstructiveField(ConstructiveField):
     def _story_flow(self,p):
         emo=self._emotion_controls()
         speed=self.profile.get('params',{}).get('speed',1.)
-        t=self.elapsed*(.85+.25*speed)
+        control=getattr(self,'motion',dict(speed=1.,amplitude=1.,burst=0.))
+        t=getattr(self,'motion_clock',self.elapsed)*(.85+.25*speed)
         envelope=ss(.02,.16,p)*(1-ss(.67,.825,p))
         u,v=self.u,self.v
         mood=self.profile['mood_style']
@@ -872,6 +878,9 @@ class DreamConstructiveField(ConstructiveField):
             rush=.085*math.sin(t*.86)+.027*math.sin(t*3.2)
             dx=(u-.57)*rush+.026*math.sin(t*1.7)+.025*torch.sin(v*11-t*1.6)
             dy=(v-.52)*rush+.014*math.sin(t*3.4)+.016*torch.sin(u*13+t)
+            wave=torch.exp(-((v-(.15+.70*control['burst']))/.22).square())
+            dx+=.065*wave*torch.sin(u*8+t*.8)*control['burst']
+            dy+=.045*wave*control['burst']
         elif mood=='bright_happy':
             dx=(u-.5)*(.055*math.sin(t*.45))+.018*torch.sin(v*9-t*.65)
             dy=-.025*math.sin(t*.35)+.016*torch.sin(u*9+t*.5)
@@ -881,6 +890,8 @@ class DreamConstructiveField(ConstructiveField):
         else:
             dx=.026*torch.sin(v*11+t*.61)+.016*torch.sin((u+v)*17-t*.87)
             dy=.025*torch.sin(u*9-t*.48)+.013*math.sin(t*.71)
+            dx+=(u-.53)*.10*control['burst']
+            dy-=(v-.45)*.08*control['burst']
         if self.method=='GA':
             dx+=.010*torch.sin(v*29+u*11+t*1.3)
             dy+=.010*torch.sin(u*25-v*8-t*.9)
@@ -891,14 +902,14 @@ class DreamConstructiveField(ConstructiveField):
             dy=(torch.round(dy*self.h/18)*18/self.h)+.024*activity*torch.cos(u*18+t*1.6)
         tension=self._story('tension',.5)
         motion=(.75+.45*emo['intensity'])*(.75+.40*tension)*(1.12-.24*emo['aptitude'])
-        motion*=1-.91*self._story('pause')
+        motion*=control['amplitude']*(1-.80*self._story('pause'))
         dx*=motion;dy*=motion
-        travel=self._story('travel')*(.035+.06*abs(self.profile.get('loco_vel',.2)))
-        opening=self._story('opening')*(.035+.10*self.profile.get('aperture_amp',0.))
-        retreat=self._story('retreat')*.075
+        travel=self._story('travel')*(.035+.06*abs(self.profile.get('loco_vel',.2)))*control['amplitude']
+        opening=self._story('opening')*(.035+.10*self.profile.get('aperture_amp',0.))*control['amplitude']
+        retreat=self._story('retreat')*.075*control['amplitude']
         dx+=(u-.5)*(-travel-opening+retreat)
         dy+=(v-.48)*(-travel-opening+retreat)
-        shake=.006*emo['sensitivity']*tension*(1-self._story('pause'))
+        shake=.006*emo['sensitivity']*tension*(1-self._story('pause'))*control['amplitude']
         dx+=shake*torch.sin(v*18+t*(1.3+emo['sensitivity']))
         dy+=shake*.65*torch.sin(u*17-t*1.8)
         # Restore v10 irregular motion; retain v11 camera continuity into completion.
@@ -906,7 +917,7 @@ class DreamConstructiveField(ConstructiveField):
         return dx*envelope+cam_x,dy*envelope+cam_y,envelope
 
     def _camera_flow(self):
-        t=self.elapsed
+        t=getattr(self,'motion_clock',self.elapsed)
         fx,fy=self._story('focal_x',.5),self._story('focal_y',.5)
         # Small continuous camera drift, never a character's running gait.
         zoom=1.026+.00025*t+.014*self._story('tension',.5)-.012*self._story('opening')-.009*self._story('retreat')
@@ -915,10 +926,32 @@ class DreamConstructiveField(ConstructiveField):
         return (self.u-fx)*(1/zoom-1)+pan_x,(self.v-fy)*(1/zoom-1)+pan_y
 
     def _living_light(self,rgb):
-        t=self.elapsed;emo=self._emotion_controls()
+        t=getattr(self,'motion_clock',self.elapsed);emo=self._emotion_controls()
         sweep=torch.exp(-((self.u-(.5+.42*math.sin(t*.19)))/.16).square())
         amount=.008+.012*emo['intensity']+.008*self._story('light')
-        return rgb*(1+amount*(sweep[None,None]-.35)+.012*self.last_onset)
+        result=rgb*(1+amount*(sweep[None,None]-.35)+.012*self.last_onset)
+        if hasattr(self,'source_light'):
+            result=result*self.source_light
+        return result
+
+    def _variable_cells(self):
+        """Merge/split visible cells while the 12px local CA lattice persists."""
+        requested=float(getattr(self,'motion',{}).get('mesh_px',30.))
+        levels=[12,24,40,60,120]
+        high=next((i for i,size in enumerate(levels) if size>=requested),len(levels)-1)
+        low=max(0,high-1)
+        a,b=levels[low],levels[high]
+        weight=0. if a==b else float(np.clip((requested-a)/(b-a),0,1))
+        def material(size):
+            rgb=F.interpolate(F.avg_pool2d(self.detail,size,size),size=(self.h,self.w),mode='nearest')
+            x=((self.px%size)+.5)/size-.5
+            y=((self.py%size)+.5)/size-.5
+            gap=(torch.maximum(x.abs(),y.abs())<(.475 if size<=24 else .455)).float()
+            return rgb,gap
+        small,small_gap=material(a)
+        if a==b:return small,small_gap
+        large,large_gap=material(b)
+        return small*(1-weight)+large*weight,small_gap*(1-weight)+large_gap*weight
 
     def _render_complete(self):
         dx,dy=self._camera_flow()
@@ -945,13 +978,9 @@ class DreamConstructiveField(ConstructiveField):
             colour=self.detail
         else:
             activity=self.expand(self.activity)
-            cell=30
-            gap_x=((self.px%cell)+.5)/cell-.5
-            gap_y=((self.py%cell)+.5)/cell-.5
-            cell_gap=(torch.maximum(gap_x.abs(),gap_y.abs())<.46).float()
-            material=grain*(.68+.32*activity)*(cell_gap*(1-ss(.45,.80,p))+ss(.45,.80,p))
-            cells=F.interpolate(F.avg_pool2d(self.detail,cell,cell),size=(self.h,self.w),mode='nearest')
-            fine=ss(.42,.80,p)
+            cells,cell_gap=self._variable_cells()
+            material=grain*(.68+.32*activity)*(cell_gap*(1-ss(.69,.825,p))+ss(.69,.825,p))
+            fine=.24+.76*ss(.61,.825,p)
             colour=cells*(1-fine)+self.detail*fine
         settle=ss(.65,.825,p)
         material=material*(1-settle)+settle
@@ -961,7 +990,7 @@ class DreamConstructiveField(ConstructiveField):
         grid=self.base_grid+torch.stack([dx*2,dy*2],-1)[None]
         moving=F.grid_sample(rgba,grid,mode='bilinear',padding_mode='zeros',align_corners=False)
         rgb,a=moving[:,:3],moving[:,3:]
-        mood=self.profile['mood_style'];t=self.elapsed
+        mood=self.profile['mood_style'];t=getattr(self,'motion_clock',self.elapsed)
         if mood=='dark_horror':
             contrast=1+.27*envelope
             gain=1-envelope*.17+envelope*.16*math.sin(t*1.9)**8
@@ -1035,7 +1064,7 @@ class DreamConstructiveField(ConstructiveField):
         mood=self.profile['mood_style']
         wind=dict(vivid_mystery=(.035,-.025),dark_horror=(.065,.012),
                   bright_happy=(.025,-.055),dark_calm=(-.018,.035))[mood]
-        strength=.7+.4*self._emotion_controls()['intensity']
+        strength=(.7+.4*self._emotion_controls()['intensity'])*(.45+.55*getattr(self,'motion',{}).get('amplitude',1.))
         dx=cam_x-age.pow(1.3)*(wind[0]+self.patch_x*.080)*strength*1.65
         dy=cam_y-age.pow(1.3)*(wind[1]+self.patch_y*.050)*strength*1.65
         dissolve=((local_age-.08)/.90).clamp(0,1)

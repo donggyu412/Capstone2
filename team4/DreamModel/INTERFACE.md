@@ -1,4 +1,50 @@
-# DreamModel v12 — 움직임이 이어지는 N1 배경과 사운드
+# DreamModel v13 — 10/29 배경 피드백 반영
+
+## 이번 작업의 범위
+
+DreamModel은 1920×1080, 30fps, 300초의 배경을 생성한다. 배경 단독 실행은 무음이며, `team4/main.py`는 이 v13 배경과 최신 GridModel 오브제, 전달된 음악을 합성한다. 음악 자체를 새로 제작하지 않는다.
+
+입력은 `3팀_to_4팀_input_1031.zip` 안의 `input/background/dream_background.mp4`, `scenes.json`, `dream_scenes.json` 세 파일이다. ZIP 안의 기존 README는 과거 3개 시나리오를 설명하지만 실제 영상은 현재 대표 시나리오 하나이며 무음이다.
+
+## 10/29 녹음에서 확인한 요구와 구현
+
+| 녹음 위치 | 배경 요구 요약 | v13 구현 |
+|---|---|---|
+| 42:27~43:16 | 기승전결이 같은 리듬으로 움직이지 않게, 감정마다 속도와 변화 폭을 달리함 | 놀람=긴 숨고르기와 불규칙 돌출, 공포=급류·반동, 기쁨=개방·상승, 슬픔=정체·느린 후퇴. 움직임 시계와 CA 활성 주기를 함께 바꿈 |
+| 43:16~43:39 | 셀 그물망을 크게도, 미세하게도 다양하게 함 | CA의 표시 셀을 약 18~120px 범위에서 병합·분할하며 전환. 기본 국소 이웃 연산 격자는 12px 유지 |
+| 44:12~44:35 | 배경이 바뀌면 움직임도 확실히 달라져야 함 | 감정별 움직임 모드는 장면 경계에서 즉시 변경. 이전 생성물의 잔상 인계는 1.25초 이내 |
+
+시간은 자동 전사로 확인한 대략적인 위치이며, 불명확한 문장은 요구사항에 추가하지 않았다. 35~39분대 오브제의 크기·위치 변경 요구는 이 배경 작업에 적용하지 않았다.
+
+## 3팀 영상의 연결 방식
+
+- 네 장면의 중앙 프레임을 생성 목표로 사용하고, 전체 300초 영상은 10Hz로 추가 분석한다.
+- 영상의 영역별 명암 변화와 움직임 에너지가 생성된 RGB 상태의 조명과 속도에 들어간다. 3팀 영상의 파티클 궤적을 그대로 재생하는 것은 아니다.
+- 입력 영상은 생성 목표와 조명·속도 제어로 활용한다. 아직 생성되지 않은 셀에는 목표 이미지나 원본 영상이 보이지 않는다.
+- v12의 GA→CA, 한 점에서의 국소 증식, 목표 수렴 검사, 붕괴, 색 잔상 인계를 유지한다.
+- 네 장면의 순서와 JSON의 감정(놀람→공포→기쁨→슬픔)을 보존한다.
+
+## 배경 전용 실행
+
+프로젝트 루트에서, ZIP의 배경 폴더를 원하는 위치에 풀고 실행한다.
+
+```powershell
+python -m team4.DreamModel.tools.render_background_ca --background-video "입력폴더/dream_background.mp4" --scenario-dir "입력폴더" --silent --out-dir "배경출력폴더" --tag background_v13_300s
+```
+
+`--single-scene 2`를 추가하면 공포 장면만 75초로 확인할 수 있다. `--silent`는 음악 폴더를 읽지 않는다. `--background-video` 없이 기존 정지 이미지 입력도 사용할 수 있다. v13의 감정별 움직임과 가변 표시 셀은 공통 적용된다.
+
+## GridModel 및 음악과 통합
+
+프로젝트 루트에서 `python team4/main.py`를 실행하면 위와 같은 전체 영상 입력 경로로 v13 배경을 만들고, GridModel의 감정·음악 반응 오브제를 렌더링해 `team4/output/team4_output.mp4`로 합성한다. `run_all.py`의 마지막 단계도 이 파일을 실행하므로 같은 경로를 사용한다.
+
+통합 화면의 배경은 DreamModel 출력 하나다. 3팀 원본 배경을 추가로 혼합하지 않으며, 배경 레이어에 축소·흐림·색 보정을 적용하지 않는다. 오브제의 검은 바탕은 점진적인 알파 마스크로 제거하고, 반투명 경계색을 보정해 밝은 배경에서 생기는 검은 테두리를 줄인다. 원래 오브제의 셀 질감, 크기·회전, 75초 장면 배치와 음악 타이밍을 유지한다. 음악은 전체 레벨에 2dB 여유를 두고 처음 0.08초, 마지막 0.6초만 페이드한다. 중간의 상대적 음량 변화는 유지한다. 최종 전달 영상은 H.264 CRF 20, medium 프리셋으로 인코딩한다. grain 튜닝과 순간 비트레이트 상한은 사용하지 않는다. 1080p30·300초 시간축을 유지하며 미세 질감은 손실 압축으로 달라질 수 있다.
+
+이미 검증한 레이어는 `--background-layer <v13.mp4> --object-layer <gridmodel_object_ca.mp4>`로 명시해 재사용할 수 있다. 기본 실행은 두 레이어를 새로 만들며, 규격이 맞지 않는 영상을 자동으로 늘이거나 반복하지 않는다. 최종 인코딩 후 전체 디코딩과 9,000프레임 검사를 거쳐 완성 파일을 저장한다. 중간 레이어도 비교를 위해 보존한다.
+
+---
+
+## v12 설계 및 입력 기록 — 이전 결과 재현용
 
 수정 범위는 DreamModel 내부의 엔진, 장면 합성, CLI, 이 문서 네 파일이다. 오브제·인물·문구·자막·나레이션은 추가하지 않는다. `dream.mp4`의 네 배경과 최신 Team3 N1 이야기 순서를 보존한다.
 
@@ -12,7 +58,7 @@
 
 ## 입력과 음원
 
-- 배경 목표: 사용자가 제공한 `C:\Users\carro\Downloads\dream.mp4`에서 각 장면 중앙 프레임을 순서대로 추출.
+- 배경 목표: 제공된 `dream.mp4`에서 각 장면 중앙 프레임을 순서대로 추출.
 - 이야기: `Capstone2-main (3).zip`의 `team3/background/input/storyboard/dream_scenes.json`.
 - 사운드: 같은 ZIP의 `team4/input/sound/dream_sound.wav` 원본 300초를 AAC 스테레오로 결합. 새 음악·음성 합성을 하지 않는다.
 - ZIP의 음원과 해시가 일치하는지 기록한다. 원본 음원 자체의 짧은 휴지는 유지한다. N1의 개별 사건에 맞춰 새로 작곡했다고 주장하지 않는다.
@@ -38,7 +84,7 @@
 프로젝트 루트에서:
 
 ```powershell
-& 'C:\Users\carro\.gemini\antigravity\scratch\Capstone2\team4\DreamModel\.venv\Scripts\python.exe' -B -X utf8 team4\DreamModel\tools\render_background_ca.py --reference-video 'C:\Users\carro\Downloads\dream.mp4' --story-zip 'C:\Users\carro\Downloads\Capstone2-main (3).zip' --scene-sec 75 --scene-count 4 --out-dir team4\DreamModel\output_v12_restored_motion --tag n1_background_v12_300s_audio
+.\team4\DreamModel\.venv\Scripts\python.exe -B -X utf8 -m team4.DreamModel.tools.render_background_ca --reference-video '입력폴더\dream.mp4' --story-zip '입력폴더\Capstone2-main (3).zip' --scene-sec 75 --scene-count 4 --out-dir team4\DreamModel\output_v12_restored_motion --tag n1_background_v12_300s_audio
 ```
 
 ## 검증 항목

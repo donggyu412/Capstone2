@@ -570,7 +570,7 @@ def compute_cycle_params(scene_sec):
 
 
 class DreamBackgroundRenderer:
-    def __init__(self, scenario_dir, sound_path, film=1, seed=28, mode="hybrid",scene_sec=75.,single_scene=None,scene_count=4):
+    def __init__(self, scenario_dir, sound_path, film=1, seed=28, mode="hybrid",scene_sec=75.,single_scene=None,scene_count=4,background_video=None,source_cache_dir=None):
         if mode not in ("hybrid","ga_only","ca_only"): raise ValueError(mode)
         self.mode,self.seed,self.scene_sec = mode,seed,float(scene_sec)
         self.single_scene = single_scene
@@ -603,7 +603,14 @@ class DreamBackgroundRenderer:
         self.carry = None
         self.last_snapshot = {}
         self.cycle_records = []
-        print(f"Dream background v12: {self.total_dur}s, continuous GA -> CA, audio={self.sound_path is not None}; device={m.DEV}",flush=True)
+        from .background_motion import VideoRhythm
+        self.video_rhythm = (VideoRhythm(background_video,source_cache_dir or self.scenario_dir/'temporal_cache',m.FFMPEG,self.scene_sec)
+                             if background_video is not None else None)
+        self.motion_clock = 0.
+        self.previous_act = None
+        self.act_transition = False
+        self.motion_samples = []
+        print(f"Dream background v13: {self.total_dur}s, emotion rhythm + variable mesh, video_guidance={self.video_rhythm is not None}; device={m.DEV}",flush=True)
 
     def frame(self,f,render=True):
         t = f/m.FPS
@@ -614,6 +621,7 @@ class DreamBackgroundRenderer:
         key = (act,cycle)
         sc = self.scenes[act]
         if key != self.active_key:
+            self.act_transition = self.active_key is not None and act != self.active_key[0]
             # Retain only the preceding generated remnants, not an incoming target.
             if self.active_key is not None:
                 prev = self.scenes[self.active_key[0]]
@@ -624,19 +632,37 @@ class DreamBackgroundRenderer:
             self.active_key = key
         e = sc.engine
         e.story_state = sample_background_story(sc.profile,tl,self.scene_sec)
+        from .background_motion import emotion_motion
+        energy = 0.
+        if self.video_rhythm is not None:
+            gain,energy = self.video_rhythm.sample(act,tl)
+            e.source_light = F.interpolate(m.T(gain),size=(e.h,e.w),mode='bilinear',align_corners=False)
+        e.motion = emotion_motion(sc.profile['emotion_en'],tl,energy)
+        if self.previous_act != act:
+            self.motion_clock = 0.
+            self.previous_act = act
+        self.motion_clock += e.motion['speed']/m.FPS
+        e.motion_clock = self.motion_clock
+        e.act_time = tl
         e.step(elapsed,cycle,self.cycle_dur,float(self.S["onset"][min(f,len(self.S["onset"])-1)]))
+        if f % m.FPS == 0:
+            self.motion_samples.append(dict(time=t,scene=act+1,method=e.method,**e.motion))
         if len(e.records) and not any(r is e.record for r in self.cycle_records):
             e.record["scene"] = act+1
             e.record["mood"] = sc.profile["mood_style"]
             self.cycle_records.append(e.record)
         self.last_snapshot = dict(scene=act+1,time=t,**e.last_snapshot)
+        self.last_snapshot.update(motion_speed=e.motion['speed'],motion_amplitude=e.motion['amplitude'],mesh_px=e.motion['mesh_px'],motion_mode=e.motion['mode'])
         if not render: return None
         canvas=sc.canvas
         carry_weight=0.
         if self.carry is not None and elapsed<10:
-            carry_weight=1-m.ss(3.,10.,elapsed)
+            carry_weight=(1-m.ss(.15,1.25,elapsed)) if self.act_transition else (1-m.ss(2.,7.,elapsed))
             scale=1+elapsed*.002
             grid=e.base_grid/scale
+            if self.act_transition:
+                dx,dy,_=e._story_flow(.20)
+                grid=grid+torch.stack([dx*2,dy*2],-1)[None]*.55
             residual=F.grid_sample(self.carry,grid,mode='bilinear',padding_mode='border',align_corners=False)
             canvas=canvas*(1-carry_weight)+residual*carry_weight
         self.last_snapshot['carry_weight']=float(carry_weight)
@@ -662,7 +688,10 @@ class DreamBackgroundRenderer:
             target_guidance_from_first_birth=True,
             multiscale_target_optimization=True,
             story_controls_consumed=True,
-            continuous_remnant_handoff=True,living_completion=True,spatial_sine_warp=True,restored_v10_motion=True,
+            continuous_remnant_handoff=True,living_completion=True,
+            emotion_specific_tempo=True,variable_ca_mesh=True,act_transition_seconds=1.25,
+            source_video_temporal_guidance=self.video_rhythm.report if self.video_rhythm else None,
+            motion_samples=self.motion_samples,
             added_objects=False,added_narration=False,added_text=False,
             source_image_compositing=False,completion="all descendants + MAE < 0.007 + PSNR > 38 dB",
             sequence=[r["method"] for r in self.cycle_records])
