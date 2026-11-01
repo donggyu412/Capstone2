@@ -24,6 +24,7 @@ import functools
 import inspect
 import json
 import subprocess
+import shutil
 import sys
 import time
 import uuid
@@ -267,6 +268,37 @@ def prepare_reference_audio(story_zip: Path, out_dir: Path) -> Path:
     return path
 
 
+def prepare_background_video(video_path, metadata_dir, out_dir, scene_sec):
+    """Use the delivered video and its matching JSON; preserve scene order."""
+    video_path=Path(video_path)
+    metadata_dir=Path(metadata_dir) if metadata_dir else video_path.parent
+    destination=Path(out_dir)/'reference_inputs'
+    destination.mkdir(parents=True,exist_ok=True)
+    for name in ('scenes.json','dream_scenes.json'):
+        source=metadata_dir/name
+        if not source.is_file():raise FileNotFoundError(f'Missing matching metadata: {source}')
+        target=destination/name
+        if source.resolve()!=target.resolve():shutil.copy2(source,target)
+    cap=cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():raise ValueError(f'Cannot open background video: {video_path}')
+    try:
+        fps=cap.get(cv2.CAP_PROP_FPS)
+        frames=int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if fps<=0 or frames/fps < scene_sec*4-.1:raise ValueError('Background video must cover all four acts')
+        times=[(i+.5)*scene_sec for i in range(4)]
+        for i,t in enumerate(times,1):
+            cap.set(cv2.CAP_PROP_POS_MSEC,t*1000)
+            ok,frame=cap.read()
+            if not ok:raise RuntimeError(f'Cannot read background at {t}s')
+            ok,png=cv2.imencode('.png',frame)
+            if not ok:raise RuntimeError('Cannot encode background reference')
+            (destination/f'scene_{i:02d}.png').write_bytes(png.tobytes())
+        (destination/'provenance.json').write_text(json.dumps(dict(source=str(video_path.resolve()),sample_times_seconds=times,frames=frames,fps=fps),indent=2),encoding='utf-8')
+    finally:
+        cap.release()
+    return destination
+
+
 @_locked_render
 def run_render(
     film: int = 1,
@@ -281,19 +313,25 @@ def run_render(
     reference_video: Path | None = None,
     story_zip: Path | None = None,
     scene_count: int = 4,
+    background_video: Path | None = None,
+    silent: bool = False,
 ):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     cv2.setNumThreads(4)
     torch.set_num_threads(4)
 
-    if reference_video is not None:
+    if background_video is not None:
+        scenario_dir = prepare_background_video(background_video,scenario_dir,out_dir,scene_sec)
+        sound_path = None if silent else resolve_sound_path(sound_path,film)
+    elif reference_video is not None:
         if story_zip is None: raise ValueError("--reference-video requires --story-zip")
         scenario_dir = prepare_reference_inputs(Path(reference_video), Path(story_zip), out_dir)
-        sound_path = Path(sound_path) if sound_path is not None else prepare_reference_audio(Path(story_zip),out_dir)
+        sound_path = None if silent else (Path(sound_path) if sound_path is not None else prepare_reference_audio(Path(story_zip),out_dir))
     else:
         if scenario_dir is None: scenario_dir = ASSETS_SCENARIOS / SCENARIO_NAMES[film]
-        sound_path = resolve_sound_path(sound_path, film)
+        sound_path = None if silent else resolve_sound_path(sound_path, film)
+    if silent:sound_path=None
 
     seed = 27 + film
     torch.manual_seed(seed)
@@ -309,6 +347,8 @@ def run_render(
             scene_sec=scene_sec,
             single_scene=single_scene,
             scene_count=scene_count,
+            background_video=background_video,
+            source_cache_dir=out_dir/'temporal_cache',
         )
         total_frames = R.total_frames
         total_dur = R.total_dur
@@ -405,7 +445,7 @@ def run_render(
         encode_mp4.replace(final_mp4)
         sz = final_mp4.stat().st_size
         report = dict(
-            version="v12_restored_v10_motion_continuous_audio",
+            version="v13_emotion_rhythm_variable_mesh_video_guidance",
             validation=validation,
             cycles=R.cycle_records,
             sampled_frames=metadata,
@@ -471,6 +511,8 @@ def main():
     ap.add_argument("--scene-count", type=int, default=4, choices=[1,2,3,4], help="Render the first N acts without changing their order")
     ap.add_argument("--tag", type=str, default="", help="별도 검증 출력 파일 접두어 (미지정 시 기본 파일명 유지)")
     ap.add_argument("--reference-video", type=Path, help="Four ordered goal scenes in the supplied video")
+    ap.add_argument("--background-video", type=Path, help="Delivered background MP4: scene references plus full-timeline temporal guidance")
+    ap.add_argument("--silent", action="store_true", help="Background-only output, without looking up or processing audio")
     ap.add_argument("--story-zip", type=Path, help="Archive containing the current Team3 storyboard")
     args = ap.parse_args()
 
@@ -493,6 +535,8 @@ def main():
             reference_video=args.reference_video,
             story_zip=args.story_zip,
             scene_count=args.scene_count,
+            background_video=args.background_video,
+            silent=args.silent,
         )
         return
 
@@ -509,6 +553,8 @@ def main():
                 reference_video=args.reference_video,
                 story_zip=args.story_zip,
                 scene_count=args.scene_count,
+                background_video=args.background_video,
+                silent=args.silent,
             )
     else:
         sc_dir = Path(args.scenario_dir) if args.scenario_dir else None
@@ -526,6 +572,8 @@ def main():
             reference_video=args.reference_video,
             story_zip=args.story_zip,
             scene_count=args.scene_count,
+            background_video=args.background_video,
+            silent=args.silent,
         )
 
 

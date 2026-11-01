@@ -1,0 +1,73 @@
+{
+  "version": "team4_v13_compact_delivery",
+  "source_video": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30.0,
+    "frames": 9000,
+    "duration_seconds": 300.0
+  },
+  "width": 1920,
+  "height": 1080,
+  "fps": 30.0,
+  "frames": 9000,
+  "duration_seconds": 300.0,
+  "encoder": {
+    "codec": "libx264",
+    "preset": "medium",
+    "crf": 20,
+    "pixel_format": "yuv420p"
+  },
+  "source_bytes": 2431552214,
+  "bytes": 756108576,
+  "size_reduction_percent": 68.9,
+  "audio_mode": "stream_copy",
+  "full_decode_passed": true,
+  "source_sha256": "6c3a2b149789d52709b42cb69b7e9c129c893ecd74dc9fc8c9abed273b1ba56d",
+  "video_sha256": "1bb6451300584d013b0a69951bb761e945c1289a09deab8ae353b9d30031bd62",
+  "content_unchanged": true,
+  "pixel_identical": false,
+  "audio_bitstream_sha256": "293220a370fb3c0bd7e54aebe72969c4931130b343348c7fa44416f8ef6c021b",
+  "audio_bitstream_identical": true,
+  "structure_comparison": {
+    "analysis_resolution": [
+      480,
+      270
+    ],
+    "frames_compared": 9000,
+    "mean_ssim": 0.995821787888889,
+    "minimum_ssim": 0.988642,
+    "worst_frame_zero_based": 5902,
+    "frames_below_0_98": 0,
+    "frames_below_0_95": 0,
+    "purpose": "Frame-aligned coarse structure comparison; not a pixel equality or perceptual quality percentage."
+  },
+  "sampled_frames_zero_based": [
+    900,
+    3150,
+    5400,
+    7650
+  ],
+  "visual_review": "passed",
+  "source_composition": "v13 background + unchanged GridModel d673cc4 + audio; no Team3 source overlay",
+  "visual_review_note": "Reviewed four scene structures and native-resolution center crops at 12, 87.57, 124, 218, 268 seconds and the lowest-SSIM frame at 196.73 seconds. Geometry and cell patterns are retained; minor fine-texture differences remain from lossy compression.",
+  "source_filename": "team4_v13_final_300s.mp4",
+  "output_filename": "team4_v13_final_5min_compact.mp4",
+  "gridmodel_base_commit": "d673cc443754a3f9b13a7f1578dc35ba453965f9",
+  "original_render_layers": {
+    "background": {
+      "filename": "background_v13_300s.mp4",
+      "sha256": "3e5ec61f61b113a95a2746a9b29b4d37d7ae9745f8a108ee3f3df6dc96dd0d15"
+    },
+    "objects": {
+      "filename": "gridmodel_object_ca.mp4",
+      "sha256": "08560bf8f840a90f4155091b08ad404447e0160341a005d1b85452e1ebf18863"
+    },
+    "music": {
+      "filename": "dream_sound.wav",
+      "sha256": "2954a649d911ad7d1b2abb9ffdc1e97d8c6791dffed1f647509f185eaa8cf108"
+    }
+  },
+  "pipeline_note": "Delivery was transcoded from the validated integrated master. A fresh model render follows the same v13/GridModel composition and shared encoder settings, but is not claimed to be byte-identical.",
+  "frame_comparison_note": "SSIM uses decoded frames scaled to 480x270; it is not a percentage of visual quality or pixel identity."
+}
