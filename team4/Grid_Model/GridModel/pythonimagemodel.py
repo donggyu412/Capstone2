@@ -167,7 +167,7 @@ def beat_pulses(levels: np.ndarray, rate: float) -> tuple[np.ndarray, np.ndarray
     return pulse, signed_pulse
 
 
-def sound_motion(sound_path: Path, fps: float, frame_count: int) -> tuple[np.ndarray, np.ndarray]:
+def sound_motion(sound_path: Path, fps: float, frame_count: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Make slow emotion-led motion with gentle sound energy and sparse peaks."""
     sample_rate = 4000
     window = sample_rate // 20
@@ -207,7 +207,39 @@ def sound_motion(sound_path: Path, fps: float, frame_count: int) -> tuple[np.nda
         scales[index] = base + slow_breath + audio * energy[index] + peak * beat[index]
         rotations[index] = rotation_limit * signed_beat[index]
     return (np.clip(scales, cfg.OBJECT_MIN_SCALE, cfg.OBJECT_MAX_SCALE),
-            np.clip(rotations, -cfg.MAX_ROTATION_DEGREES, cfg.MAX_ROTATION_DEGREES))
+            np.clip(rotations, -cfg.MAX_ROTATION_DEGREES, cfg.MAX_ROTATION_DEGREES),
+            energy)
+
+
+def source_frame_indices(energy: np.ndarray, fps: float, frame_count: int) -> np.ndarray:
+    """Vary source playback speed while consuming each 75-second scene in 75 seconds."""
+    indices = np.zeros(frame_count, dtype=np.int32)
+    scene_frames = max(1, round(cfg.SCENE_DURATION_SECONDS * fps))
+    for start in range(0, frame_count, scene_frames):
+        end = min(frame_count, start + scene_frames)
+        count = end - start
+        if count == 1:
+            indices[start] = start
+            continue
+        # Loud passages move through the source more quickly, quiet passages more slowly.
+        local_energy = energy[start:end]
+        relative_energy = local_energy - float(local_energy.mean())
+        speeds = 1.0 + cfg.PLAYBACK_SPEED_RESPONSE * relative_energy
+        speeds = np.clip(speeds, cfg.PLAYBACK_SPEED_MIN, cfg.PLAYBACK_SPEED_MAX)
+        distance = np.concatenate(([0.0], np.cumsum(speeds[:-1], dtype=np.float64)))
+        # Re-scale cumulative travel so this source scene begins and ends with this output scene.
+        distance *= (count - 1) / max(float(distance[-1]), 1e-6)
+        indices[start:end] = start + np.rint(distance).astype(np.int32)
+    return indices
+
+
+def intro_opacity(frame_index: int, fps: float) -> float:
+    """Hold black, then reveal the object with a smooth three-second fade."""
+    seconds = frame_index / fps
+    if seconds <= cfg.INTRO_BLACKOUT_SECONDS:
+        return 0.0
+    progress = np.clip((seconds - cfg.INTRO_BLACKOUT_SECONDS) / cfg.INTRO_FADE_IN_SECONDS, 0.0, 1.0)
+    return float(progress * progress * (3.0 - 2.0 * progress))
 
 
 def resize_object(result: np.ndarray, scale: float, angle: float = 0.0) -> np.ndarray:
@@ -315,7 +347,8 @@ def render_object_video(input_path: Path, output_path: Path, sound_path: Path) -
     height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
     count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
     max_frames = min(count, round(cfg.MAX_DURATION_SECONDS * fps)) if count > 0 else round(cfg.MAX_DURATION_SECONDS * fps)
-    scales, rotations = sound_motion(sound_path, fps, max_frames)
+    scales, rotations, energy = sound_motion(sound_path, fps, max_frames)
+    source_indices = source_frame_indices(energy, fps, max_frames)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     writer = cv2.VideoWriter(
         str(output_path), cv2.VideoWriter_fourcc(*"mp4v"), fps,
@@ -330,15 +363,27 @@ def render_object_video(input_path: Path, output_path: Path, sound_path: Path) -
     # Video starts/stops with black frames; seed new object appearances from
     # the source silhouette so the CA has material to evolve immediately.
     frame_index = 0
+    source_index = -1
+    source_frame: np.ndarray | None = None
     try:
         while True:
             if frame_index >= max_frames:
                 break
-            ok, frame = capture.read()
-            if not ok:
+            target_source_index = int(source_indices[frame_index])
+            while source_index < target_source_index:
+                ok, source_frame = capture.read()
+                if not ok:
+                    raise RuntimeError(
+                        f"입력 오브제 영상의 프레임을 읽지 못했습니다: {target_source_index}"
+                    )
+                source_index += 1
+            if source_frame is None:
                 break
-            result, state = ca_object_frame(frame, state, rng)
+            result, state = ca_object_frame(source_frame, state, rng)
             result = resize_object(result, float(scales[frame_index]), float(rotations[frame_index]))
+            opacity = intro_opacity(frame_index, fps)
+            if opacity < 1.0:
+                result = (result.astype(np.float32) * opacity).astype(np.uint8)
             output_size = (cfg.OUTPUT_WIDTH or width, cfg.OUTPUT_HEIGHT or height)
             if result.shape[1::-1] != output_size:
                 result = cv2.resize(result, output_size, interpolation=cv2.INTER_NEAREST)
