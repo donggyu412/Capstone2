@@ -391,7 +391,7 @@ function driftMotion() {
 /* ── 1-b'''. 어둠 속 시작 + 속도 강약 (11-02 교수님 피드백) ─────
    "첫 장면이 정신없이 시작 → 완전한 어둠 속 작은 점 하나가 꿈틀대며 서서히 출발" ·
    "움직임 속도가 여전히 획일적 → 속도 강약이 확연히 차이나게".
-   ① 초반 어둠  첫 장면(첫 바퀴만) 처음 8초는 거의 검정 · 움직임도 거의 멈춤 → 25초까지 천천히 밝아지며 깨어난다.
+   ① 초반 어둠  첫 장면(첫 바퀴만) 처음 5초는 완전한 어둠 · 움직임도 거의 멈춤 → 5~10초 형체가 서서히 떠오르고 13초에 온전히 깨어난다.
                (장면 길이에 비례 — ?sec=20 이면 약 2초 → 6.7초) 그 어둠 위에 오브제의 점 하나가 보인다.
    ② 속도 강약  장면 안에서 '멈춘 듯(still) · 보통(flow) · 확 몰아침(rush)' 구간이 무작위로 번갈아 온다.
                멈춤 다음엔 대개 몰아침이, 몰아침 다음엔 대개 멈춤이 와서 차이가 확연하다.
@@ -400,12 +400,12 @@ function driftMotion() {
    시험: `?intro=0` ① 끔 · `?tempo=0` ② 끔 */
 const INTRO_ON = new URLSearchParams(location.search).get('intro') !== '0';
 const TEMPO_ON = new URLSearchParams(location.search).get('tempo') !== '0';
-const INTRO_HOLD = SCENE_PERIOD * 8 / 75, INTRO_END = SCENE_PERIOD * 25 / 75;   // 75초 장면이면 8초 어둠 → 25초에 온전히 (11-02 사용자·오브제 확정 · 처음 24초는 길었다)
+const INTRO_HOLD = SCENE_PERIOD * 5 / 75, INTRO_END = SCENE_PERIOD * 13 / 75;   // 75초 장면이면 0~5초 완전한 어둠 → 5~10초 형체가 서서히 → 13초 온전히 (11-02 사용자 확정 · 24초는 길었다)
 let introOver = false;                               // 첫 장면을 한 번 지나면 다시는 어두워지지 않는다
 function introK() {                                  // 0 = 어둠 · 1 = 온전히 깨어남
   if (!INTRO_ON || introOver || sceneIdx !== 0) return 1;
   const t = clamp((sceneFrame - INTRO_HOLD) / (INTRO_END - INTRO_HOLD), 0, 1);
-  return t * t * (3 - 2 * t);
+  return t * t * (3 - 2 * t);                       // 부드러운 S 곡선 — 처음·끝 모두 툭 끊기지 않게 (빨리 걷히는 곡선은 시작이 끊겨 보였다 · 11-02 사용자)
 }
 const TEMPO_MODE = {
   //        목표 배율  길이(초)      다가가는 빠르기(프레임당)
