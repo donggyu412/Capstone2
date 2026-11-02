@@ -631,13 +631,14 @@ class DreamBackgroundRenderer:
             sc.start_cycle(method,self.seed*1000+act*100+cycle)
             self.active_key = key
         e = sc.engine
+        e.opening = act == 0 and cycle == 0
         e.story_state = sample_background_story(sc.profile,tl,self.scene_sec)
         from .background_motion import emotion_motion
         energy = 0.
         if self.video_rhythm is not None:
             gain,energy = self.video_rhythm.sample(act,tl)
             e.source_light = F.interpolate(m.T(gain),size=(e.h,e.w),mode='bilinear',align_corners=False)
-        e.motion = emotion_motion(sc.profile['emotion_en'],tl,energy)
+        e.motion = emotion_motion(sc.profile['emotion_en'],tl/self.scene_sec*75.,energy,e.story_state)
         if self.previous_act != act:
             self.motion_clock = 0.
             self.previous_act = act
@@ -655,6 +656,7 @@ class DreamBackgroundRenderer:
         self.last_snapshot.update(motion_speed=e.motion['speed'],motion_amplitude=e.motion['amplitude'],mesh_px=e.motion['mesh_px'],motion_mode=e.motion['mode'])
         if not render: return None
         canvas=sc.canvas
+        if e.opening:canvas=canvas*m.ss(10.,16.,tl)
         carry_weight=0.
         if self.carry is not None and elapsed<10:
             carry_weight=(1-m.ss(.15,1.25,elapsed)) if self.act_transition else (1-m.ss(2.,7.,elapsed))
@@ -666,7 +668,8 @@ class DreamBackgroundRenderer:
             residual=F.grid_sample(self.carry,grid,mode='bilinear',padding_mode='border',align_corners=False)
             canvas=canvas*(1-carry_weight)+residual*carry_weight
         self.last_snapshot['carry_weight']=float(carry_weight)
-        return e.render(canvas)
+        result=e.render(canvas)
+        return result*m.ss(.8,2.,tl) if e.opening else result
 
     def stats(self):
         return [r for r in self.cycle_records if r["method"]=="CA"]

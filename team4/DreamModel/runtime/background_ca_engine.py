@@ -679,8 +679,9 @@ class ConstructiveField:
         else:
             settled = ss(0,.58,self.elapsed-self.refine_t)
             rgb = self.detail
-        dx = self.local_x - wobble*torch.sin(phase+self.elapsed*freq)*(1-settled)
-        dy = self.local_y - wobble*torch.cos(phase*.73+self.elapsed*freq*.8)*(1-settled)
+        point_time = self.elapsed*(.15 if getattr(self,'opening',False) else 1.)
+        dx = self.local_x - wobble*torch.sin(phase+point_time*freq)*(1-settled)
+        dy = self.local_y - wobble*torch.cos(phase*.73+point_time*freq*.8)*(1-settled)
         parent_ids = np.maximum(self.parent,0)
         parent_dx = parent_ids%self.nw-self.nx
         parent_dy = parent_ids//self.nw-self.ny
@@ -811,15 +812,16 @@ class DreamConstructiveField(ConstructiveField):
         self.elapsed,self.last_onset=elapsed,onset
         p=elapsed/duration
         if self.complete_t is None:
-            if p<.016:
+            if elapsed < (6. if getattr(self,'opening',False) else .016*duration):
                 self.stage='seed'
             else:
                 self.stage='growth' if not self.alive.all() else 'reconstruction'
                 self.edge=self.structural_edge
-                # At ~7s the space is present but coarse, porous and constantly rebuilt.
+                # Keep local births while varying how quickly the space forms.
                 emo=self._emotion_controls()
                 tempo=.82+.28*emo['intensity']+.10*emo['sensitivity']+.08*self._story('tension',.5)
                 if self.profile['mood_style']=='dark_horror':tempo*=1.05
+                tempo*=.30+.70*min(getattr(self,'motion',{}).get('speed',1.),3.)
                 self.work_credit+=DT*150/(duration*.20)*tempo
                 for _ in range(int(self.work_credit)):
                     self._birth_step(elapsed,p)
