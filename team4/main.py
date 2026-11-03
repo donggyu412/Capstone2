@@ -114,6 +114,43 @@ def background_command(source: Path) -> list[str]:
     ]
 
 
+def opening_filter() -> str:
+    """Reveal this run's composite from one living point, then pass through."""
+    width, height = SIZE
+    spot = max(8, 2 * round(height / 90))
+
+    def ease(value: str) -> str:
+        p = f'clip({value},0,1)'
+        return f'({p}*{p}*(3-2*{p}))'
+
+    growth = ease('(T-5)/9')
+    join = ease('(T-14)/4')
+    distance = 'hypot((X/W-0.5)*W/H,Y/H-0.5)'
+    spread = f'clip((0.006+1.15*pow({growth},1.6)-{distance})/0.035,0,1)'
+    mask = f'255*(0.85*{growth}*{spread}*(1-{join})+{join})'
+    point = (f'255*{ease("(T-0.8)/1.2")}*(1-{ease("(T-5)/6")})'
+             '*(0.85+0.1*sin(T*0.9)+0.05*sin(T*2.3))'
+             '*exp(-(pow(X-W/2,2)+pow(Y-H/2,2))/(2*pow(W*0.13,2)))')
+    # Only the first 540 frames are processed. The tail keeps its original
+    # pixels and timing; the soundtrack stays on the existing audio branch.
+    return (
+        '[composed]split[head][tail];'
+        '[head]trim=end_frame=540,setpts=PTS-STARTPTS[scene];'
+        '[tail]trim=start_frame=540,setpts=PTS-STARTPTS[rest];'
+        f'color=c=black:s={width}x{height}:r=30:d=18[dark];'
+        f'color=c=0xffb8f4:s={spot}x{spot}:r=30:d=18,format=yuva420p,'
+        f"geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='{point}'[point];"
+        '[dark][point]overlay='
+        "x='(W-w)/2+2*sin(t*0.83)+sin(t*1.73)':"
+        "y='(H-h)/2+2*sin(t*1.13)':shortest=1:format=yuv420[seed];"
+        'color=c=white:s=480x270:r=30:d=18,format=yuv420p,'
+        f"geq=lum='{mask}':cb='{mask}':cr='{mask}',"
+        f'scale={width}:{height}:flags=bilinear[reveal];'
+        '[seed][scene][reveal]maskedmerge[opening];'
+        '[opening][rest]concat=n=2:v=1:a=0[video]'
+    )
+
+
 def composition_filter() -> str:
     # Only the object's black canvas is removed. Background pixels are not
     # resized, blurred, graded, or blended with the Team3 source video.
@@ -123,9 +160,10 @@ def composition_filter() -> str:
         "[0:v]setpts=PTS-STARTPTS[bg];"
         "[1:v]fps=30,setpts=N/(30*TB),format=rgba,"
         "colorkey=0x000000:0.025:0.22,unpremultiply=inplace=1[fg];"
-        "[bg][fg]overlay=x=0:y=0:eof_action=pass:repeatlast=0:format=yuv420[video];"
+        "[bg][fg]overlay=x=0:y=0:eof_action=pass:repeatlast=0:format=yuv420[composed];"
         "[2:a]atrim=duration=300,asetpts=PTS-STARTPTS,volume=-2dB,"
-        "afade=t=in:st=0:d=0.08,afade=t=out:st=299.4:d=0.6[audio]"
+        "afade=t=in:st=0:d=0.08,afade=t=out:st=299.4:d=0.6[audio];"
+        + opening_filter()
     )
 
 
@@ -161,6 +199,8 @@ def composite(background: Path, objects: Path, music: Path, output: Path) -> dic
     report = dict(
         version="team4_v13_gridmodel_20261101", output=str(output), **final_info,
         full_decode_passed=True, background_source_mix=0.0,
+        opening=dict(mode="generated_from_current_layers", blackout_until_seconds=0.8,
+                     spread_start_seconds=5, transition_start_seconds=14, end_seconds=18),
         encoder=DELIVERY_ENCODER, audio_headroom_db=2.0,
         background=dict(path=str(background), sha256=sha256(background), **background_info),
         objects=dict(path=str(objects), sha256=sha256(objects), **object_info),
@@ -226,15 +266,16 @@ def main() -> None:
     parser.add_argument("--background-layer", type=Path, help="Reuse an explicitly selected, already rendered v13 layer")
     parser.add_argument("--object-layer", type=Path, help="Reuse an explicitly selected GridModel layer")
     parser.add_argument("--output", type=Path, default=OUTPUT_DIR / "team4_output.mp4")
-    parser.add_argument('--opening-video', type=Path, default=TEAM4_DIR / 'input/video/dream_final.mp4')
+    parser.add_argument('--opening-video', type=Path, help='기존 완성본을 수동 편집할 때만 지정')
     parser.add_argument('--existing-video', type=Path, help='기존 완성본의 도입부만 수정')
     args = parser.parse_args()
     if args.existing_video:
+        if args.opening_video is None:
+            parser.error('--existing-video 수동 편집에는 --opening-video가 필요합니다.')
         apply_opening(args.existing_video, args.opening_video, args.output)
         return
-    opening = args.opening_video if args.opening_video.is_file() else None
-    if opening:
-        inspect_video(opening)
+    if args.opening_video is not None:
+        parser.error('--opening-video는 --existing-video 수동 편집에만 사용합니다.')
     check_model_environment()
     validate_metadata()
     source = find_background_video()
@@ -247,10 +288,7 @@ def main() -> None:
         run(background_command(source), cwd=TEAM4_DIR.parent)
     if args.object_layer is None:
         run([str(PYTHON_EXE), str(GRID_SCRIPT)])
-    base_output = args.output.with_name(args.output.stem + '_before_opening.mp4') if opening else args.output
-    composite(background.resolve(), objects.resolve(), music.resolve(), base_output.resolve())
-    if opening:
-        apply_opening(base_output, opening, args.output)
+    composite(background.resolve(), objects.resolve(), music.resolve(), args.output.resolve())
     print(f"[완료] 통합 영상: {args.output.resolve()}", flush=True)
 
 
