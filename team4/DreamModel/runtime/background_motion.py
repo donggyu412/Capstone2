@@ -12,38 +12,55 @@ import cv2
 import numpy as np
 
 
-def emotion_motion(emotion, seconds, source_energy=0.0):
-    """Art-directed response to 10/29 feedback; seconds follows the whole act."""
+def emotion_motion(emotion, seconds, source_energy=0.0, story=None):
+    """Unequal holds and surges follow story beats, not a repeating oscillator."""
     t = float(seconds)
-    pulse = lambda centre, width: math.exp(-.5*((t-centre)/width)**2)
-    # Unequal pauses and bursts avoid using one oscillator for all four acts.
+    # (seconds, rate): unequal spacing and repeated medium/slow holds prevent
+    # an alternating fast/slow rhythm. Story controls below retain event timing.
+    timing = {
+        'surprise': [(0,.05),(6,.05),(10,.35),(14,.8),(20,.8),(21,3.1),(23,1.1),
+                     (28,.08),(32,.08),(40,.55),(43,2.4),(49,.9),(57,.3),(65,1.4),(75,.25)],
+        'fear': [(0,.35),(5,.35),(7,2.6),(13,1.2),(18,1.2),(19,.08),(24,.08),
+                 (30,2.1),(38,.65),(47,.65),(49,3.3),(56,1.8),(63,3.1),(66,.15),(75,.4)],
+        'happy': [(0,.18),(9,.18),(16,.7),(24,1.9),(30,1.9),(38,.5),(47,.15),
+                  (54,.15),(61,1.1),(67,2.4),(72,.85),(75,.85)],
+        'sad': [(0,.55),(7,1.3),(13,.35),(23,.1),(29,.04),(39,.04),(45,.4),
+                (50,.18),(56,.18),(59,.85),(65,.12),(75,.05)],
+        'neutral': [(0,.15),(12,.15),(18,.7),(27,.7),(31,1.8),(37,.3),(51,.3),
+                    (58,.9),(64,.12),(75,.12)],
+    }
+    keys=timing.get('fear' if emotion in ('angry','disgust') else emotion,timing['neutral'])
+    index=int(np.clip(np.searchsorted([k[0] for k in keys],t,side='right')-1,0,len(keys)-2))
+    a,x=keys[index];b,y=keys[index+1]
+    u=float(np.clip((t-a)/(b-a),0,1))
+    speed=x+(y-x)*u*u*(3-2*u)
+    story=story or {}
+    speed*=.85+.30*float(story.get('tension',.5))+.15*float(story.get('travel',0.))
+    beat=story.get('beat','')
+    if beat in ('discovery','relief'):speed*=.45
+    elif beat in ('aversion','oxygen_pressure'):speed*=1.25
+    speed*=1-.94*float(np.clip(story.get('pause',0.),0,1))
+    speed=float(np.clip(speed*(1+.08*source_energy),.025,3.8))
+    burst=float(np.clip((speed-.1)/3.,0,1))
+    # Keep the existing emotion-specific displacement and cell-size ranges.
     if emotion == 'surprise':
-        burst = min(1., sum(pulse(c,w) for c,w in [(6.8,.65),(17.5,1.2),(28.3,.9),(43.8,.8),(56.1,1.25),(67.2,.65)]))
-        speed = .14+2.65*burst+.24*source_energy
         amplitude = .30+1.35*burst
         mesh = 18+100*burst
         mode = 'pause_then_burst'
     elif emotion in ('fear','angry','disgust'):
-        burst = min(1., sum(pulse(c,w) for c,w in [(4.,1.1),(11.7,1.8),(20.3,.85),(31.2,2.1),(41.6,1.3),(49.4,.9),(58.8,2.),(69.1,1.2)]))
-        speed = .35+2.40*burst+.36*source_energy
         amplitude = .70+1.15*burst
         mesh = 30+90*(.25+.75*burst)
         mode = 'surge_recoil_wave'
     elif emotion == 'happy':
-        burst = .5+.5*math.sin(t*.57+.60*math.sin(t*.13))
-        speed = .62+.65*burst+.16*source_energy
         amplitude = .62+.34*burst
         mesh = 18+45*burst
         mode = 'open_and_lift'
     elif emotion == 'sad':
-        burst = pulse(25.,4.5)*.45+pulse(58.,6.)*.25
-        speed = .045+.16*burst+.05*source_energy
         amplitude = .10+.18*burst
         mesh = 18+66*(.5+.5*math.sin(t*.095-.9))
         mode = 'long_stillness_slow_retreat'
     else:
-        burst = .5+.5*math.sin(t*.24)
-        speed, amplitude, mesh = .35+.25*burst,.38+.25*burst,18+42*burst
+        amplitude, mesh = .38+.25*burst,18+42*burst
         mode = 'quiet_irregular_drift'
     return dict(speed=float(speed),amplitude=float(amplitude),mesh_px=float(mesh),
                 burst=float(burst),mode=mode,source_energy=float(source_energy))

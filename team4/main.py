@@ -5,9 +5,11 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 
 
@@ -169,12 +171,70 @@ def composite(background: Path, objects: Path, music: Path, output: Path) -> dic
     return report
 
 
+def apply_opening(original: Path, opening: Path, output: Path) -> dict:
+    """Keep the supplied point opening, then return to the completed video."""
+    original, opening, output = (p.resolve() for p in (original, opening, output))
+    if output in (original, opening):
+        raise ValueError('수정본은 원본과 다른 새 파일 경로로 지정해 주세요.')
+    info = inspect_video(original)
+    inspect_video(opening)
+    ffmpeg = find_ffmpeg()
+    log = subprocess.run([ffmpeg, '-hide_banner', '-skip_frame', 'nokey', '-i', str(original),
+                          '-an', '-vf', 'showinfo', '-f', 'null', '-'], capture_output=True, check=True).stderr
+    keys = [round(float(t) * FPS) for t in re.findall(rb'pts_time:([0-9.]+)', log)]
+    cut_frame = next((f for f in keys if f >= 18 * FPS), info['frames'])
+    cut = cut_frame / FPS
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.opening-', dir=output.parent) as temp:
+        work = Path(temp).resolve()
+        assert work.parent == output.parent
+        prefix, pending = work / 'prefix.mp4', work / 'result.mp4'
+        graph = ('[0:v]trim=end=18,settb=1/30,setpts=N,fps=30[intro];'
+                 f'[1:v]trim=start=14:end={cut:.9f},settb=1/30,setpts=N,fps=30[rest];'
+                 '[intro][rest]xfade=transition=fade:duration=4:offset=14,format=yuv420p[video]')
+        run([ffmpeg, '-y', '-v', 'error', '-i', str(opening), '-i', str(original),
+             '-filter_complex_threads', '3', '-filter_complex', graph,
+             '-map', '[video]', '-map', '1:a:0', '-frames:v', str(cut_frame), '-t', f'{cut:.9f}',
+             *delivery_video_args(), '-r', '30', '-video_track_timescale', '15360',
+             '-c:a', 'copy', '-movflags', '+faststart', str(prefix)])
+        quote = lambda p: "'" + p.as_posix().replace("'", "'\\''") + "'"
+        listing = work / 'join.ffconcat'
+        entries = f'ffconcat version 1.0\nfile {quote(prefix)}\nduration {cut:.9f}\n'
+        if cut_frame < info['frames']:
+            entries += f'file {quote(original)}\ninpoint {cut:.9f}\noutpoint {DURATION}\n'
+        listing.write_text(entries, encoding='utf-8')
+        run([ffmpeg, '-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', str(listing),
+             '-i', str(original), '-map', '0:v:0', '-map', '1:a:0', '-c', 'copy',
+             '-t', str(DURATION), '-movflags', '+faststart', str(pending)])
+        check = subprocess.run([ffmpeg, '-v', 'error', '-xerror', '-i', str(pending), '-f', 'null', '-'], capture_output=True, check=True)
+        if check.stderr or inspect_video(pending) != info:
+            raise RuntimeError('수정 영상의 디코딩 또는 프레임 검증에 실패했습니다.')
+        audio_hash = lambda p: subprocess.check_output([ffmpeg, '-v', 'error', '-i', str(p),
+            '-map', '0:a:0', '-c:a', 'copy', '-f', 'hash', '-hash', 'sha256', '-'])
+        if audio_hash(original) != audio_hash(pending):
+            raise RuntimeError('원본 사운드 보존 검사에 실패했습니다.')
+        report = dict(**info, opening_until_seconds=14, transition_end_seconds=18,
+                      stream_copy_from_seconds=cut, original_audio_preserved=True,
+                      full_decode_passed=True, video_sha256=sha256(pending))
+        pending.replace(output)
+        output.with_suffix('.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
+    return report
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="DreamModel v13 + GridModel + sound")
     parser.add_argument("--background-layer", type=Path, help="Reuse an explicitly selected, already rendered v13 layer")
     parser.add_argument("--object-layer", type=Path, help="Reuse an explicitly selected GridModel layer")
     parser.add_argument("--output", type=Path, default=OUTPUT_DIR / "team4_output.mp4")
+    parser.add_argument('--opening-video', type=Path, default=TEAM4_DIR / 'input/video/dream_final.mp4')
+    parser.add_argument('--existing-video', type=Path, help='기존 완성본의 도입부만 수정')
     args = parser.parse_args()
+    if args.existing_video:
+        apply_opening(args.existing_video, args.opening_video, args.output)
+        return
+    opening = args.opening_video if args.opening_video.is_file() else None
+    if opening:
+        inspect_video(opening)
     check_model_environment()
     validate_metadata()
     source = find_background_video()
@@ -187,7 +247,10 @@ def main() -> None:
         run(background_command(source), cwd=TEAM4_DIR.parent)
     if args.object_layer is None:
         run([str(PYTHON_EXE), str(GRID_SCRIPT)])
-    composite(background.resolve(), objects.resolve(), music.resolve(), args.output.resolve())
+    base_output = args.output.with_name(args.output.stem + '_before_opening.mp4') if opening else args.output
+    composite(background.resolve(), objects.resolve(), music.resolve(), base_output.resolve())
+    if opening:
+        apply_opening(base_output, opening, args.output)
     print(f"[완료] 통합 영상: {args.output.resolve()}", flush=True)
 
 
