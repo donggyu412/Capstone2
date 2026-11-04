@@ -1,26 +1,32 @@
 {
- "run": "20261014-185259_storyboard",
+ "run": "20261030-000624_storyboard",
  "scenes": [
   {
    "stage": "기",
-   "title": "캡슐 내부",
-   "emotion": "혐오",
+   "title": "폐쇄된 중계소 옥상",
+   "emotion": "놀람",
    "emotion_src": "2팀 대표 감정(main_emotion)",
-   "intensity": 0.455,
+   "intensity": 0.75,
    "backgrounds": [
-    "캡슐 내부"
+    "폐쇄된 중계소 옥상"
    ],
-   "reference_artists": "아피찻퐁 100%",
-   "artist_weights": {},
-   "artist_basis": {},
+   "reference_artists": "아피찻퐁 97% · 마에다 3%",
+   "artist_weights": {
+    "maeda": 0.033
+   },
+   "artist_basis": {
+    "maeda": [
+     "하늘"
+    ]
+   },
    "dream_laws": [],
-   "dream_laws_total": 4,
+   "dream_laws_total": 0,
    "moisture": [],
    "source_image": "/media/scene_01.png",
    "width": 1920,
    "height": 1080,
    "captured_scene_frame": 2250,
-   "captured_at": "2026-10-14T09:54:09.110Z",
+   "captured_at": "2026-10-29T15:08:42.011Z",
    "engine": {
     "GLOW_SIZE": 0.7,
     "BASE_ALPHA": 0.01,
@@ -35,38 +41,25 @@
   },
   {
    "stage": "승",
-   "title": "끝없이 늘어나는 캡슐 복도",
-   "emotion": "혐오",
+   "title": "노출 통로",
+   "emotion": "공포",
    "emotion_src": "2팀 대표 감정(main_emotion)",
-   "intensity": 0.424,
+   "intensity": 0.75,
    "backgrounds": [
-    "끝없이 늘어나는 캡슐 복도",
-    "성에 낀 캡슐 창들"
+    "노출 통로",
+    "옥상"
    ],
-   "reference_artists": "아피찻퐁 93% · 디갈라카스 7%",
-   "artist_weights": {
-    "digalakis": 0.067
-   },
-   "artist_basis": {
-    "digalakis": [
-     "물결",
-     "정적"
-    ]
-   },
+   "reference_artists": "아피찻퐁 100%",
+   "artist_weights": {},
+   "artist_basis": {},
    "dream_laws": [],
-   "dream_laws_total": 6,
-   "moisture": [
-    {
-     "kind": "frost",
-     "name": "서리",
-     "src": "성에 낀 캡슐 창들"
-    }
-   ],
+   "dream_laws_total": 1,
+   "moisture": [],
    "source_image": "/media/scene_02.png",
    "width": 1920,
    "height": 1080,
    "captured_scene_frame": 2250,
-   "captured_at": "2026-10-14T09:59:12.755Z",
+   "captured_at": "2026-10-29T15:13:20.796Z",
    "engine": {
     "GLOW_SIZE": 0.7,
     "BASE_ALPHA": 0.01,
@@ -81,25 +74,26 @@
   },
   {
    "stage": "전",
-   "title": "둥근 벽으로 둘러싸인 공간",
+   "title": "거대한 창 너머 별이 흐르는 모선 내부",
    "emotion": "기쁨",
    "emotion_src": "2팀 대표 감정(main_emotion)",
-   "intensity": 0.414,
+   "intensity": 0.55,
    "backgrounds": [
-    "둥근 벽으로 둘러싸인 공간",
-    "틈 너머의 희고 매끄러운 안쪽 공간"
+    "거대한 창 너머 별이 흐르는 모선 내부",
+    "도면에 없던 문과 통로",
+    "중계소"
    ],
    "reference_artists": "아피찻퐁 100%",
    "artist_weights": {},
    "artist_basis": {},
    "dream_laws": [],
-   "dream_laws_total": 4,
+   "dream_laws_total": 0,
    "moisture": [],
    "source_image": "/media/scene_03.png",
    "width": 1920,
    "height": 1080,
    "captured_scene_frame": 2250,
-   "captured_at": "2026-10-14T10:07:18.079Z",
+   "captured_at": "2026-10-29T15:17:58.224Z",
    "engine": {
     "GLOW_SIZE": 0.7,
     "BASE_ALPHA": 0.01,
@@ -114,25 +108,25 @@
   },
   {
    "stage": "결",
-   "title": "둥근 벽으로 둘러싸인 공간",
-   "emotion": "중립",
+   "title": "궤도 정거장의 환승 홀",
+   "emotion": "슬픔",
    "emotion_src": "2팀 대표 감정(main_emotion)",
-   "intensity": 0.285,
+   "intensity": 0.75,
    "backgrounds": [
-    "둥근 벽으로 둘러싸인 공간",
-    "희고 매끄러운 바닥"
+    "궤도 정거장의 환승 홀",
+    "격실 통로"
    ],
    "reference_artists": "아피찻퐁 100%",
    "artist_weights": {},
    "artist_basis": {},
    "dream_laws": [],
-   "dream_laws_total": 3,
+   "dream_laws_total": 0,
    "moisture": [],
    "source_image": "/media/scene_04.png",
    "width": 1920,
    "height": 1080,
    "captured_scene_frame": 2250,
-   "captured_at": "2026-10-14T10:11:06.802Z",
+   "captured_at": "2026-10-29T15:21:56.082Z",
    "engine": {
     "GLOW_SIZE": 0.7,
     "BASE_ALPHA": 0.01,

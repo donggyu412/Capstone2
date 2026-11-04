@@ -38,6 +38,9 @@ EXPRESSION = {   # 멀리서도 한눈에 읽히게 과장한다
     '중립': '담담함 — 편안한 눈과 다문 입',
 }
 MAX_PER_SCENE = 4   # 장면마다 그릴 형상 수 (오브제가 많으면 이야기 순서대로 고르게 고른다 · 시선이 한곳에 머물게)
+# 11/12 피드백 — 얼굴 · 사람으로 쏠리지 않게: 장면마다 얼굴 있는 형상은 딱 하나(그 장면 감정), 나머지는 얼굴 없이 서로 다른 갈래
+KINDS = ['동물', '탈것', '자연(식물 · 날씨 · 풍경)', '건축물', '도구 · 기계', '생활 사물', '바다 · 하늘의 생물', '천체 · 빛']
+HYBRID = 0.35       # 얼굴 없는 형상 중 '잡종'(이야기 속 두 오브제를 합친 낯선 형상 · 바퀴 달린 말처럼)으로 그릴 비율
 ROLES = ('main', 'detail', 'accent', 'grid')
 
 PROMPT = """너는 꿈 영상의 오브제를 '기하학적 선화'로 그리는 일러스트레이터야.
@@ -52,6 +55,7 @@ PROMPT = """너는 꿈 영상의 오브제를 '기하학적 선화'로 그리는
 1. 이 오브제를 표현할 '구체적인 대상' 하나를 정해. 사람 · 동물 · 탈것(자동차 · 배 · 비행기 …) · 사물 중에서,
    이야기와 이어지면서 보는 사람이 바로 알아볼 수 있고, 이미 쓴 대상과 종류가 겹치지 않게 다양하게.
    {face_rule}
+   {kind_rule}
 2. 그 대상을 아래 스타일의 선화로 그려. 어두운 배경 위의 흰 선이 중심인 기하학적 라인 아트야.
    - main: 대상의 윤곽과 큰 구조를 이루는 굵은 선 8~20개
    - detail: 눈 · 입 · 코 · 귀 · 바퀴 · 창문 같은 세부 선 4~14개.
@@ -61,10 +65,11 @@ PROMPT = """너는 꿈 영상의 오브제를 '기하학적 선화'로 그리는
      얼굴이 없으면 자세 · 기울기 · 선의 긴장으로 감정을 드러내.
    - 전체가 직선 · 꺾은선 · 원 · 다각형 같은 기하학적 요소로 이뤄지게 (손으로 그린 곡선 낙서처럼 보이지 않게).
    - accent: main 선 몇 개를 살짝 어긋나게 다시 따라 그린 색 선 3~8개
-   - grid: 대상의 몸을 따라 휘어지는 그물망 · 등고선 선 6~14개 (대상 윤곽 안쪽만)
+   - grid: 대상의 결을 따르는 선 4~8개 (대상 윤곽 안쪽만). 가로줄을 층층이 쌓지 말고 대상에 맞게 대각선 · 방사형 · 곡선 ·
+     세로 결 등 방향을 달리해 (모든 대상이 마디진 애벌레나 원통처럼 보이지 않게)
    좌표는 1000x1000 캔버스, 대상은 가운데에 크게 (x, y 모두 100~900 안). 선 하나는 점 4~40개, 전체 점은 1500개 이하.
 3. JSON 하나로만 답해 (설명 · 코드블록 없이):
-{{"subject": "대상 이름(한국어)", "subject_en": "english", "has_face": true, "expression": "그린 표정 한 줄",
+{{"subject": "대상 이름(한국어)", "subject_en": "english", "kind": "갈래", "has_face": true, "expression": "그린 표정 한 줄",
   "reason": "이 대상이 이야기와 이어지는 이유 한 문장",
   "strokes": [{{"role": "main", "closed": false, "points": [[x, y], ...]}}, ...]}}"""
 
@@ -100,11 +105,22 @@ def _parse(text):
     return d
 
 
-def draw_one(client, sc, name, used, ref=None, face=False):
+def draw_one(client, sc, name, used, ref=None, face=False, kind=None, hybrid_with=None, person_ok=True):
     emo = (sc.get('main_emotion') or {}).get('label', '중립')
-    face_rule = ('이번 대상은 반드시 얼굴이 있는 존재(사람 · 동물 · 의인화된 사물)로 정하고, 얼굴을 크게 앞에 보이게 그려 '
-                 f"'{emo}' 표정이 화면의 중심이 되게 해." if face else '')
-    prompt = PROMPT.format(story=(sc.get('story') or '')[:2500], emotion=emo, name=name, face_rule=face_rule,
+    if face:
+        face_rule = ('이번 대상은 이 장면의 감정을 보여 줄 형상이야. 반드시 얼굴이 있는 존재(동물 · 의인화된 사물'
+                     + (' · 사람' if person_ok else ', 사람은 이미 썼으니 사람 말고') + ')로 정하고, 얼굴을 크게 앞에 보이게 그려 '
+                     f"'{emo}' 표정이 화면의 중심이 되게 해.")
+    else:
+        face_rule = ('이번 대상은 얼굴 · 눈 · 입을 절대 그리지 마. has_face 는 false. 사람이나 사람 모양(막대 인간 포함)도 그리지 마. '
+                     '감정은 자세 · 기울기 · 선의 긴장으로만 드러내. 실루엣(전체 윤곽)이 다른 대상들과 확연히 다르게.')
+    kind_rule = ''
+    if kind:
+        kind_rule = f"대상의 갈래는 '{kind}' 에서 골라 (사람 금지)."
+    if hybrid_with:
+        kind_rule += (f" 그리고 이 대상은 이야기 속 다른 오브제 '{hybrid_with}' 와 합쳐진 낯선 잡종 형상으로 그려 "
+                      "(예: 바퀴 달린 말 · 날개 달린 자동차 · 뿌리가 내린 등대). 보는 사람의 고정관념을 깨는 결합이어야 해.")
+    prompt = PROMPT.format(story=(sc.get('story') or '')[:2500], emotion=emo, name=name, face_rule=face_rule, kind_rule=kind_rule,
                            used=', '.join(used) or '(없음)', expression=EXPRESSION.get(emo, EXPRESSION['중립']))
     content = [{'type': 'text', 'text': prompt}]
     if ref is not None:  # 참고 사진 (아피찻퐁 이미지 등) — 이 사진 속 대상을 기하학적 선화로 바꾼다
@@ -171,6 +187,8 @@ def build(story_path, out_dir, ref_dir=None, only=None):
         except Exception:
             old = {}
     seen = set()
+    used_kinds, person_used = set(), False
+    rng_t = __import__('numpy').random.default_rng(int(hashlib.sha1(story_path.read_bytes()).hexdigest()[:8], 16))
     used, result = [], {'source': 'Claude 기하학적 선화', 'scenes': [],
                         'story_hash': hashlib.sha1(story_path.read_bytes()).hexdigest()[:12]}
     md = ['# 오브제 ↔ 꿈 이야기 설명서 (진화 목표 선화)', '',
@@ -184,10 +202,17 @@ def build(story_path, out_dir, ref_dir=None, only=None):
         pick = choose(sc, objs, seen)            # 장면마다 최대 4개 — 앞 장면에서 그린 오브제는 뒤로 미루고 이야기 순서대로 고르게
         skipped = [o for o in objs if o not in pick]
         n_face = 0
+        face_slot = int(rng_t.integers(len(pick)))            # 장면마다 얼굴 있는 형상은 딱 하나 (그 장면 감정) · 자리는 무작위
+        kinds_left = [k for k in KINDS if k not in used_kinds] or list(KINDS)
         for i, name in enumerate(objs, 1):
             if name not in pick:
                 continue
-            face_req = n_face < 2 and pick.index(name) in (0, 2)   # 장면마다 둘은 얼굴 있는 대상 (표정 = 감정)
+            face_req = pick.index(name) == face_slot
+            kind = None if face_req else kinds_left.pop(int(rng_t.integers(len(kinds_left)))) if kinds_left else None
+            hyb = None
+            if not face_req and rng_t.random() < HYBRID:
+                others = [o for o in objs if o != name]
+                hyb = others[int(rng_t.integers(len(others)))] if others else None
             key = (sc['scene'], name)
             redo = only is not None and f"{sc['scene']}-{i}" in only
             if key in old and not redo and old[key].get('strokes'):
@@ -201,13 +226,17 @@ def build(story_path, out_dir, ref_dir=None, only=None):
                             if cand.exists():
                                 ref = cand
                 print(f"  … {sc['scene']}-{i} {name} 그리는 중" + (f' (참고 사진 {ref.name})' if ref else ''))
-                d = draw_one(client, sc, name, used, ref, face_req) or {'subject': '', 'strokes': []}
+                d = draw_one(client, sc, name, used, ref, face_req, kind, hyb, person_ok=not person_used) or {'subject': '', 'strokes': []}
             sent, pos = first_sentence(sc.get('story', ''), name)
             if pos is None:
                 pos = (i - 0.5) / max(len(sc.get('objects') or []), 1)
             o = dict(d, index=i, name=name, sentence=sent, reveal=round(pos, 3))
             if o.get('has_face'):
                 n_face += 1
+            if o.get('kind'):
+                used_kinds.add(o['kind'])
+            if '사람' in str(o.get('kind', '')) or '사람' in str(o.get('subject', '')):
+                person_used = True
             seen.add(name)
             if o.get('subject'):
                 used.append(o['subject'])
